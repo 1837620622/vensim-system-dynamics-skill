@@ -3,7 +3,7 @@
 
 依据 Vensim 官方 Sketch Format / Sketch Object Detail / Arrow Class 文档实现：
   - 解析草图对象(10 变量 / 11 阀门 / 12 源汇云图注释 / 1 箭头)的真实字段；
-  - 区分物理流率管道(field weight >= FLOW_WEIGHT_THRESHOLD 或端点为阀门/云)与信息箭头；
+  - 区分物理流率管道(field thick >= FLOW_THICK_THRESHOLD 或端点为阀门/云)与信息箭头；
   - 用 Graphviz 计算可移动辅助变量坐标，库存/阀门/云/流率标签默认锁定；
   - 只为信息箭头生成单个中间控制点，使普通 Arrow 显示为平滑圆弧；
   - 平行边自动错开曲率，远距离边增大弧度；
@@ -37,16 +37,23 @@ T_SOURCE_SINK = 12
 T_OTHER = (30, 31)
 OBJECT_TYPES = {T_VARIABLE, T_VALVE, T_SOURCE_SINK, *T_OTHER}
 
-# 箭头 field[7] >= 此阈值视为物理流率管道(粗管)，< 视为信息箭头(细线)
-# 依据官方示例：流率管道箭头该字段为 22，信息箭头为 0。
-FLOW_WEIGHT_THRESHOLD = 20
+# 箭头字段顺序(官方 Sketch Objects 文档)：
+#   1,id,from,to,shape,hid,pol,thick,hasf,dtype,res,color,font,np|plist
+# field[7] = thick(线宽)。物理流率管道 thick=22，信息箭头 thick=0。
+# thick >= 此阈值视为物理流率管道(粗管)，< 视为信息箭头(细线)。
+FLOW_THICK_THRESHOLD = 20
 
-# shape 字段位标志：bit6(32)=附着到阀门；低 5 位为形状码
+# shape 字段位标志：低 5 位为形状码；bit6(1<<5=32)=附着到阀门；bit7=形状由类型决定
 SHAPE_ATTACHED_TO_VALVE = 32
 SHAPE_MASK = 31
 
-# bits 字段(field[8])：偶数表示 shadow variable（影子变量，跨视图引用）
-# shadow 变量不应被自动移动，其坐标只是本视图的显示位置。
+# bits 字段(field[8])，官方称为 arrows_in_allowed：
+#   bit1(1)=允许入箭头, bit2(2)=允许出箭头, bit3(4)=有注释续行,
+#   bit4(8)=IO 对象, bit7(128)=因果不穿透, bit8(256)=用户设定尺寸
+# PySD 的 sketch.peg 用 arrows_in_allowed 偶数判定 shadow variable：
+#   偶数 → shadow variable(跨视图引用，无入箭头)，不自动移动；
+#   奇数 → defined variable(本视图定义，有入箭头)。
+# 依据 PySD SketchVisitor.visit_var_definition 与官方 Defined & Shadow Variables。
 
 
 @dataclasses.dataclass
@@ -90,13 +97,13 @@ class Arrow:
     from_id: int
     to_id: int
     shape: int
-    weight: int          # field[7]：物理管道(>=20) vs 信息箭头(<20)
+    thick: int          # field[7] thick：物理管道(>=20) vs 信息箭头(<20)
     fields: List[str]
     points: List[Tuple[float, float]]
 
     @property
     def is_physical_flow(self) -> bool:
-        return self.weight >= FLOW_WEIGHT_THRESHOLD
+        return self.thick >= FLOW_THICK_THRESHOLD
 
 
 @dataclasses.dataclass
@@ -218,7 +225,7 @@ def parse_views(lines: List[str]) -> List[View]:
                         from_id=_safe_int(fields[2]),
                         to_id=_safe_int(fields[3]),
                         shape=_safe_int(fields[4]),
-                        weight=_safe_int(fields[7]) if len(fields) > 7 else 0,
+                        thick=_safe_int(fields[7]) if len(fields) > 7 else 0,
                         fields=fields,
                         points=parse_points(point_tail),
                     )
@@ -545,7 +552,7 @@ def command_inspect(path: Path) -> int:
             flow = "FLOW" if arrow.is_physical_flow else "info"
             print(
                 f"  id={arrow.obj_id:<4} {arrow.from_id} -> {arrow.to_id} "
-                f"{flow:<4} shape={arrow.shape} weight={arrow.weight} points={len(arrow.points)}"
+                f"{flow:<4} shape={arrow.shape} thick={arrow.thick} points={len(arrow.points)}"
             )
     return 0
 

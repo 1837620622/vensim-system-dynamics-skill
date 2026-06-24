@@ -28,6 +28,13 @@ Python 脚本只用标准库，无需 `pip install`。
 ## 最快使用方式
 
 ```bash
+# 便捷封装（推荐）：一键 inspect + audit + layout
+chmod +x skill.sh
+./skill.sh doctor                                   # 检查环境
+./skill.sh quick /path/to/your_model.mdl            # 一键全流程
+./skill.sh layout /path/to/your_model.mdl --route   # 单步自动排版
+
+# 或直接调用 Python 脚本
 # 1. 查看模型对象 ID、位置、形状、箭头 from/to、控制点
 python tools/vensim_autolayout.py inspect /path/to/your_model.mdl
 

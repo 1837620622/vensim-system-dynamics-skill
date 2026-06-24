@@ -45,29 +45,33 @@ Vensim 先建立正确模型结构（库存 / 流率 / 阀门 / 云 / 方程）
 ## 目录结构
 
 ```
-vensim_system_dynamics/
-├── SKILL.md                          # AI 代理指令：建模原则、工作流、草图格式、安全边界
+vensim-skill/
 ├── README.md                         # 本文件（英文）
 ├── README_CN.md                      # 中文说明
-├── requirements.txt                  # 无 Python 包依赖；仅需 Graphviz
-├── tools/
-│   └── vensim_autolayout.py          # 检查 / 审计 / 自动排版脚本
-├── templates/
-│   ├── model_spec_template.json      # 建模前语义规范模板
-│   ├── layout_config_sfd.json        # SFD 自动排版配置样例
-│   └── layout_config_cld.json        # CLD 自动排版配置样例
-├── examples/
-│   ├── population_demo.mdl           # SFD：库存流率 + 承载力负反馈闭环
-│   ├── cld_customer_loop.mdl         # CLD：客户因果回路（正负反馈）
-│   ├── delay_structure.mdl           # SFD：DELAY1 物料延迟
-│   ├── smooth_structure.mdl          # SFD：SMOOTH 信息平滑
-│   ├── coflow_structure.mdl          # SFD：共流（属性随物料流动）
-│   ├── lookup_structure.mdl          # SFD：WITH LOOKUP 供需寻价
-│   ├── s_shaped_growth.mdl           # SFD：S 形采纳扩散
-│   ├── control_panel.mdl             # SFD：Input/Output Controls 控制面板
-│   └── README.md                     # 示例说明
-└── docs/
-    └── REFERENCES.md                 # 实现依据与限制（官方文档链接）
+├── LICENSE                           # MIT
+├── skill.sh                          # 便捷 CLI 封装（inspect/audit/layout/quick/examples/doctor）
+├── .gitignore
+├── vensim_system_dynamics/           # Skill 本体
+│   ├── SKILL.md                      # AI 代理指令：建模原则、工作流、草图格式、安全边界
+│   ├── requirements.txt              # 无 Python 包依赖；仅需 Graphviz
+│   ├── tools/
+│   │   └── vensim_autolayout.py      # 检查 / 审计 / 自动排版脚本
+│   ├── templates/
+│   │   ├── model_spec_template.json  # 建模前语义规范模板
+│   │   ├── layout_config_sfd.json    # SFD 自动排版配置样例
+│   │   └── layout_config_cld.json    # CLD 自动排版配置样例
+│   ├── examples/                     # 8 个覆盖 Vensim 全功能的完整图例
+│   │   ├── population_demo.mdl       # SFD：库存流率 + 承载力负反馈闭环
+│   │   ├── cld_customer_loop.mdl     # CLD：客户因果回路（正负反馈）
+│   │   ├── delay_structure.mdl       # SFD：DELAY1 物料延迟
+│   │   ├── smooth_structure.mdl      # SFD：SMOOTH 信息平滑
+│   │   ├── coflow_structure.mdl      # SFD：共流（属性随物料流动）
+│   │   ├── lookup_structure.mdl      # SFD：WITH LOOKUP 供需寻价
+│   │   ├── s_shaped_growth.mdl       # SFD：S 形采纳扩散
+│   │   ├── control_panel.mdl         # SFD：Input/Output Controls 控制面板
+│   │   └── README.md                 # 示例说明
+│   └── docs/
+│       └── REFERENCES.md             # 实现依据与限制（官方文档 + PySD 交叉验证）
 ```
 
 ---
@@ -103,6 +107,18 @@ sudo dnf install graphviz       # Fedora
 ---
 
 ## 快速开始
+
+### 方式一：skill.sh 便捷封装
+
+```bash
+chmod +x skill.sh
+./skill.sh doctor                                   # 检查 python3 与 graphviz
+./skill.sh examples                                 # 审计全部示例
+./skill.sh quick examples/population_demo.mdl       # 一键 inspect + audit + layout
+./skill.sh layout your_model.mdl --route            # 单步自动排版（默认 SFD 配置）
+```
+
+### 方式二：直接调用 Python 脚本
 
 ```bash
 # 1. 查看模型内的对象 ID、坐标、形状、箭头 from/to、控制点

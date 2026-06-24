@@ -1,0 +1,19 @@
+{
+  "view": "*",
+  "canvas": {"x_min": 120, "x_max": 1180, "y_min": 110, "y_max": 720},
+  "rankdir": "LR",
+  "nodesep": 0.65,
+  "ranksep": 1.05,
+  "move_stocks": false,
+  "lock_node_names": [
+    "在此填入库存变量名",
+    "在此填入关键流率标签名"
+  ],
+  "lock_object_ids": [],
+  "route_information_arrows_only": true,
+  "curve_strength": 0.18,
+  "parallel_curve_spacing": 0.08,
+  "minimum_curve_pixels": 26,
+  "maximum_curve_pixels": 118,
+  "skip_views": []
+}

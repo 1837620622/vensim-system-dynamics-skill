@@ -1,0 +1,4 @@
+# 无需 pip 安装 Python 包。
+# 可选外部可执行文件：Graphviz（dot / neato / fdp / sfdp）
+# macOS: brew install graphviz
+# Windows: 安装 Graphviz 后把 dot 所在目录加入 PATH

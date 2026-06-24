@@ -1,0 +1,17 @@
+# 依赖
+.graphviz/
+__pycache__/
+*.pyc
+
+# 自动排版生成的临时文件
+*.backup.mdl
+*.layout_report.json
+my_layout.json
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 编辑器
+.vscode/
+.idea/

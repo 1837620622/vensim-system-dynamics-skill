@@ -1,0 +1,267 @@
+# Vensim System Dynamics Skill
+
+> 一个可复用的 **AI 代理指令 + Python 工具脚本** 包，用于 Vensim 系统动力学建模、课程作业、政策分析与管理研究，并在 **保留方程与对象 ID** 的前提下把已建模的草图自动排版为论文级 SFD / CLD。
+
+[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
+[![Graphviz](https://img.shields.io/badge/graphviz-required-orange.svg)](https://graphviz.org/)
+[![Vensim](https://img.shields.io/badge/Vensim-PLE%2FPro-DSS.svg)](https://vensim.com/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+中文说明见 [README_CN.md](README_CN.md)。
+
+---
+
+## 这个项目解决什么问题
+
+Vensim PLE **没有**一键「全图自动布局」或「自动避让」按钮。原生 Layout 菜单只做对齐、统一大小、水平 / 垂直等间距。当模型变量变多时，箭头会漂浮、重叠、穿过变量，手工整理成论文可用图非常耗时。
+
+但 Vensim 的普通 Arrow 在存在 **一个中间控制点** 时会形成平滑圆弧；按住 `Command/Ctrl` 绘制的是 Spline Arrow。因此「AI 自动排版 + 连线自动变平滑曲线」是可行的——实现路径是：
+
+```
+Vensim 先建立正确模型结构（库存 / 流率 / 阀门 / 云 / 方程）
+        ↓  Python 解析 .mdl 草图，提取真实对象 ID、坐标、箭头 from/to、控制点
+        ↓  Graphviz 计算可移动辅助变量的坐标（库存 / 流率骨架锁定）
+        ↓  Python 为每条信息箭头生成单控制点圆弧（平行边自动错开曲率）
+        ↓  回写新坐标与控制点到 *_autolayout.mdl（方程区不动）
+        ↓  Vensim 打开 → Check Model → Units Check → 手工微调
+```
+
+**它不是「让 AI 代替建模」**，而是把 **已正确建模** 的复杂图整理得更易读、更符合论文规范。
+
+---
+
+## 核心特性
+
+- **保守的草图解析**：严格依据 Vensim 官方 Sketch Format 文档，准确识别变量(10)、阀门(11)、源汇云(12)、箭头(1) 的真实字段。
+- **物理流 vs 信息箭头自动区分**：通过箭头 `weight` 字段（≥20 为物理流率管道，<20 为信息箭头）和端点对象类型判定，物理流管道保持原样不被破坏。
+- **半固定 + 自动布局**：默认锁定库存、阀门、云、流率标签、shadow variable、控制面板对象；只让 Graphviz 排布普通辅助变量。
+- **平滑弧线**：为信息箭头生成单个中间控制点，使普通 Arrow 显示为圆弧；平行边自动分配对称曲率避免重叠；远距离边增大弧度，近距离边小弧度。
+- **安全回写**：自动生成 `*_backup.mdl` 与 `*.layout_report.json`；不改方程区，不新建 / 删除对象，不改箭头 `from/to`。
+- **审计与检查**：`inspect` 列出全部对象与箭头属性；`audit` 检测断裂的箭头对象引用。
+- **纯标准库**：Python 脚本只用标准库，无需 `pip install`；唯一外部依赖是 Graphviz。
+
+---
+
+## 目录结构
+
+```
+vensim_system_dynamics/
+├── SKILL.md                          # AI 代理指令：建模原则、工作流、草图格式、安全边界
+├── README.md                         # 本文件（英文）
+├── README_CN.md                      # 中文说明
+├── requirements.txt                  # 无 Python 包依赖；仅需 Graphviz
+├── tools/
+│   └── vensim_autolayout.py          # 检查 / 审计 / 自动排版脚本
+├── templates/
+│   ├── model_spec_template.json      # 建模前语义规范模板
+│   ├── layout_config_sfd.json        # SFD 自动排版配置样例
+│   └── layout_config_cld.json        # CLD 自动排版配置样例
+├── examples/
+│   ├── population_demo.mdl           # 最小人口库存—流率示例模型
+│   └── README.md                     # 示例说明
+└── docs/
+    └── REFERENCES.md                 # 实现依据与限制（官方文档链接）
+```
+
+---
+
+## 安装
+
+### 1. Python
+
+Python 3.8+，无需额外包：
+
+```bash
+python3 --version
+```
+
+### 2. Graphviz
+
+**macOS：**
+
+```bash
+brew install graphviz
+dot -V
+```
+
+**Windows：** 从 https://graphviz.org/download/ 安装，并把 `dot` 所在目录（如 `C:\Program Files\Graphviz\bin`）加入 `PATH`。
+
+**Linux：**
+
+```bash
+sudo apt-get install graphviz   # Debian/Ubuntu
+sudo dnf install graphviz       # Fedora
+```
+
+---
+
+## 快速开始
+
+```bash
+# 1. 查看模型内的对象 ID、坐标、形状、箭头 from/to、控制点
+python tools/vensim_autolayout.py inspect examples/population_demo.mdl
+
+# 2. 审计箭头引用是否指向本视图内有效对象
+python tools/vensim_autolayout.py audit examples/population_demo.mdl
+
+# 3. 复制 SFD 配置，填入要锁定的库存 / 流率名
+cp templates/layout_config_sfd.json my_layout.json
+#   编辑 my_layout.json，把 lock_node_names 改成你模型里的库存与流率标签名
+
+# 4. 生成自动排版模型（自动建 .backup.mdl 与 .layout_report.json）
+python tools/vensim_autolayout.py layout examples/population_demo.mdl \
+  --output examples/population_demo_autolayout.mdl \
+  --config my_layout.json \
+  --engine dot \
+  --route-information-arrows
+
+# 5. 审计输出
+python tools/vensim_autolayout.py audit examples/population_demo_autolayout.mdl
+```
+
+在 Vensim 中打开 `*_autolayout.mdl`：先看图，再 `Model > Check Model`，再 `Model > Units Check`，手工微调少数交叉关系后保存为最终版本。
+
+---
+
+## 命令参考
+
+### `inspect` — 列出草图对象与箭头
+
+```bash
+python tools/vensim_autolayout.py inspect <model.mdl>
+```
+
+输出每个对象的类型(`var`/`valve`/`src/sink`)、坐标、形状、是否附着阀门、是否 shadow variable、是否库存状；每条箭头标注 `FLOW`(物理流率管道) 或 `info`(信息箭头)、weight、控制点数。
+
+### `audit` — 审计箭头对象引用
+
+```bash
+python tools/vensim_autolayout.py audit <model.mdl>
+```
+
+检测箭头 `from/to` 是否引用了本视图不存在的对象 ID（会漂浮 / 反向 / 穿变量的根因），并警告无控制点或空名变量。
+
+### `layout` — 应用保守自动排版
+
+```bash
+python tools/vensim_autolayout.py layout <model.mdl> \
+  --output <out.mdl> \
+  --config <config.json> \
+  --engine {dot|neato|fdp|sfdp} \
+  --route-information-arrows
+```
+
+- `--engine dot`：分层布局，适合 SFD（库存—流率有明确层级）。
+- `--engine neato`/`fdp`：弹簧模型，适合 CLD（关系网图）。
+- `--route-information-arrows`：为可重布线的信息箭头设置单个圆弧控制点。
+
+---
+
+## 配置文件说明
+
+```json
+{
+  "view": "*",
+  "canvas": {"x_min": 120, "x_max": 1180, "y_min": 110, "y_max": 720},
+  "rankdir": "LR",
+  "nodesep": 0.65,
+  "ranksep": 1.05,
+  "move_stocks": false,
+  "lock_node_names": ["Population", "Births", "Deaths"],
+  "lock_object_ids": [],
+  "route_information_arrows_only": true,
+  "curve_strength": 0.18,
+  "parallel_curve_spacing": 0.08,
+  "minimum_curve_pixels": 26,
+  "maximum_curve_pixels": 118,
+  "skip_views": []
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `view` | 处理哪个视图，`*` 为全部 |
+| `canvas` | 可移动节点的目标画布范围（像素） |
+| `rankdir` | Graphviz 布局方向：`LR`/`TB`/`BT`/`RL` |
+| `nodesep` / `ranksep` | 节点间距 / 层间距 |
+| `move_stocks` | 是否允许移动库存状变量（SFD 应为 `false`） |
+| `lock_node_names` | 按变量名锁定的对象（库存、流率标签） |
+| `lock_object_ids` | 按对象 ID 锁定 |
+| `route_information_arrows_only` | 只重布线信息箭头，不动物理流 |
+| `curve_strength` | 弧线强度系数 |
+| `parallel_curve_spacing` | 平行边错开曲率增量 |
+| `minimum_curve_pixels` / `maximum_curve_pixels` | 弧度像素上下限 |
+| `skip_views` | 跳过的视图名列表 |
+
+---
+
+## SFD 推荐布局规范
+
+系统动力学存量流量图有明确规范，建议采用「半固定 + 自动布局」而非完全交给 Graphviz：
+
+```
+顶部：云 → 流入 → 库存 → 流出 → 云
+中部：辅助变量、比率、效果变量
+右侧 / 下方：参数、价格、比率
+下部：收入、成本、利润
+底部：留存收益 → 投资者回报
+```
+
+- 库存与两侧流率管道固定在顶部中央；
+- 投资者回报等库存及其流率固定在左下；
+- 其余辅助变量交给 Graphviz 按层级排布；
+- 箭头按上下 / 左右关系自动选取弯曲方向；
+- 同方向多条箭头自动分配不同弯曲轨道避免重叠；
+- 远距离关系用大弧度，近距离用小弧度。
+
+---
+
+## 安全边界（必须遵守）
+
+- 自动排版 **只整理已正确建模** 的草图；
+- 脚本 **不新建** 库存、阀门、云或物理流；
+- 脚本 **不改** 方程区、箭头 `from/to`、对象 ID；
+- 默认 **锁定** 库存、阀门、源汇云、流率标签、shadow variable、控制面板对象；
+- 输出 **必须** 在目标 Vensim 版本重新打开并运行 `Check Model` + `Units Check`；
+- 出现错位 / 浮动箭头 / 阀门脱离时 **立即恢复** `*_backup.mdl` 改用手动。
+
+---
+
+## 适合的任务
+
+- 汽车销售、人口、供应链韧性、政策执行、光伏治沙、城市交通等 SFD；
+- 区域运输、公共治理、生态经济等 CLD；
+- 作业要求的 Control Panel、政策情景、敏感性分析；
+- 把原始 Vensim 图整理为论文可用图。
+
+## 不适合的情况
+
+- 模型尚未确认时直接批量生成 `.mdl`；
+- 希望一个按钮自动设计理论机制或自动给参数；
+- 多个库存—流率骨架已乱接、阀门与标签脱离；
+- 不愿在 Vensim 中打开验证。
+
+---
+
+## 实现依据
+
+依据 Vensim 官方文档与开源解析器实现，完整链接见 [docs/REFERENCES.md](docs/REFERENCES.md)：
+
+- Vensim Help — [Sketch Format](https://www.vensim.com/documentation/ref_sketch_format.html)
+- Vensim Help — [Sketch Object Detail](https://www.vensim.com/documentation/24305.html)
+- Vensim Help — [Arrow Class](https://www.vensim.com/documentation/22925.html)
+- Vensim Help — [Layout Menu](https://www.vensim.com/documentation/layoutmenu.html)
+- Graphviz — [splines](https://graphviz.org/docs/attrs/splines/)
+- PySD — [Vensim Translation](https://pysd.readthedocs.io/en/master/structure/vensim_translation.html)（辅助验证）
+
+---
+
+## 许可证
+
+MIT License。见 [LICENSE](LICENSE)。
+
+## 致谢
+
+- [Ventana Systems](https://www.vensim.com/) — Vensim 与官方文档
+- [SDXorg/pysd](https://github.com/SDXorg/pysd) — Vensim `.mdl` 解析参考
+- [Graphviz](https://graphviz.org/) — 自动布局引擎

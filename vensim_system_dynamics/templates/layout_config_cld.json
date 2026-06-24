@@ -1,0 +1,16 @@
+{
+  "view": "*",
+  "canvas": {"x_min": 100, "x_max": 1180, "y_min": 100, "y_max": 720},
+  "rankdir": "LR",
+  "nodesep": 0.80,
+  "ranksep": 1.10,
+  "move_stocks": true,
+  "lock_node_names": [],
+  "lock_object_ids": [],
+  "route_information_arrows_only": false,
+  "curve_strength": 0.22,
+  "parallel_curve_spacing": 0.10,
+  "minimum_curve_pixels": 32,
+  "maximum_curve_pixels": 135,
+  "skip_views": []
+}

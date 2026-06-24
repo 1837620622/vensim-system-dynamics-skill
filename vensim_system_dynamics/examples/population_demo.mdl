@@ -1,0 +1,55 @@
+Population = INTEG ( Births - Deaths, 1000 )
+	~ Person
+	~ A simple population stock
+	|
+Births = Population * Birth Fraction
+	~ Person/Month
+	~
+	|
+Deaths = Population / Average Lifetime
+	~ Person/Month
+	~
+	|
+Birth Fraction = 0.02
+	~ 1/Month
+	~
+	|
+Average Lifetime = 75
+	~ Month
+	~
+	|
+INITIAL TIME = 0
+	~ Month
+	~
+	|
+FINAL TIME = 120
+	~ Month
+	~
+	|
+TIME STEP = 0.25
+	~ Month
+	~
+	|
+SAVEPER = TIME STEP
+	~ Month
+	~
+	|
+\\\---/// Sketch information - do not modify anything except names
+V300  Do not put anything below this section - it will be ignored
+*Population Demo
+$192-192-192,0,Arial|12||0-0-0|0-0-0|0-0-255|-1--1--1|-1--1--1|96,96,100,0
+10,1,Population,520,220,48,20,3,3,0,0,0,0,0,0
+12,2,48,285,220,8,8,0,3,0,0,-1,0,0,0
+11,3,48,370,220,6,8,34,3,0,0,1,0,0,0
+10,4,Births,370,245,24,11,40,3,0,0,-1,0,0,0
+12,5,48,725,220,8,8,0,3,0,0,-1,0,0,0
+11,6,48,650,220,6,8,34,3,0,0,1,0,0,0
+10,7,Deaths,650,245,24,11,40,3,0,0,-1,0,0,0
+10,8,Birth Fraction,240,340,38,11,0,3,0,0,0,0,0,0
+10,9,Average Lifetime,780,340,40,11,0,3,0,0,0,0,0,0
+1,10,3,1,4,0,0,22,0,0,0,-1--1--1,,1|(445,220)|
+1,11,1,6,4,0,0,22,0,0,0,-1--1--1,,1|(585,220)|
+1,12,8,4,0,0,0,0,0,64,0,-1--1--1,,1|(300,300)|
+1,13,1,4,0,0,0,0,0,64,0,-1--1--1,,1|(440,290)|
+1,14,9,7,0,0,0,0,0,64,0,-1--1--1,,1|(710,300)|
+1,15,1,7,0,0,0,0,0,64,0,-1--1--1,,1|(585,305)|

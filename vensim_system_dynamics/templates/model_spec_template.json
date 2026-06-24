@@ -1,0 +1,78 @@
+{
+  "project": {
+    "title": "填写模型名称",
+    "research_question": "填写核心研究问题",
+    "time_unit": "Month",
+    "simulation_horizon": {"initial_time": 0, "final_time": 60, "time_step": 0.25},
+    "system_boundary": "填写系统边界、外生变量与不纳入机制"
+  },
+  "stocks": [
+    {
+      "name": "库存变量名称",
+      "definition": "系统内累积状态",
+      "unit": "人",
+      "initial_value": 0,
+      "inflows": ["流入变量名称"],
+      "outflows": ["流出变量名称"],
+      "equation": "INTEG(流入变量名称-流出变量名称, 0)",
+      "status": "pending_validation"
+    }
+  ],
+  "flows": [
+    {
+      "name": "流率变量名称",
+      "definition": "单位时间内进入或离开库存的数量",
+      "unit": "人/Month",
+      "target_stock": "库存变量名称",
+      "direction": "inflow",
+      "equation": "待填写",
+      "drivers": ["影响因素1", "影响因素2"],
+      "source": "数据、文献或假设",
+      "status": "pending_validation"
+    }
+  ],
+  "auxiliaries": [
+    {
+      "name": "辅助变量名称",
+      "definition": "填写定义",
+      "unit": "Dmnl",
+      "equation": "待填写",
+      "source": "数据、文献或假设",
+      "range": {"min": null, "max": null, "increment": null},
+      "status": "pending_validation"
+    }
+  ],
+  "causal_links": [
+    {
+      "from": "原因变量",
+      "to": "结果变量",
+      "polarity": "+",
+      "delay": false,
+      "mechanism": "解释在其他条件不变下的作用机制",
+      "status": "pending_validation"
+    }
+  ],
+  "feedback_loops": [
+    {
+      "name": "R1 或 B1",
+      "type": "reinforcing",
+      "path": ["变量A", "变量B", "变量C", "变量A"],
+      "mechanism": "填写回路机制",
+      "expected_behavior": "增长、收敛、超调或振荡等"
+    }
+  ],
+  "policy_levers": [
+    {
+      "name": "政策杠杆",
+      "baseline": 0,
+      "scenarios": [{"name": "policy_1", "value": 0, "rationale": "填写依据"}],
+      "expected_channel": "填写政策传导链"
+    }
+  ],
+  "validation_plan": {
+    "structure_check": true,
+    "units_check": true,
+    "extreme_conditions": ["参数置零", "高值压力测试"],
+    "behavior_tests": ["基准情景", "政策情景", "敏感性分析"]
+  }
+}

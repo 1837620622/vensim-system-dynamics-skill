@@ -57,7 +57,14 @@ vensim_system_dynamics/
 │   ├── layout_config_sfd.json        # SFD 自动排版配置样例
 │   └── layout_config_cld.json        # CLD 自动排版配置样例
 ├── examples/
-│   ├── population_demo.mdl           # 最小人口库存—流率示例模型
+│   ├── population_demo.mdl           # SFD：库存流率 + 承载力负反馈闭环
+│   ├── cld_customer_loop.mdl         # CLD：客户因果回路（正负反馈）
+│   ├── delay_structure.mdl           # SFD：DELAY1 物料延迟
+│   ├── smooth_structure.mdl          # SFD：SMOOTH 信息平滑
+│   ├── coflow_structure.mdl          # SFD：共流（属性随物料流动）
+│   ├── lookup_structure.mdl          # SFD：WITH LOOKUP 供需寻价
+│   ├── s_shaped_growth.mdl           # SFD：S 形采纳扩散
+│   ├── control_panel.mdl             # SFD：Input/Output Controls 控制面板
 │   └── README.md                     # 示例说明
 └── docs/
     └── REFERENCES.md                 # 实现依据与限制（官方文档链接）

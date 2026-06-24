@@ -1,0 +1,70 @@
+Birth Rate = 0.02
+	~ 1/Month
+	~ 
+	|
+Death Rate = 0.01
+	~ 1/Month
+	~ 
+	|
+Population = INTEG ( Birth Rate * Population - Death Rate * Population, 1000 )
+	~ Person
+	~ 
+	|
+Carrying Capacity = 5000
+	~ Person
+	~ 
+	|
+Growth Multiplier = 1 - Population / Carrying Capacity
+	~ Dmnl
+	~ 
+	|
+Effective Birth Rate = Birth Rate * Growth Multiplier
+	~ 1/Month
+	~ 
+	|
+Net Growth = Effective Birth Rate * Population - Death Rate * Population
+	~ Person/Month
+	~ 
+	|
+INITIAL TIME = 0
+	~ Month
+	~ 
+	|
+FINAL TIME = 240
+	~ Month
+	~ 
+	|
+TIME STEP = 0.25
+	~ Month
+	~ 
+	|
+SAVEPER = TIME STEP
+	~ Month
+	~ 
+	|
+\\\---/// Sketch information - do not modify anything except names
+V300  Do not put anything below this section - it will be ignored
+*Control Panel
+$192-192-192,0,Arial|12||0-0-0|0-0-0|0-0-255|-1--1--1|-1--1--1|96,96,100,0
+10,1,Population,500,200,40,20,3,3,0,0,0,0,0,0
+10,2,Birth Rate,200,200,32,11,0,3,0,0,0,0,0,0
+10,3,Death Rate,200,300,32,11,0,3,0,0,0,0,0,0
+10,4,Carrying Capacity,800,200,52,11,0,3,0,0,0,0,0,0
+10,5,Growth Multiplier,500,330,52,11,0,3,0,0,0,0,0,0
+10,6,Effective Birth Rate,200,400,58,11,0,3,0,0,0,0,0,0
+10,7,Net Growth,500,430,32,11,40,3,0,0,-1,0,0,0
+12,8,0,120,500,30,9,8,4,0,0,-1,0,0,0
+Birth Rate,0,0.1,0.005
+12,9,0,120,540,30,9,8,4,0,0,-1,0,0,0
+Death Rate,0,0.1,0.005
+12,10,0,120,580,30,9,8,4,0,0,-1,0,0,0
+Carrying Capacity,0,20000,100
+12,11,0,700,500,30,9,8,4,0,0,-1,0,0,0
+Population
+1,12,2,6,0,0,0,0,0,64,0,-1--1--1,,1|(200,300)|
+1,13,4,5,0,0,0,0,0,64,0,-1--1--1,,1|(650,265)|
+1,14,1,5,0,0,0,0,0,64,0,-1--1--1,,1|(500,265)|
+1,15,5,6,0,0,0,0,0,64,0,-1--1--1,,1|(350,365)|
+1,16,3,7,0,0,0,0,0,64,0,-1--1--1,,1|(350,430)|
+1,17,6,7,0,0,0,0,0,64,0,-1--1--1,,1|(350,430)|
+1,18,1,7,0,0,0,0,0,64,0,-1--1--1,,1|(500,365)|

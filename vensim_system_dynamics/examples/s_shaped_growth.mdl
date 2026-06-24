@@ -1,0 +1,79 @@
+Adopters = INTEG ( Adoption Rate - Abandonment Rate, 10 )
+	~ Person
+	~ 
+	|
+Potential Adopters = INTEG ( - Adoption Rate, 1000 )
+	~ Person
+	~ 
+	|
+Adoption Rate = Potential Adopters * Adoption Fraction * Contact Rate * Adopters / Total Population
+	~ Person/Month
+	~ 
+	|
+Abandonment Rate = Adopters * Abandonment Fraction
+	~ Person/Month
+	~ 
+	|
+Adoption Fraction = 0.37
+	~ Dmnl
+	~ 
+	|
+Contact Rate = 10
+	~ 1/Month
+	~ 
+	|
+Abandonment Fraction = 0.02
+	~ 1/Month
+	~ 
+	|
+Total Population = 1010
+	~ Person
+	~ 
+	|
+INITIAL TIME = 0
+	~ Month
+	~ 
+	|
+FINAL TIME = 120
+	~ Month
+	~ 
+	|
+TIME STEP = 0.25
+	~ Month
+	~ 
+	|
+SAVEPER = TIME STEP
+	~ Month
+	~ 
+	|
+\\\---/// Sketch information - do not modify anything except names
+V300  Do not put anything below this section - it will be ignored
+*S-Shaped Adoption
+$192-192-192,0,Arial|12||0-0-0|0-0-0|0-0-255|-1--1--1|-1--1--1|96,96,100,0
+10,1,Potential Adopters,200,180,58,20,3,3,0,0,0,0,0,0
+11,2,48,400,180,6,8,34,3,0,0,1,0,0,0
+10,3,Adoption Rate,400,205,48,11,40,3,0,0,-1,0,0,0
+11,4,48,560,180,6,8,34,3,0,0,1,0,0,0
+10,5,Adopters,560,180,36,20,3,3,0,0,0,0,0,0
+11,6,48,720,180,6,8,34,3,0,0,1,0,0,0
+10,7,Abandonment Rate,720,205,52,11,40,3,0,0,-1,0,0,0
+12,8,48,860,180,8,8,0,3,0,0,-1,0,0,0
+10,9,Adoption Fraction,300,330,48,11,0,3,0,0,0,0,0,0
+10,10,Contact Rate,480,330,32,11,0,3,0,0,0,0,0,0
+10,11,Total Population,640,330,42,11,0,3,0,0,0,0,0,0
+10,12,Abandonment Fraction,720,430,58,11,0,3,0,0,0,0,0,0
+1,13,1,2,4,0,0,22,0,0,0,-1--1--1,,1|(300,180)|
+1,14,2,3,4,0,0,22,0,0,0,-1--1--1,,1|(400,140)|
+1,15,3,4,4,0,0,22,0,0,0,-1--1--1,,1|(480,180)|
+1,16,4,5,4,0,0,22,0,0,0,-1--1--1,,1|(560,140)|
+1,17,5,6,4,0,0,22,0,0,0,-1--1--1,,1|(640,180)|
+1,18,6,7,4,0,0,22,0,0,0,-1--1--1,,1|(720,140)|
+1,19,7,8,4,0,0,22,0,0,0,-1--1--1,,1|(790,180)|
+1,20,9,3,0,0,0,0,0,64,0,-1--1--1,,1|(350,265)|
+1,21,10,3,0,0,0,0,0,64,0,-1--1--1,,1|(440,265)|
+1,22,11,3,0,0,0,0,0,64,0,-1--1--1,,1|(520,250)|
+1,23,5,11,0,0,0,0,0,64,0,-1--1--1,,1|(600,250)|
+1,24,12,7,0,0,0,0,0,64,0,-1--1--1,,1|(720,330)|
+1,25,5,12,0,0,0,0,0,64,0,-1--1--1,,1|(720,250)|
+1,26,5,3,0,0,0,0,0,64,0,-1--1--1,,1|(480,205)|
+1,27,1,3,0,0,0,0,0,64,0,-1--1--1,,1|(300,250)|

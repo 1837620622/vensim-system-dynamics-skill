@@ -1,0 +1,62 @@
+Sales = 100
+	~ Unit/Month
+	~ 
+	|
+Customers = 1000
+	~ Unit
+	~ 
+	|
+Satisfaction = 0.8
+	~ Dmnl
+	~ 
+	|
+Word of Mouth = Customers * Satisfaction * 0.01
+	~ Unit/Month
+	~ 
+	|
+Churn = Customers * ( 1 - Satisfaction ) * 0.02
+	~ Unit/Month
+	~ 
+	|
+Price = 50
+	~ Dollar/Unit
+	~ 
+	|
+Quality = 0.7
+	~ Dmnl
+	~ 
+	|
+INITIAL TIME = 0
+	~ Month
+	~ 
+	|
+FINAL TIME = 60
+	~ Month
+	~ 
+	|
+TIME STEP = 0.25
+	~ Month
+	~ 
+	|
+SAVEPER = TIME STEP
+	~ Month
+	~ 
+	|
+\\\---/// Sketch information - do not modify anything except names
+V300  Do not put anything below this section - it will be ignored
+*Customer CLD
+$192-192-192,0,Arial|12||0-0-0|0-0-0|0-0-255|-1--1--1|-1--1--1|96,96,100,0
+10,1,Customers,400,200,40,11,0,3,0,0,0,0,0,0
+10,2,Word of Mouth,200,90,48,11,0,3,0,0,0,0,0,0
+10,3,Satisfaction,400,330,40,11,0,3,0,0,0,0,0,0
+10,4,Churn,600,90,32,11,0,3,0,0,0,0,0,0
+10,5,Quality,200,330,32,11,0,3,0,0,0,0,0,0
+10,6,Price,600,330,28,11,0,3,0,0,0,0,0,0
+1,7,1,2,0,0,0,0,0,64,0,-1--1--1,,1|(300,140)|
+1,8,2,1,0,0,0,0,0,64,0,-1--1--1,,1|(300,250)|
+1,9,1,4,0,0,0,0,0,64,0,-1--1--1,,1|(500,140)|
+1,10,4,1,0,0,0,0,0,64,0,-1--1--1,,1|(500,250)|
+1,11,3,2,0,0,0,0,0,64,0,-1--1--1,,1|(300,200)|
+1,12,5,3,0,0,0,0,0,64,0,-1--1--1,,1|(300,330)|
+1,13,6,3,0,0,0,0,0,64,0,-1--1--1,,1|(500,330)|
+1,14,3,4,0,0,0,0,0,64,0,-1--1--1,,1|(500,200)|

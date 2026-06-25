@@ -1,10 +1,10 @@
 # Vensim 系统动力学操作手册
 
-> 本文件是 `vensim-skill` 技能的详细操作参考文档，配合根目录 `SKILL.md` 使用。技能元数据（name/description/license/compatibility）以根目录 `SKILL.md` 为准。
+> 本文件是 `vensim-skill` 技能的详细操作参考文档，配合技能目录 `SKILL.md` 使用。技能元数据以 `SKILL.md` 为准。
 
 ## 0. 兼容性（全球 IDE / AI 编程助手）
 
-本技能是**纯 CLI 工具**（`skill.sh` + Python 标准库），不依赖 MCP 协议、不绑定特定 IDE 插件。任何能执行 shell 命令、能读取项目文件的 AI 编程助手均可使用，跨 macOS / Windows / Linux。已验证与以下全球主流工具兼容：
+本技能是**纯 CLI 工具**（`skill.sh` + Python 标准库），不依赖 MCP 协议、不绑定特定 IDE 插件。任何能执行 shell 命令、能读取项目文件的 AI 编程助手均可使用，跨 macOS / Windows / Linux。设计目标兼容以下全球主流工具：
 
 - **云订阅型**：Claude Code、Cursor、Windsurf、Codex CLI、Antigravity、Amp、Mistral Vibe
 - **免费 / 云托管型**：Gemini CLI、GitHub Copilot（CLI 与 VS Code Chat）、Amazon Q Developer、Kiro、Qwen Code
@@ -12,7 +12,7 @@
 - **IDE 内置 / 插件型**：VS Code、JetBrains 全系（IntelliJ/PyCharm 等）AI Assistant、Trae、通义灵码、CodeGeeX、Baidu Comate、Replit AI
 - **自主 Agent 型**：Devin、OpenHands、Bolt.new、v0、Lovable
 
-> 调研依据：Agent Skills 规范（agentskills.io / agensi.io）确认 `name` + `description` + 纯 Markdown 指令的技能可跨 Claude Code、Codex CLI、Cursor、Windsurf、Gemini CLI、Copilot 等全部主流运行时加载；本技能仅用标准 frontmatter 字段，平台特定字段均被安全忽略。
+> 兼容性信息放在正文中，frontmatter 仅保留常见技能校验字段。
 
 **跨平台入口**：macOS/Linux 用 `./skill.sh`，Windows 用 `skill.cmd`（cmd/PowerShell）或 Git Bash/WSL 下的 `./skill.sh`；两入口命令一致，自动检测 `python3`/`python`/`py`。Python 脚本用 `pathlib`+`shutil.which`+`subprocess`（不依赖 shell），读文件兼容 UTF-8 BOM 与 GB 编码，CSV 用 `newline=""` 避免 Windows 双换行。
 
@@ -118,25 +118,27 @@ Vensim 先建立正确模型结构（库存/流率/阀门/云/方程）
 
 依赖：Graphviz（`dot`/`neato`）。macOS `brew install graphviz`；Windows 装 Graphviz 后把 `dot` 加入 PATH。Python 脚本只用标准库。
 
+以下命令默认从本技能目录运行，也就是包含 `skill.sh` 的目录。
+
 ```bash
 # 1. 备份并查看草图对象 ID、坐标、形状、箭头 from/to、控制点
-python tools/vensim_autolayout.py inspect model.mdl
+python vensim_system_dynamics/tools/vensim_autolayout.py inspect model.mdl
 
 # 2. 审计箭头引用是否指向本 view 内有效对象
-python tools/vensim_autolayout.py audit model.mdl
+python vensim_system_dynamics/tools/vensim_autolayout.py audit model.mdl
 
 # 3. 复制 SFD 配置，填入要锁定的库存/流率名
-cp templates/layout_config_sfd.json my_layout.json
+cp vensim_system_dynamics/templates/layout_config_sfd.json my_layout.json
 
 # 4. 生成自动排版模型（自动建 .backup.mdl 与 .layout_report.json）
-python tools/vensim_autolayout.py layout model.mdl \
+python vensim_system_dynamics/tools/vensim_autolayout.py layout model.mdl \
   --output model_autolayout.mdl \
   --config my_layout.json \
   --engine dot \
   --route-information-arrows
 
 # 5. 审计输出
-python tools/vensim_autolayout.py audit model_autolayout.mdl
+python vensim_system_dynamics/tools/vensim_autolayout.py audit model_autolayout.mdl
 ```
 
 ### 图形策略
@@ -145,7 +147,17 @@ python tools/vensim_autolayout.py audit model_autolayout.mdl
 - **曲线**：普通 Arrow + 1 个中间控制点 = 圆弧。脚本为信息箭头设单控制点；需真正 spline 外观时先在 Vensim 用 `Cmd/Ctrl+Arrow` 建 spline，脚本只调节点位置不改箭头类型。
 - **避交叉**：平行边赋相反曲率；远距离边增大弧度，近距离边小弧度；仍严重交叉则分 View，不继续堆曲线。
 
-## 7. 输出质量门槛
+## 7. 仿真与 nodata 处理
+
+纯 Python 仿真引擎用于课程作业和常见结构快速验证。默认严格模式下，变量缺失、不支持函数、表达式求值失败会直接报错，避免生成 nodata 或全 0 伪结果；确实需要兼容输出时，给 `simulate` / `graph` / `compare` 添加 `--keep-going`。
+
+遇到图表无数据时按顺序处理：
+1. 运行 `./skill.sh check model.mdl` 检查控制变量、循环依赖、未定义变量和断裂草图引用。
+2. 运行 `./skill.sh simulate model.mdl --var 目标变量 --output result.csv` 生成 CSV，确认目标变量是否存在且有数值序列。
+3. 若报“不支持函数”或“求值失败”，优先补函数实现或改用 Vensim/PySD 后端，不要把全 0 当作有效结果。
+4. CSV 正常后再运行 `./skill.sh graph model.mdl --var 目标变量 --output result.png` 出图。
+
+## 8. 输出质量门槛
 
 - [ ] 每个库存有流入和/或流出
 - [ ] 每个流率单位正确
@@ -159,7 +171,7 @@ python tools/vensim_autolayout.py audit model_autolayout.mdl
 - [ ] 自动排版后 .mdl 已在目标 Vensim 版本重新打开验证
 - [ ] 最终 ZIP 含 Word/PDF、.mdl、参数/数据、运行说明、必要文献
 
-## 8. 常见错误
+## 9. 常见错误
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
@@ -167,8 +179,9 @@ python tools/vensim_autolayout.py audit model_autolayout.mdl
 | 箭头漂浮/反向/穿变量 | from/to 对象 ID 错、控制点格式错 | 还原备份；inspect 查 ID；Vensim 重绘 |
 | 移动后阀门与标签分离 | 移动了阀门/流率标签/库存骨架 | 配置锁定这些；只移普通辅助变量 |
 | 能运行但结果不合理 | 单位/符号/初值/反馈方向/步长错 | Units Check + 极端条件 + 参数审计 |
+| 图表 nodata/无曲线 | 变量名不匹配、仿真未运行、函数未支持、求值失败 | 先 simulate 导出 CSV，再 graph；严格模式报错必须修 |
 | 控制面板失效 | Vensim 版本不支持 IO Controls | 改参数表 + 情景运行流程 |
 
-## 9. 参考资料
+## 10. 参考资料
 
 详见 `docs/REFERENCES.md`（Vensim 官方 Sketch Format / Arrow Class / Sketch Object Detail / Layout Menu / Check Model，Graphviz splines，PySD 解析器）。实现依据与限制写在该文件。

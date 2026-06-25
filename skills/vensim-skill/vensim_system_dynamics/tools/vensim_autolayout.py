@@ -20,7 +20,8 @@ import math
 import re
 import shlex
 import shutil
-import subprocess
+# 仅调用 argparse choices 限定的 Graphviz 可执行文件。
+import subprocess  # nosec B404
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -61,6 +62,11 @@ OBJECT_TYPES = {T_VARIABLE, T_VALVE, T_SOURCE_SINK, *T_OTHER}
 # field[7] = thick(线宽)。物理流率管道 thick=22，信息箭头 thick=0。
 # thick >= 此阈值视为物理流率管道(粗管)，< 视为信息箭头(细线)。
 FLOW_THICK_THRESHOLD = 20
+MAX_GRAPHVIZ_NODES = 1_000
+MAX_GRAPHVIZ_EDGES = 5_000
+MAX_DOT_LABEL_CHARS = 256
+GRAPHVIZ_TIMEOUT_SECONDS = 20
+ALLOWED_RANKDIR = {"TB", "BT", "LR", "RL"}
 
 # shape 字段位标志：低 5 位为形状码；bit6(1<<5=32)=附着到阀门；bit7=形状由类型决定
 SHAPE_ATTACHED_TO_VALVE = 32
@@ -331,7 +337,22 @@ def graph_nodes_for_layout(view: View, movable: Dict[int, Obj]) -> Dict[int, Obj
 
 
 def _quote_dot(identifier: str) -> str:
-    return '"' + identifier.replace('"', '\\"') + '"'
+    escaped = (
+        identifier
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r", " ")
+        .replace("\n", "\\n")
+        .replace("\t", " ")
+    )
+    return '"' + escaped + '"'
+
+
+def _dot_label(label: str) -> str:
+    cleaned = "".join(ch if ch >= " " else " " for ch in label)
+    if len(cleaned) > MAX_DOT_LABEL_CHARS:
+        cleaned = cleaned[:MAX_DOT_LABEL_CHARS] + "..."
+    return cleaned
 
 
 def graphviz_positions(
@@ -349,9 +370,19 @@ def graphviz_positions(
     if not nodes:
         return {}
 
-    rankdir = str(config.get("rankdir", "LR"))
+    rankdir = str(config.get("rankdir", "LR")).upper()
+    if rankdir not in ALLOWED_RANKDIR:
+        raise ValueError(f"rankdir 仅支持: {', '.join(sorted(ALLOWED_RANKDIR))}")
     nodesep = float(config.get("nodesep", 0.65))
     ranksep = float(config.get("ranksep", 1.05))
+    if len(nodes) > MAX_GRAPHVIZ_NODES:
+        raise RuntimeError(f"Graphviz 节点过多: {len(nodes)} > {MAX_GRAPHVIZ_NODES}")
+    edge_count = sum(
+        1 for arrow in view.arrows
+        if not arrow.is_physical_flow and arrow.from_id in nodes and arrow.to_id in nodes
+    )
+    if edge_count > MAX_GRAPHVIZ_EDGES:
+        raise RuntimeError(f"Graphviz 边过多: {edge_count} > {MAX_GRAPHVIZ_EDGES}")
 
     dot_lines = [
         "digraph G {",
@@ -361,7 +392,7 @@ def graphviz_positions(
     ]
     for obj_id, obj in nodes.items():
         if obj.kind == T_VARIABLE:
-            label = obj.name.replace('"', "'") or f"var{obj_id}"
+            label = _dot_label(obj.name) or f"var{obj_id}"
         else:
             label = f"valve_{obj_id}"
         dot_lines.append(f"{_quote_dot(f'n{obj_id}')} [label={_quote_dot(label)}];")
@@ -377,13 +408,18 @@ def graphviz_positions(
             )
     dot_lines.append("}")
 
-    result = subprocess.run(
-        [engine, "-Tplain"],
-        input="\n".join(dot_lines),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    # engine 由 argparse choices 限定为 dot/neato/fdp/sfdp，且 shell=False。
+    try:
+        result = subprocess.run(  # nosec B603
+            [engine, "-Tplain"],
+            input="\n".join(dot_lines),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=GRAPHVIZ_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Graphviz 运行超时: {GRAPHVIZ_TIMEOUT_SECONDS} 秒") from exc
     if result.returncode != 0:
         raise RuntimeError(f"Graphviz 运行失败: {result.stderr.strip()}")
 

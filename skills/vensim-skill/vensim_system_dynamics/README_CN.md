@@ -18,7 +18,7 @@ Vensim 内置的是"对齐、等间距、尺寸统一、手动调曲线"，**不
 
 ## 兼容性（全球 IDE / AI 编程助手）
 
-本技能是**纯 CLI 工具**（`skill.sh` + Python 标准库），不依赖 MCP 协议、不绑定特定 IDE 插件。任何能执行 shell 命令、能读取项目文件的 AI 编程助手均可使用，跨 macOS / Windows / Linux。已验证与以下全球主流工具兼容：
+本技能是**纯 CLI 工具**（`skill.sh` + Python 标准库），不依赖 MCP 协议、不绑定特定 IDE 插件。任何能执行 shell 命令、能读取项目文件的 AI 编程助手均可使用，跨 macOS / Windows / Linux。设计目标兼容以下全球主流工具：
 
 - **云订阅型**：Claude Code、Cursor、Windsurf、Codex CLI、Antigravity、Amp、Mistral Vibe
 - **免费 / 云托管型**：Gemini CLI、GitHub Copilot（CLI 与 VS Code Chat）、Amazon Q Developer、Kiro、Qwen Code
@@ -38,7 +38,24 @@ which dot && dot -V
 
 Python 脚本只用标准库，无需 `pip install`。
 
+## 通过 skills.sh 安装
+
+发布到公开 GitHub 后，可通过 skills.sh / `npx skills` 直接发现和安装：
+
+```bash
+# 查看仓库内可安装的技能
+npx skills add 1837620622/vensim-system-dynamics-skill --list
+
+# 安装到 Codex
+npx skills add 1837620622/vensim-system-dynamics-skill \
+  --skill vensim-skill \
+  --agent codex \
+  --yes
+```
+
 ## 最快使用方式
+
+以下命令默认从本技能目录运行，也就是包含 `skill.sh` 的目录。
 
 ```bash
 # 便捷封装（推荐）：一键 inspect + audit + layout
@@ -49,20 +66,20 @@ chmod +x skill.sh
 
 # 或直接调用 Python 脚本
 # 1. 查看模型对象 ID、位置、形状、箭头 from/to、控制点
-python tools/vensim_autolayout.py inspect /path/to/your_model.mdl
+python vensim_system_dynamics/tools/vensim_autolayout.py inspect /path/to/your_model.mdl
 
 # 2. 复制 SFD 配置，填入要锁定的库存、流率名
-cp templates/layout_config_sfd.json my_layout.json
+cp vensim_system_dynamics/templates/layout_config_sfd.json my_layout.json
 
 # 3. 生成自动排版模型（自动建 .backup.mdl 与 .layout_report.json）
-python tools/vensim_autolayout.py layout /path/to/your_model.mdl \
+python vensim_system_dynamics/tools/vensim_autolayout.py layout /path/to/your_model.mdl \
   --output /path/to/your_model_autolayout.mdl \
   --config my_layout.json \
   --engine dot \
   --route-information-arrows
 
 # 4. 审计输出
-python tools/vensim_autolayout.py audit /path/to/your_model_autolayout.mdl
+python vensim_system_dynamics/tools/vensim_autolayout.py audit /path/to/your_model_autolayout.mdl
 ```
 
 在 Vensim 中打开 `your_model_autolayout.mdl`：先看图，再 `Model > Check Model`，再 `Model > Units Check`，手工微调少数交叉关系后保存为最终版本。
@@ -73,28 +90,30 @@ python tools/vensim_autolayout.py audit /path/to/your_model_autolayout.mdl
 
 ```bash
 # 仿真导出 CSV
-./skill.sh simulate examples/population_demo.mdl --var Population --var Births --var Deaths
+./skill.sh simulate vensim_system_dynamics/examples/population_demo.mdl --var Population --var Births --var Deaths
 
 # 折线图 PNG（需 matplotlib）
-./skill.sh graph examples/population_demo.mdl --var Population --var Deaths \
+./skill.sh graph vensim_system_dynamics/examples/population_demo.mdl --var Population --var Deaths \
        --output pop.png --title "种群动态"
 
 # 多场景对比图（净利润、植被盖度、耦合度等任意变量）
-./skill.sh compare examples/population_demo.mdl \
+./skill.sh compare vensim_system_dynamics/examples/population_demo.mdl \
        --scenario scenario_low.mdl --scenario scenario_high.mdl \
        --var Population --var "Crowding Effect" --output compare.png
 
 # 单位量纲校验
-./skill.sh units examples/population_demo.mdl
+./skill.sh units vensim_system_dynamics/examples/population_demo.mdl
 
 # 全面检查：未定义变量 / 缺失单位 / 循环依赖 / 断裂草图引用
-./skill.sh check examples/population_demo.mdl
+./skill.sh check vensim_system_dynamics/examples/population_demo.mdl
 
 # 自动修复缺失单位、断裂草图箭头
 ./skill.sh fix broken_model.mdl --output fixed_model.mdl
 ```
 
-支持函数：`INTEG`、`SMOOTH`、`SMOOTH3`、`DELAY1`、`DELAY3`、`DELAY FIXED`、`IF THEN ELSE`、`WITH LOOKUP`、`LOOKUP`、`ABS`、`SQRT`、`EXP`、`LN`、`MIN`、`MAX`、`MODULO`。
+支持函数：`INTEG`、`SMOOTH`、`SMOOTH3`、`DELAY1`、`DELAY3`、`DELAY FIXED`、`IF THEN ELSE`、`WITH LOOKUP`、`LOOKUP`、`ABS`、`SQRT`、`EXP`、`LN`、`MIN`、`MAX`、`MODULO`、`STEP`、`RAMP`、`PULSE`、`XIDZ`、`ZIDZ`。
+
+nodata 策略：默认严格模式下，变量缺失、不支持函数或求值失败会直接报错并指出根因，避免生成看似正常但全 0 的曲线。确实需要兼容输出时，可为 `simulate` / `graph` / `compare` 添加 `--keep-going`。
 
 ## 必须先在 Vensim 中做好的部分
 

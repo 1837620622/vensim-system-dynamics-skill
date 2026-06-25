@@ -84,27 +84,41 @@ case "$cmd" in
     [ $# -ge 1 ] || die "用法: $0 simulate <model.mdl> [--output out.csv] [--var V1 --var V2 ...] [--plot out.png]"
     need_py
     model="$1"; shift
-    out=""
+    cmd_args=("$model")
     # 检查是否已带 --output，未带则自动补默认输出路径
     has_out=0
     for a in "$@"; do [ "$a" = "--output" ] && has_out=1; done
-    if [ "$has_out" -eq 0 ]; then out="--output ${model%.mdl}_sim.csv"; fi
-    "$PY" "$ENGINE" simulate "$model" $out "$@"
+    if [ "$has_out" -eq 0 ]; then cmd_args+=(--output "${model%.mdl}_sim.csv"); fi
+    cmd_args+=("$@")
+    "$PY" "$ENGINE" simulate "${cmd_args[@]}"
     ;;
   graph)
     [ $# -ge 1 ] || die "用法: $0 graph <model.mdl> [--var V1 --var V2] --output out.png [--title T]  (缺省 --var 画全部变量)"
     need_py
     model="$1"; shift
-    out=""
+    cmd_args=("$model")
     has_out=0
     for a in "$@"; do [ "$a" = "--output" ] && has_out=1; done
-    if [ "$has_out" -eq 0 ]; then out="--output ${model%.mdl}_graph.png"; fi
-    "$PY" "$ENGINE" graph "$model" $out "$@"
+    if [ "$has_out" -eq 0 ]; then cmd_args+=(--output "${model%.mdl}_graph.png"); fi
+    cmd_args+=("$@")
+    "$PY" "$ENGINE" graph "${cmd_args[@]}"
     ;;
   compare)
     [ $# -ge 1 ] || die "用法: $0 compare <base.mdl> --scenario s1.mdl --var V --output out.png"
     need_py
     "$PY" "$ENGINE" compare "$@"
+    ;;
+  auto)
+    [ $# -ge 1 ] || die "用法: $0 auto <model.mdl> [--var V1 --var V2 ...] [--keep-going]"
+    need_py
+    model="$1"; shift
+    sim_out="${model%.mdl}_sim.csv"
+    graph_out="${model%.mdl}_graph.png"
+    echo "=== check ==="; "$PY" "$ENGINE" check "$model"
+    echo "=== simulate ==="; "$PY" "$ENGINE" simulate "$model" --output "$sim_out" "$@"
+    echo "=== graph ==="; "$PY" "$ENGINE" graph "$model" --output "$graph_out" "$@"
+    echo "完成: $sim_out"
+    echo "完成: $graph_out"
     ;;
   units)
     [ $# -ge 1 ] || die "用法: $0 units <model.mdl>"
@@ -130,10 +144,11 @@ Vensim System Dynamics Skill
     $0 quick    <model.mdl> [--engine dot]  一键 inspect+audit+layout
     $0 examples                               审计全部示例
   仿真与分析 (不依赖 Vensim):
-    $0 simulate <model.mdl> [--output out.csv] [--var V]   纯 Python 仿真导出 CSV
-    $0 graph    <model.mdl> --var V [--var V2] --output out.png [--title T]  折线图
-    $0 compare  <base.mdl> --scenario s.mdl --var V --output out.png         多场景对比图
-    $0 units    <model.mdl>                 单位量纲校验
+    $0 simulate <model.mdl> [--output out.csv] [--var V] [--keep-going]  纯 Python 仿真导出 CSV
+    $0 graph    <model.mdl> --var V [--var V2] [--output out.png] [--title T] [--keep-going]  折线图
+    $0 compare  <base.mdl> --scenario s.mdl --var V --output out.png [--keep-going]  多场景对比图
+    $0 auto     <model.mdl> [--var V] [--keep-going]  一键 check+simulate+graph
+    $0 units    <model.mdl>                 单位缺失预检
     $0 check    <model.mdl>                 全面检查(未定义/缺单位/循环/断裂引用)
     $0 fix      <model.mdl> --output f.mdl  自动修复缺失单位与断裂引用
   环境:

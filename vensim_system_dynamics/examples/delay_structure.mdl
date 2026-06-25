@@ -6,9 +6,9 @@ Order Pipeline = INTEG ( Order Rate - Delivery Rate, 300 )
 	~ Unit
 	~ 
 	|
-Delivery Rate = DELAY1( Order Rate, Delay Time )
+Delivery Rate = Order Pipeline / Delay Time
 	~ Unit/Month
-	~ 
+	~ 一阶物料延迟的显式结构：流出 = 管道库存 / 延迟时间
 	|
 Delay Time = 3
 	~ Month

@@ -29,6 +29,25 @@ from typing import Dict, Iterable, List, Optional, Tuple
 # 草图起始标记（.mdl 中写作 \\\---///）
 SKETCH_MARKER = r"\\\---///"
 
+# 方程区 INTEG 正则：匹配 "变量名 = INTEG ( ..., 初值 )"
+_INTEG_EQ = re.compile(r"^\s*([A-Za-z_][\w\$\s]*?)\s*=\s*INTEG\s*\(", re.I)
+
+
+def parse_stock_names(mdl_text: str) -> set:
+    """从方程区解析所有库存变量名（含 INTEG 的方程左侧变量）。
+
+    用于替代单纯依赖图形形状识别库存：先从方程语义确定库存名，
+    再在 Sketch 中按名定位对象并锁定。
+    """
+    sketch_pos = mdl_text.find(SKETCH_MARKER)
+    body = mdl_text[:sketch_pos] if sketch_pos >= 0 else mdl_text
+    stocks: set = set()
+    for line in body.splitlines():
+        m = _INTEG_EQ.match(line)
+        if m:
+            stocks.add(m.group(1).strip())
+    return stocks
+
 # 对象类型码
 T_ARROW = 1
 T_VARIABLE = 10
@@ -71,6 +90,7 @@ class Obj:
     shape: int
     bits: int
     raw_fields: List[str]
+    stock_names: set = dataclasses.field(default_factory=set)
 
     @property
     def attached_to_valve(self) -> bool:
@@ -84,8 +104,13 @@ class Obj:
 
     @property
     def stock_like(self) -> bool:
-        # 库存常用 boxed 形状码 3；这是保守启发式，用户可在配置里锁定更多对象
-        return self.kind == T_VARIABLE and (self.shape & SHAPE_MASK) == 3
+        # 优先用方程语义：变量名出现在 INTEG 方程左侧则为库存。
+        # 退化为图形形状启发式：boxed 形状码 3 作为保守兜底。
+        if self.kind != T_VARIABLE:
+            return False
+        if self.name and self.name in self.stock_names:
+            return True
+        return (self.shape & SHAPE_MASK) == 3
 
 
 @dataclasses.dataclass
@@ -176,13 +201,15 @@ def format_points(points: Iterable[Tuple[float, float]]) -> str:
 # 草图解析
 # ---------------------------------------------------------------------------
 
-def parse_views(lines: List[str]) -> List[View]:
+def parse_views(lines: List[str], stock_names: Optional[set] = None) -> List[View]:
     marker_positions = [
         i for i, line in enumerate(lines)
         if _line_body(line).startswith(SKETCH_MARKER)
     ]
     if not marker_positions:
         raise ValueError(r"No Vensim Sketch Information marker found. Expected \\---///.")
+    if stock_names is None:
+        stock_names = set()
 
     views: List[View] = []
     for view_index, marker in enumerate(marker_positions):
@@ -248,14 +275,17 @@ def parse_views(lines: List[str]) -> List[View]:
                     shape=_safe_int(fields[7]),
                     bits=_safe_int(fields[8]),
                     raw_fields=fields,
+                    stock_names=stock_names,
                 )
         views.append(View(view_index, name, marker, end, objects, arrows))
     return views
 
 
 def load_mdl(path: Path) -> Tuple[List[str], List[View]]:
-    lines = _read_text(path).splitlines(keepends=True)
-    return lines, parse_views(lines)
+    text = _read_text(path)
+    lines = text.splitlines(keepends=True)
+    stock_names = parse_stock_names(text)
+    return lines, parse_views(lines, stock_names=stock_names)
 
 
 # ---------------------------------------------------------------------------
@@ -475,7 +505,12 @@ def choose_views(views: List[View], config: dict) -> List[View]:
 
 
 def _is_information_arrow(arrow: Arrow, objects: Dict[int, Obj]) -> bool:
-    """判定是否为可重布线的信息箭头：细线且两端均为变量节点。"""
+    """判定是否为可重布线的信息箭头：细线、两端均为变量节点、且原本为普通 Arrow。
+
+    保守判据：仅当原箭头控制点个数 <= 1 时才视为普通 Arrow，可写入单控制点圆弧。
+    Polyline(多控制点)、Spline、Perpendicular 等多控制点箭头保持原样不动，
+    避免破坏其原有路由类型（Vensim Arrow Class 文档：不同箭头类型行为不同）。
+    """
     if arrow.is_physical_flow:
         return False
     src = objects.get(arrow.from_id)
@@ -486,6 +521,10 @@ def _is_information_arrow(arrow: Arrow, objects: Dict[int, Obj]) -> bool:
     if src.kind not in (T_VARIABLE, T_VALVE):
         return False
     if dst.kind not in (T_VARIABLE, T_VALVE):
+        return False
+    # 仅普通 Arrow(0 或 1 个控制点)可重写为单控制点圆弧；
+    # 多控制点箭头(Polyline/Spline/Perpendicular)保持原样
+    if len(arrow.points) > 1:
         return False
     return True
 
@@ -557,12 +596,87 @@ def command_inspect(path: Path) -> int:
     return 0
 
 
+def _equation_semantics_audit(path: Path) -> Tuple[int, int]:
+    """方程区语义审计：重复定义、未定义引用、未使用变量、缺失单位。
+
+    复用 vensim_engine 的方程解析与依赖提取，返回 (errors, warnings)。
+    """
+    try:
+        from vensim_engine import parse_equations, extract_deps
+    except ImportError:
+        # vensim_engine 不可用时跳过语义审计
+        return 0, 0
+
+    text = _read_text(path)
+    equations = parse_equations(text)
+    names = set(equations.keys())
+    errors = warnings = 0
+
+    # 1. 重复定义：parse_equations 用 OrderedDict，后定义覆盖前定义；
+    #    通过重新扫描原始文本检测同名方程出现多次
+    sketch_pos = text.find(SKETCH_MARKER)
+    body = text[:sketch_pos] if sketch_pos >= 0 else text
+    seen: Dict[str, int] = {}
+    for line in body.splitlines():
+        m = re.match(r"^\s*([A-Za-z_][\w\$\s]*?)\s*=\s*(.+)$", line)
+        if not m:
+            continue
+        name = m.group(1).strip()
+        # 排除控制变量与函数定义行
+        if name in ("INITIAL TIME", "FINAL TIME", "TIME STEP", "SAVEPER"):
+            continue
+        seen[name] = seen.get(name, 0) + 1
+    for name, count in seen.items():
+        if count > 1:
+            errors += 1
+            print(f"  ERROR 变量 '{name}' 被重复定义 {count} 次。")
+
+    # 2. 未定义变量引用
+    for name, eq in equations.items():
+        rhs = eq.integ_flow or eq.rhs
+        for d in extract_deps(rhs, names):
+            if d not in equations:
+                errors += 1
+                print(f"  ERROR {name}: 引用未定义变量 '{d}'。")
+
+    # 3. 未使用变量（定义但从未被任何方程引用）
+    referenced: set = set()
+    for eq in equations.values():
+        rhs = eq.integ_flow or eq.rhs
+        for d in extract_deps(rhs, names):
+            referenced.add(d)
+    for name in equations:
+        if name in ("INITIAL TIME", "FINAL TIME", "TIME STEP", "SAVEPER"):
+            continue
+        if name not in referenced:
+            warnings += 1
+            print(f"  WARNING 变量 '{name}' 已定义但从未被引用。")
+
+    # 4. 缺失单位
+    for name, eq in equations.items():
+        if name in ("INITIAL TIME", "FINAL TIME", "TIME STEP", "SAVEPER"):
+            continue
+        if not eq.unit:
+            warnings += 1
+            print(f"  WARNING {name}: 缺失单位。")
+
+    return errors, warnings
+
+
 def command_audit(path: Path) -> int:
     _, views = load_mdl(path)
     errors = warnings = 0
     print(f"AUDIT: {path}")
+
+    # 方程区语义审计
+    print("\n[方程语义]")
+    eq_errors, eq_warnings = _equation_semantics_audit(path)
+    errors += eq_errors
+    warnings += eq_warnings
+
+    # Sketch 引用审计
     for view in views:
-        print(f"\nVIEW: {view.name}")
+        print(f"\n[Sketch] VIEW: {view.name}")
         ids = set(view.objects)
         for arrow in view.arrows:
             if arrow.from_id not in ids or arrow.to_id not in ids:
@@ -578,11 +692,14 @@ def command_audit(path: Path) -> int:
             if obj.kind == T_VARIABLE and not obj.name.strip():
                 warnings += 1
                 print(f"  WARNING object {obj.obj_id}: 变量名为空。")
+
     if errors == 0:
-        print("\nPASS: 未发现断裂的箭头对象引用。")
+        print("\nPASS: 未发现错误。")
     else:
-        print(f"\nFAIL: 发现 {errors} 处断裂引用。")
+        print(f"\nFAIL: 发现 {errors} 处错误。")
     print(f"Warnings: {warnings}")
+    print("\n注意：audit 仅检查 Sketch 对象 ID 断裂与方程区基础语义，")
+    print("不替代 Vensim Check Model 与 Units Check。")
     return 1 if errors else 0
 
 

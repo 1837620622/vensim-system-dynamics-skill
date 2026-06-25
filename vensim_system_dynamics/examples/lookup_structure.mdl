@@ -1,6 +1,6 @@
-Price = 50
+Price = INTEG ( Price Change, 50 )
 	~ Dollar/Unit
-	~ 
+	~ 市场价格随供需差额调整
 	|
 Demand = WITH LOOKUP( Price, ( [0,0)-(100,1000)], (0,950), (20,800), (40,600), (60,400), (80,200), (100,50) )
 	~ Unit/Month
@@ -16,10 +16,6 @@ Price Change = ( Demand - Supply ) * Adjustment Rate
 	|
 Adjustment Rate = 0.1
 	~ 1/Month
-	~ 
-	|
-Price = INTEG ( Price Change, 50 )
-	~ Dollar/Unit
 	~ 
 	|
 INITIAL TIME = 0

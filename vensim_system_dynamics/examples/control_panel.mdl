@@ -6,9 +6,9 @@ Death Rate = 0.01
 	~ 1/Month
 	~ 
 	|
-Population = INTEG ( Birth Rate * Population - Death Rate * Population, 1000 )
+Population = INTEG ( Net Growth, 1000 )
 	~ Person
-	~ 
+	~ 人口库存，净增长受承载力反馈约束
 	|
 Carrying Capacity = 5000
 	~ Person

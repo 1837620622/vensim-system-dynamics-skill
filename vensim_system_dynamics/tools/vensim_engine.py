@@ -222,8 +222,18 @@ def topological_sort(equations: "OrderedDict[str, Equation]") -> List[str]:
 # ---------------------------------------------------------------------------
 
 class LookupTable:
-    """线性插值查表。"""
-    def __init__(self, pairs: List[Tuple[float, float]]):
+    """线性插值查表。支持传入 (x,y) 对列表或 Vensim 原始表字符串。"""
+
+    _PAIR_RE = re.compile(r"\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)")
+
+    def __init__(self, table):
+        if isinstance(table, str):
+            # 解析 Vensim 表字符串：( [0,0)-(100,1000)], (0,950), (20,800), ...
+            # 先剥离范围声明 ( [x,y)-(x,y)]，再取 (x,y) 数值对
+            body = re.sub(r"\(\s*\[.*?\)\s*\]", " ", table)
+            pairs = [(float(x), float(y)) for x, y in self._PAIR_RE.findall(body)]
+        else:
+            pairs = list(table)
         self.xs = [p[0] for p in pairs]
         self.ys = [p[1] for p in pairs]
 
@@ -247,9 +257,18 @@ class LookupTable:
 def _to_python_expr(rhs: str, name_map: Dict[str, str]) -> str:
     """把 Vensim 表达式转成 Python 可求值字符串，变量名映射为合法标识符。"""
     s = rhs
-    # WITH LOOKUP(x, table) -> _wl(x, table)
-    s = re.sub(r"WITH\s+LOOKUP\s*\(([^,]+),\s*(\[\[.*?\]\])\)",
-               r"_wl(\1,\2)", s, flags=re.S | re.I)
+    # WITH LOOKUP(x, table) -> _wl(x, "table")
+    # Vensim 实际格式：WITH LOOKUP( Price, ( [0,0)-(100,1000)], (0,950), (20,800), ... )
+    # table 部分作为字符串字面量传给 _wl，由 LookupTable 解析
+    def _wl_sub(m):
+        x_arg = m.group(1).strip()
+        table = m.group(2)
+        # 转义内嵌双引号
+        table_escaped = table.replace('"', '\\"')
+        return f'_wl({x_arg}, "{table_escaped}")'
+
+    s = re.sub(r"WITH\s+LOOKUP\s*\(([^,()]+),\s*(\(.+\))\s*\)",
+               _wl_sub, s, flags=re.S | re.I)
     # IF THEN ELSE(c,a,b) -> (a if c else b)
     s = re.sub(r"IF\s+THEN\s+ELSE\s*\(([^,]+),([^,]+),([^)]+)\)",
                r"(\2 if (\1) else \3)", s, flags=re.I)

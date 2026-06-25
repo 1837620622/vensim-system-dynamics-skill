@@ -78,16 +78,12 @@ case "$cmd" in
     [ $# -ge 1 ] || die "用法: $0 simulate <model.mdl> [--output out.csv] [--var V1 --var V2 ...]"
     need_py
     model="$1"; shift
-    out=""; vars=""
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --output) out="$2"; shift 2;;
-        --var) vars="$vars --var $2"; shift 2;;
-        *) die "未知参数: $1";;
-      esac
-    done
-    [ -n "$out" ] || out="${model%.mdl}_sim.csv"
-    python3 "$ENGINE" simulate "$model" --output "$out" $vars
+    out=""
+    # 检查是否已带 --output，未带则自动补默认输出路径
+    has_out=0
+    for a in "$@"; do [ "$a" = "--output" ] && has_out=1; done
+    if [ "$has_out" -eq 0 ]; then out="--output"; out="${out} ${model%.mdl}_sim.csv"; fi
+    python3 "$ENGINE" simulate "$model" $out "$@"
     ;;
   graph)
     [ $# -ge 1 ] || die "用法: $0 graph <model.mdl> --var V1 [--var V2] --output out.png [--title T]"

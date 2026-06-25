@@ -10,13 +10,21 @@ Finished Goods = INTEG ( Production Finish - Shipment, 200 )
 	~ Unit
 	~ 
 	|
-Ordering = Desired Raw Material - Raw Material
+Ordering = ( Desired Raw Material - Raw Material ) / Adjustment Time
 	~ Unit/Month
-	~ 
+	~ 原材料订货率，一阶负反馈调整
 	|
-Desired Raw Material = 1000
+Desired Raw Material = Demand * Coverage Time
 	~ Unit
-	~ 
+	~ 期望原材料基于需求与覆盖时间
+	|
+Adjustment Time = 2
+	~ Month
+	~ 订货调整时间
+	|
+Coverage Time = 10
+	~ Month
+	~ 原材料覆盖时间
 	|
 Production Start = Raw Material * Production Rate
 	~ Unit/Month
@@ -34,17 +42,17 @@ Completion Rate = 0.4
 	~ 1/Month
 	~ 
 	|
-Shipment = Finished Goods * Shipping Rate
+Shipment = MIN ( Finished Goods * Shipping Rate, Demand )
 	~ Unit/Month
-	~ 
+	~ 发货取产能与需求的较小值，需求驱动闭环
 	|
 Shipping Rate = 0.6
 	~ 1/Month
 	~ 
 	|
-Demand = 100
+Demand = 100 + STEP ( 50, 20 )
 	~ Unit/Month
-	~ 
+	~ 外部需求，第20月阶跃增加以测试响应
 	|
 INITIAL TIME = 0
 	~ Month

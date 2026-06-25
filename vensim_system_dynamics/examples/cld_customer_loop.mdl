@@ -1,14 +1,18 @@
-Sales = 100
+Sales = Customers * Purchase Frequency
 	~ Unit/Month
+	~ 销量由客户规模与购买频率决定
+	|
+Purchase Frequency = 0.1
+	~ 1/Month
 	~ 
 	|
-Customers = 1000
+Customers = INTEG ( Word of Mouth - Churn, 1000 )
 	~ Unit
-	~ 
+	~ 客户库存，口碑带来新客户，流失带走老客户
 	|
-Satisfaction = 0.8
+Satisfaction = Quality * 0.6 + ( 1 - Price / 100 ) * 0.4
 	~ Dmnl
-	~ 
+	~ 满意度由质量与价格共同决定，便因果箭头进入方程
 	|
 Word of Mouth = Customers * Satisfaction * 0.01
 	~ Unit/Month

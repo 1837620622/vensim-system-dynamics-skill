@@ -2,9 +2,13 @@ Revenue = Sales * Price
 	~ Dollar/Month
 	~ 
 	|
-Sales = 100
+Sales = MIN ( Demand, Capacity )
 	~ Unit/Month
-	~ 
+	~ 销量取需求与产能的较小值，产能反馈进入方程
+	|
+Demand = 120
+	~ Unit/Month
+	~ 外部需求
 	|
 Price = 50
 	~ Dollar/Unit

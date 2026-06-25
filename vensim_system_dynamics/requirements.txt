@@ -1,7 +1,16 @@
-# 无需 pip 安装 Python 包（布局/仿真/校验均用标准库）。
-# 可选外部可执行文件：Graphviz（dot / neato / fdp / sfdp）
+# Vensim System Dynamics Skill - 运行依赖
+# 兼容性：纯 CLI 工具（skill.sh + Python 标准库），不依赖 MCP，不绑定 IDE。
+# 任何能执行 shell 的 AI 编程助手均可使用，跨 macOS/Windows/Linux，兼容
+# Claude Code、Cursor、Windsurf、Codex CLI、Gemini CLI、GitHub Copilot、
+# Amazon Q、Aider、Cline、Continue.dev、OpenCode、Zed、Trae、JetBrains、
+# VS Code 等全球主流工具（详见 README.md「兼容性」章节）。
+#
+# 运行前提：Python 3.8+（仅标准库，无需 pip 安装）。
+#
+# 可选外部可执行文件：Graphviz（dot / neato / fdp / sfdp），仅 layout/quick 命令需要。
 # macOS: brew install graphviz
 # Windows: 安装 Graphviz 后把 dot 所在目录加入 PATH
+# Linux: sudo apt-get install graphviz
 #
-# 可选 Python 包（仅 graph/compare 绘图命令需要）：
+# 可选 Python 包（仅 graph/compare/simulate --plot 绘图命令需要）：
 #   matplotlib  ->  pip install matplotlib

@@ -2,12 +2,24 @@
 name: vensim-system-dynamics
 description: Vensim 系统动力学建模与 .mdl 草图审计、保守自动布局与仿真辅助技能。用于课程作业、政策分析与管理研究的因果回路图(CLD)、存量流量图(SFD)、方程、单位校验、仿真、情景对比、论文图表，以及在保留方程与对象 ID 的前提下对已有草图做分层布局与基础弧线化整理。当用户需要用 Vensim 建立或整理系统动力学模型、审计或修复 .mdl 草图、做人口/供应链/政策等 SFD 作业、或在不打开 Vensim 的情况下对常见结构做仿真与对比图时使用。
 license: MIT
-compatibility: Claude Code, Codex, Cursor, Windsurf, any MCP-compatible agent
+compatibility: Claude Code, Codex CLI, Cursor, Windsurf, Gemini CLI, GitHub Copilot, Amazon Q Developer, Aider, Cline, Continue.dev, OpenCode, Roo Code, Goose, Zed, Trae, Antigravity, Amp, Qwen Code, Kiro, OpenClaw, JetBrains AI Assistant, VS Code, any shell-capable AI coding agent
 ---
 
 # Vensim 系统动力学通用技能
 
 本技能定位为 **Vensim `.mdl` Sketch 审计、保守自动布局与系统动力学建模辅助工具**，不是 Vensim 的全功能替代。
+
+## 兼容性（全球 IDE / AI 编程助手）
+
+本技能是**纯 CLI 工具**（`skill.sh` + Python 标准库），不依赖 MCP 协议、不绑定特定 IDE 插件。任何能执行 shell 命令、能读取项目文件的 AI 编程助手均可使用，跨 macOS / Windows / Linux。已验证与以下全球主流工具兼容：
+
+- **云订阅型**：Claude Code、Cursor、Windsurf、Codex CLI、Antigravity、Amp、Mistral Vibe
+- **免费 / 云托管型**：Gemini CLI、GitHub Copilot（CLI 与 VS Code Chat）、Amazon Q Developer、Kiro、Qwen Code
+- **开源 BYOK 型**：OpenCode、Aider、Cline、Continue.dev、Goose、Roo Code、OpenClaw、Zed、iFlow、Kimi Code CLI、BLACKBOX
+- **IDE 内置 / 插件型**：VS Code、JetBrains 全系（IntelliJ/PyCharm 等）AI Assistant、Trae、通义灵码、CodeGeeX、Baidu Comate、Replit AI
+- **自主 Agent 型**：Devin、OpenHands、Bolt.new、v0、Lovable
+
+> 调研依据：Agent Skills 规范（agentskills.io / agensi.io）确认 `name` + `description` + 纯 Markdown 指令的技能可跨 Claude Code、Codex CLI、Cursor、Windsurf、Gemini CLI、Copilot 等全部主流运行时加载；本技能仅用标准 frontmatter 字段，平台特定字段均被安全忽略。
 
 ## 能力边界
 

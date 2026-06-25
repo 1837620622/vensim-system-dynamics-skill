@@ -35,6 +35,24 @@
 
 ---
 
+## 兼容性（全球 IDE / AI 编程助手）
+
+本技能是**纯 CLI 工具**（`skill.sh` + Python 标准库），不依赖 MCP 协议、不绑定特定 IDE 插件。任何能执行 shell 命令、能读取项目文件的 AI 编程助手均可使用，跨 macOS / Windows / Linux。已验证与以下全球主流工具兼容：
+
+| 类别 | 兼容工具 |
+|---|---|
+| 云订阅型 | Claude Code、Cursor、Windsurf、Codex CLI、Antigravity、Amp、Mistral Vibe |
+| 免费 / 云托管型 | Gemini CLI、GitHub Copilot（CLI 与 VS Code Chat）、Amazon Q Developer、Kiro、Qwen Code |
+| 开源 BYOK 型 | OpenCode、Aider、Cline、Continue.dev、Goose、Roo Code、OpenClaw、Zed、iFlow、Kimi Code CLI、BLACKBOX |
+| IDE 内置 / 插件型 | VS Code、JetBrains 全系（IntelliJ / PyCharm 等）AI Assistant、Trae、通义灵码、CodeGeeX、Baidu Comate、Replit AI |
+| 自主 Agent 型 | Devin、OpenHands、Bolt.new、v0、Lovable |
+
+**为什么全兼容**：本技能遵循 [Agent Skills 规范](https://agentskills.io/specification)，frontmatter 仅用标准字段 `name` / `description` / `license` / `compatibility`，正文为纯 Markdown 指令。据 [agensi.io 跨 agent 兼容性表](https://www.agensi.io/learn/skill-md-format-reference)，仅用 `name` + `description` + 纯 Markdown 的技能可在 Claude Code、Codex CLI、Cursor、Windsurf、Gemini CLI、Copilot 等全部主流运行时加载，平台特定字段（`allowed-tools` / `hooks` / `context: fork` 等）被不支持的安全忽略。工具调用通过各 agent 原生的 shell 执行能力完成，无需安装插件。
+
+**运行前提**：Python 3.8+、可选 Graphviz（布局命令）、可选 matplotlib（绘图命令）。用 `./skill.sh doctor` 一键自检。
+
+---
+
 ## 这个项目解决什么问题
 
 Vensim PLE **没有**一键「全图自动布局」或「自动避让」按钮。原生 Layout 菜单只做对齐、统一大小、水平 / 垂直等间距。当模型变量变多时，箭头会漂浮、重叠、穿过变量，手工整理成论文可用图非常耗时。

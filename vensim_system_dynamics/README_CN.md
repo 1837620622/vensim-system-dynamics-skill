@@ -117,3 +117,31 @@ python tools/vensim_autolayout.py audit /path/to/your_model_autolayout.mdl
 - 希望一个按钮自动设计理论机制或自动给参数；
 - 多个库存—流率骨架已乱接、阀门与标签脱离；
 - 不愿在 Vensim 中打开验证。
+
+## 作者
+
+**传康kk**（chuankangkk）
+
+- 微信：`1837620622`
+- GitHub：[@1837620622](https://github.com/1837620622)
+
+## 商务合作 / 问题反馈
+
+欢迎通过以下方式联系我，合作方向包括但不限于：
+
+- **商务合作**：系统动力学建模咨询、Vensim 模型搭建与排版、政策仿真与情景分析、论文图表与交付物定制、企业内训与课程开发、工具二次开发与私有部署。
+- **问题反馈**：使用中遇到 bug、解析错误、布局异常、仿真 nodata 等，请附 `.mdl` 文件与复现命令，便于定位。
+- **功能建议**：希望支持的新函数、新结构、新输出格式或工作流改进。
+- **学术合作**：研究项目中的模型构建、仿真验证、论文图表协作。
+- **其他合作**：技术交流、开源贡献、社区共建。
+
+**联系方式**：
+
+| 用途 | 渠道 |
+|---|---|
+| 商务合作 / 项目委托 | 微信 `1837620622`（备注「Vensim 技能合作」） |
+| 问题反馈 / Bug 报告 | GitHub [Issues](https://github.com/1837620622/vensim-system-dynamics-skill/issues) |
+| 功能建议 / 技术交流 | 微信 `1837620622` 或 GitHub Issues |
+| 开源贡献 | GitHub [Pull Requests](https://github.com/1837620622/vensim-system-dynamics-skill/pulls) |
+
+> 提交 Issue 或 PR 时请说明：使用场景、操作系统、Python 版本、复现命令、`.mdl` 文件（可脱敏）。商务合作请直接加微信，备注来意以便快速响应。

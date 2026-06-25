@@ -1,0 +1,90 @@
+{UTF-8}
+Susceptible = INTEG ( - Infection Rate, 990 )
+	~ Person
+	~ SIR 传染病模型：易感-感染-康复三库存。流行病/谣言扩散/创新采纳通用结构。
+	|
+
+Infected = INTEG ( Infection Rate - Recovery Rate, 10 )
+	~ Person
+	~	|
+
+Recovered = INTEG ( Recovery Rate, 0 )
+	~ Person
+	~	|
+
+Infection Rate = Susceptible * Infected * Infection Probability / Total Population
+	~ Person/Day
+	~ 接触传染率，正反馈驱动疫情爆发
+	|
+
+Recovery Rate = Infected / Illness Duration
+	~ Person/Day
+	~ 康复率，负反馈使疫情消退
+	|
+
+Total Population = 1000
+	~ Person
+	~	|
+
+Infection Probability = 0.3
+	~ 1/Day
+	~ 每次接触传染概率
+	|
+
+Illness Duration = 14
+	~ Day
+	~ 病程
+	|
+
+Recovered Fraction = Recovered / Total Population
+	~ Dmnl
+	~ 康复比例（疫情结束时趋近1）
+	|
+
+INITIAL TIME = 0
+	~ Day
+	~	|
+
+FINAL TIME = 100
+	~ Day
+	~	|
+
+TIME STEP = 0.25
+	~ Day
+	~	|
+
+SAVEPER = TIME STEP
+	~ Day
+	~	|
+
+\\\---/// Sketch information - do not modify anything except names
+V300  Do not put anything below this section - it will be ignored
+*SIR Epidemic
+$192-192-192,0,Arial|12||0-0-0|0-0-0|0-0-255|-1--1--1|-1--1--1|96,96,5,0
+10,1,Susceptible,200,180,48,20,3,3,0,0,0,0,0,0,0,0,0,0,0,0
+11,2,0,400,180,6,8,34,3,0,0,1,0,0,0,0,0,0,0,0,0
+10,3,Infection Rate,400,205,48,11,40,3,0,0,-1,0,0,0,0,0,0,0,0,0
+11,4,0,560,180,6,8,34,3,0,0,1,0,0,0,0,0,0,0,0,0
+10,5,Infected,560,180,30,20,3,3,0,0,0,0,0,0,0,0,0,0,0,0
+11,6,0,720,180,6,8,34,3,0,0,1,0,0,0,0,0,0,0,0,0
+10,7,Recovery Rate,720,205,48,11,40,3,0,0,-1,0,0,0,0,0,0,0,0,0
+11,8,0,880,180,6,8,34,3,0,0,1,0,0,0,0,0,0,0,0,0
+10,9,Recovered,880,180,42,20,3,3,0,0,0,0,0,0,0,0,0,0,0,0
+10,10,Total Population,400,330,54,11,0,3,0,0,0,0,0,0,0,0,0,0,0,0
+10,11,Infection Probability,560,330,72,11,0,3,0,0,0,0,0,0,0,0,0,0,0,0
+10,12,Illness Duration,720,330,48,11,0,3,0,0,0,0,0,0,0,0,0,0,0,0
+1,13,1,2,4,0,0,22,0,0,0,-1--1--1,,1|(300,180)|
+1,14,2,4,4,0,0,22,0,0,0,-1--1--1,,1|(480,180)|
+1,15,4,6,4,0,0,22,0,0,0,-1--1--1,,1|(640,180)|
+1,16,6,8,4,0,0,22,0,0,0,-1--1--1,,1|(800,180)|
+1,17,10,3,0,0,0,0,0,64,0,-1--1--1,,1|(460,265)|
+1,18,11,3,0,0,0,0,0,64,0,-1--1--1,,1|(560,265)|
+1,19,5,3,0,0,0,0,0,64,0,-1--1--1,,1|(480,205)|
+1,20,1,3,0,0,0,0,0,64,0,-1--1--1,,1|(300,250)|
+1,21,12,7,0,0,0,0,0,64,0,-1--1--1,,1|(720,265)|
+1,22,5,7,0,0,0,0,0,64,0,-1--1--1,,1|(640,205)|
+\\\---/// Sketch information - do not modify anything except names
+V300  Do not put anything below this section - it will be ignored
+*View 2
+$-1--1--1,0,|12||-1--1--1|-1--1--1|-1--1--1|-1--1--1|-1--1--1|96,96,100,0
+///---\\\

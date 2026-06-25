@@ -1,0 +1,66 @@
+{UTF-8}
+Stock Level = INTEG ( Adjustment Rate, 50 )
+	~ Unit
+	~ 一阶负反馈：库存向目标追赶。最基础的调节回路，恒温器/库存补货/目标追赶通用结构。
+	|
+
+Target Stock = 100
+	~ Unit
+	~ 目标值（可改为外生政策变量）
+	|
+
+Discrepancy = Target Stock - Stock Level
+	~ Unit
+	~ 目标与现状的差距
+	|
+
+Adjustment Time = 5
+	~ Month
+	~ 调整时间常数：越大响应越慢
+	|
+
+Adjustment Rate = Discrepancy / Adjustment Time
+	~ Unit/Month
+	~ 每期调整量，驱动库存趋近目标
+	|
+
+INITIAL TIME = 0
+	~ Month
+	~	|
+
+FINAL TIME = 60
+	~ Month
+	~	|
+
+TIME STEP = 0.25
+	~ Month
+	~	|
+
+SAVEPER = TIME STEP
+	~ Month
+	~	|
+
+\\\---/// Sketch information - do not modify anything except names
+V300  Do not put anything below this section - it will be ignored
+*First Order Negative Feedback
+$192-192-192,0,Arial|12||0-0-0|0-0-0|0-0-255|-1--1--1|-1--1--1|96,96,5,0
+12,1,48,61,110,10,8,0,3,0,0,-1,0,0,0,0,0,0,0,0,0
+11,2,0,181,110,6,8,34,3,0,0,1,0,0,0,0,0,0,0,0,0
+10,3,Adjustment Rate,181,135,42,11,40,3,0,0,-1,0,0,0,0,0,0,0,0,0
+10,4,Stock Level,341,110,42,20,3,3,0,0,0,0,0,0,0,0,0,0,0,0
+12,5,48,501,110,10,8,0,3,0,0,-1,0,0,0,0,0,0,0,0,0
+10,6,Target Stock,181,260,42,11,0,3,0,0,0,0,0,0,0,0,0,0,0,0
+10,7,Discrepancy,341,260,42,11,0,3,0,0,0,0,0,0,0,0,0,0,0,0
+10,8,Adjustment Time,501,260,52,11,0,3,0,0,0,0,0,0,0,0,0,0,0,0
+1,9,1,2,4,0,0,22,0,0,0,-1--1--1,,1|(120,110)|
+1,10,2,4,4,0,0,22,0,0,0,-1--1--1,,1|(260,110)|
+1,11,4,5,4,0,0,22,0,0,0,-1--1--1,,1|(420,110)|
+1,12,6,7,0,0,0,0,0,64,0,-1--1--1,,1|(260,260)|
+1,13,4,7,0,0,0,0,0,64,0,-1--1--1,,1|(341,185)|
+1,14,7,2,0,0,0,0,0,64,0,-1--1--1,,1|(260,185)|
+1,15,8,2,0,0,0,0,0,64,0,-1--1--1,,1|(340,135)|
+\\\---/// Sketch information - do not modify anything except names
+V300  Do not put anything below this section - it will be ignored
+*View 2
+$-1--1--1,0,|12||-1--1--1|-1--1--1|-1--1--1|-1--1--1|-1--1--1|96,96,100,0
+///---\\\

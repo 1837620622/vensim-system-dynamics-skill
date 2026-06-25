@@ -48,6 +48,7 @@ class Equation:
     is_lookup: bool = False
     lookup_pairs: List[Tuple[float, float]] = dataclasses.field(default_factory=list)
     line_index: int = 0
+    smooth_init_ref: Optional[str] = None  # SMOOTH 隐式库存初值引用的输入变量名
 
 
 def parse_equations(mdl_text: str) -> "OrderedDict[str, Equation]":
@@ -118,7 +119,84 @@ def parse_equations(mdl_text: str) -> "OrderedDict[str, Equation]":
 
         equations[name] = eq
         i = k + 1
+
+    # 展开 SMOOTH / DELAY 为隐式库存方程
+    _expand_smooth_delay(equations)
     return equations
+
+
+def _expand_smooth_delay(equations: "OrderedDict[str, Equation]") -> None:
+    """把 SMOOTH / DELAY1 / DELAY3 / SMOOTH3 展开为等价隐式库存方程。
+
+    SMOOTH(x, d)    = 一阶指数平滑 = INTEG((x - s)/d, x)
+    SMOOTH3(x, d)   = 三阶，每级 d/3
+    DELAY1(x, d)    = INTEG(x - out, 0)，out = stock/d
+    DELAY3(x, d)    = 三阶管道，每级 d/3
+    DELAY FIXED 不在此处理（需离散事件）。
+    """
+    to_add: List[Tuple[str, Equation]] = []
+    names = set(equations.keys())
+
+    for name, eq in list(equations.items()):
+        rhs = eq.rhs
+        # SMOOTH(x, d)
+        m = re.match(r"^\s*SMOOTH3?\s*\(([^,]+),\s*([^)]+)\)\s*$", rhs, re.I)
+        if m:
+            x, d = m.group(1).strip(), m.group(2).strip()
+            order = 3 if rhs.upper().startswith("SMOOTH3") else 1
+            _expand_smooth_chain(name, x, d, order, eq, equations, to_add, smooth=True)
+            continue
+        # DELAY1 / DELAY3(x, d)
+        m = re.match(r"^\s*DELAY3?\s*\(([^,]+),\s*([^)]+)\)\s*$", rhs, re.I)
+        if m:
+            x, d = m.group(1).strip(), m.group(2).strip()
+            order = 3 if rhs.upper().startswith("DELAY3") else 1
+            _expand_smooth_chain(name, x, d, order, eq, equations, to_add, smooth=False)
+
+    for nm, eqn in to_add:
+        equations[nm] = eqn
+
+
+def _expand_smooth_chain(name, x, d, order, eq, equations, to_add, smooth):
+    """展开 SMOOTH/DELAY 链为 order 级隐式库存。
+
+    smooth=True: SMOOTH，每级 INTEG((in - out)/(d/order), in)
+    smooth=False: DELAY，每级 INTEG(in - out, 0)，out = stock/(d/order)
+    最终变量名 = name，指向最后一级的 out（辅助变量）。
+    """
+    stage_d = f"({d})/{order}"
+    prev_input = x
+    init = x if smooth else "0"
+    for k in range(order):
+        stock_name = f"{name}__stage{k+1}"
+        flow = f"({prev_input} - {stock_name}) / {stage_d}" if smooth else f"{prev_input} - {stock_name}/{stage_d}"
+        stock_eq = Equation(
+            name=stock_name,
+            rhs=f"INTEG ( {flow}, {init} )",
+            unit=eq.unit,
+            comment=f"SMOOTH/DELAY 隐式第{k+1}级",
+            line_index=eq.line_index,
+        )
+        stock_eq.integ_flow = flow
+        # SMOOTH 首级初值 = 输入变量初值；后续级初值 = 上一级初值（链式）
+        if smooth:
+            stock_eq.smooth_init_ref = prev_input
+        try:
+            stock_eq.integ_init = float(init)
+        except ValueError:
+            stock_eq.integ_init = 0.0
+        to_add.append((stock_name, stock_eq))
+        prev_input = stock_name
+    # 把原变量改为辅助变量，等于最后一级库存（SMOOTH）或其流出（DELAY）
+    if smooth:
+        eq.rhs = prev_input
+        eq.integ_flow = None
+        eq.integ_init = None
+    else:
+        # DELAY: out = 最后一级 stock / stage_d
+        eq.rhs = f"{prev_input} / {stage_d}"
+        eq.integ_flow = None
+        eq.integ_init = None
 
 
 def _parse_lookup_pairs(text: str) -> List[Tuple[float, float]]:
@@ -274,13 +352,22 @@ def _to_python_expr(rhs: str, name_map: Dict[str, str]) -> str:
                r"(\2 if (\1) else \3)", s, flags=re.I)
     # MODULO(a,b)
     s = re.sub(r"MODULO\s*\(([^,]+),([^)]+)\)", r"(\1 % \2)", s, flags=re.I)
-    # 数学函数
-    s = re.sub(r"\bABS\(", "abs(", s, flags=re.I)
-    s = re.sub(r"\bSQRT\(", "math.sqrt(", s, flags=re.I)
-    s = re.sub(r"\bEXP\(", "math.exp(", s, flags=re.I)
-    s = re.sub(r"\bLN\(", "math.log(", s, flags=re.I)
-    s = re.sub(r"\bMIN\(", "min(", s, flags=re.I)
-    s = re.sub(r"\bMAX\(", "max(", s, flags=re.I)
+    # 数学函数（Vensim 函数名与左括号之间允许空白，如 MAX ( 0, ... )）
+    s = re.sub(r"\bABS\s*\(", "abs(", s, flags=re.I)
+    s = re.sub(r"\bSQRT\s*\(", "math.sqrt(", s, flags=re.I)
+    s = re.sub(r"\bEXP\s*\(", "math.exp(", s, flags=re.I)
+    s = re.sub(r"\bLN\s*\(", "math.log(", s, flags=re.I)
+    s = re.sub(r"\bMIN\s*\(", "min(", s, flags=re.I)
+    s = re.sub(r"\bMAX\s*\(", "max(", s, flags=re.I)
+    s = re.sub(r"\bSIN\s*\(", "math.sin(", s, flags=re.I)
+    s = re.sub(r"\bCOS\s*\(", "math.cos(", s, flags=re.I)
+    s = re.sub(r"\bTAN\s*\(", "math.tan(", s, flags=re.I)
+    s = re.sub(r"\bINTEGER\s*\(", "int(", s, flags=re.I)
+    s = re.sub(r"\bXIDZ\s*\(([^,]+),([^,]+),([^)]+)\)", r"((\1)/(\2) if float(\2)!=0 else (\3))", s, flags=re.I)
+    s = re.sub(r"\bZIDZ\s*\(([^,]+),([^,]+),([^)]+)\)", r"((\1)/(\2) if float(\2)!=0 else (\3))", s, flags=re.I)
+    s = re.sub(r"\bPULSE\s*\(([^,]+),([^)]+)\)", r"_pulse(\1,\2)", s, flags=re.I)
+    s = re.sub(r"\bRAMP\s*\(([^,]+),([^)]+)\)", r"_ramp(\1,\2)", s, flags=re.I)
+    s = re.sub(r"\bSTEP\s*\(([^,]+),([^)]+)\)", r"_step(\1,\2)", s, flags=re.I)
     # 幂运算 ^ -> **
     s = s.replace("^", "**")
     # 变量名替换：按长度降序，带空格的名替换为 _vN
@@ -304,7 +391,22 @@ def evaluate(rhs: str, ctx: Dict, lookups: Dict, name_map: Dict[str, str]) -> fl
     def _wl(x, table):
         return LookupTable(table)(x)
 
-    namespace = {"math": math, "_wl": _wl, "abs": abs, "min": min, "max": max}
+    def _pulse(start, duration):
+        t = ctx.get("Time", 0.0)
+        return 1.0 if start <= t < start + duration else 0.0
+
+    def _ramp(start, slope):
+        t = ctx.get("Time", 0.0)
+        return 0.0 if t < start else slope * (t - start)
+
+    def _step(value, time):
+        t = ctx.get("Time", 0.0)
+        return 0.0 if t < time else value
+
+    namespace = {
+        "math": math, "_wl": _wl, "abs": abs, "min": min, "max": max,
+        "_pulse": _pulse, "_ramp": _ramp, "_step": _step,
+    }
     # 注入 lookup 变量为可调用对象
     for k, v in lookups.items():
         namespace[name_map.get(k, k)] = v
@@ -325,6 +427,7 @@ def evaluate(rhs: str, ctx: Dict, lookups: Dict, name_map: Dict[str, str]) -> fl
 class SimResult:
     times: List[float]
     series: Dict[str, List[float]]
+    eval_warnings: List[str] = dataclasses.field(default_factory=list)
 
 
 def simulate(equations: "OrderedDict[str, Equation]", t0: float, tf: float, dt: float,
@@ -343,13 +446,13 @@ def simulate(equations: "OrderedDict[str, Equation]", t0: float, tf: float, dt: 
             name_map[name] = f"_v{i}"
 
     # 初始化
-    ctx: Dict[str, float] = {}
+    ctx: Dict[str, float] = {"Time": t0}
     lookups: Dict[str, LookupTable] = {}
     for name, eq in equations.items():
         if eq.is_lookup:
             lookups[name] = LookupTable(eq.lookup_pairs)
             ctx[name] = 0.0
-        elif eq.integ_init is not None:
+        elif eq.integ_init is not None and eq.smooth_init_ref is None:
             ctx[name] = eq.integ_init
         else:
             # 常量先求值
@@ -358,12 +461,28 @@ def simulate(equations: "OrderedDict[str, Equation]", t0: float, tf: float, dt: 
             except ValueError:
                 ctx[name] = 0.0
 
+    # SMOOTH 隐式库存初值 = 其引用输入在 t0 的值（链式：后级取前级初值）
+    ctx["Time"] = t0
+    for name, eq in equations.items():
+        if eq.smooth_init_ref is not None:
+            ref = eq.smooth_init_ref
+            if ref in ctx:
+                ctx[name] = ctx[ref]
+            else:
+                try:
+                    ctx[name] = evaluate(ref, ctx, lookups, name_map)
+                except (ValueError, TypeError):
+                    ctx[name] = 0.0
+
     times: List[float] = []
     series: Dict[str, List[float]] = {n: [] for n in equations}
     t = t0
     next_save = t0
+    eval_warnings: List[str] = []
 
     while t <= tf + 1e-9:
+        # 注入当前时间，供 STEP / PULSE / RAMP 等时间函数使用
+        ctx["Time"] = t
         # 计算所有辅助变量（当前时间步）
         for name in order:
             eq = equations[name]
@@ -371,16 +490,19 @@ def simulate(equations: "OrderedDict[str, Equation]", t0: float, tf: float, dt: 
                 continue
             try:
                 ctx[name] = evaluate(eq.rhs, ctx, lookups, name_map)
-            except ValueError:
-                pass
+            except ValueError as exc:
+                if not eval_warnings:
+                    eval_warnings.append(f"{name} @t={t:.2f}: {exc}")
         # 计算库存的流率（用当前辅助值）
         flows: Dict[str, float] = {}
         for name, eq in equations.items():
             if eq.integ_flow is not None:
                 try:
                     flows[name] = evaluate(eq.integ_flow, ctx, lookups, name_map)
-                except ValueError:
+                except ValueError as exc:
                     flows[name] = 0.0
+                    if not eval_warnings:
+                        eval_warnings.append(f"flow {name} @t={t:.2f}: {exc}")
 
         # 记录
         if t >= next_save - 1e-9:
@@ -395,7 +517,11 @@ def simulate(equations: "OrderedDict[str, Equation]", t0: float, tf: float, dt: 
                 ctx[name] = ctx.get(name, 0.0) + flows[name] * dt
         t += dt
 
-    return SimResult(times=times, series=series)
+    if eval_warnings:
+        sys.stderr.write("警告: 部分变量求值失败（已置零），首条: " + eval_warnings[0] + "\n")
+        sys.stderr.write(f"      共 {len(eval_warnings)} 类求值失败，可能导致 nodata 或曲线为 0。\n")
+
+    return SimResult(times=times, series=series, eval_warnings=eval_warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +557,7 @@ def get_time_bounds(equations: "OrderedDict[str, Equation]"):
     return t0v, tfv, dtv, spv
 
 
-def command_simulate(path: Path, output: Path, variables: List[str]) -> int:
+def command_simulate(path: Path, output: Path, variables: List[str], plot: Optional[Path] = None) -> int:
     text = load_mdl_text(path)
     equations = parse_equations(text)
     t0, tf, dt, sp = get_time_bounds(equations)
@@ -449,14 +575,47 @@ def command_simulate(path: Path, output: Path, variables: List[str]) -> int:
             w.writerow([t] + [result.series[v][i] for v in variables])
     print(f"仿真完成: {len(result.times)} 个时间点 -> {output}")
     print(f"变量: {', '.join(variables)}")
+
+    # nodata 检测：仅在有求值失败时才报全程为 0 的变量（避免均衡变量的误报）
+    if result.eval_warnings:
+        nodata = [v for v in variables if result.series.get(v) and all(x == 0.0 for x in result.series[v])]
+        if nodata:
+            print(f"警告: 以下变量全程为 0（可能 nodata）: {', '.join(nodata)}", file=sys.stderr)
+            print("      请检查方程是否含未支持的函数或求值失败警告。", file=sys.stderr)
+
+    if plot is not None:
+        _render_plot(result, variables, plot, title=f"{path.stem} Simulation")
+        print(f"折线图已导出: {plot}")
     return 0
+
+
+def _render_plot(result, variables: List[str], output: Path, title: str = "") -> None:
+    """Vensim 风格折线图：白底、细网格、左下图例、Time 轴标签。"""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(10, 6), dpi=120)
+    colors = ["#1f77b4", "#d62728", "#2ca02c", "#ff7f0e", "#9467bd",
+              "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+    for i, v in enumerate(variables):
+        if v in result.series and result.series[v]:
+            ax.plot(result.times, result.series[v],
+                    linewidth=1.8, label=v, color=colors[i % len(colors)])
+    ax.set_xlabel("Time", fontsize=11)
+    ax.set_ylabel("Value", fontsize=11)
+    ax.set_title(title or "Simulation Result", fontsize=13)
+    ax.legend(loc="upper left", framealpha=0.9, fontsize=10)
+    ax.grid(True, alpha=0.25, linestyle="--")
+    ax.axhline(0, color="black", linewidth=0.5)
+    fig.tight_layout()
+    fig.savefig(output, bbox_inches="tight")
+    plt.close(fig)
 
 
 def command_graph(path: Path, variables: List[str], output: Path, title: str) -> int:
     try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+        import matplotlib  # noqa: F401
     except ImportError:
         print("ERROR: 需要 matplotlib，请 pip install matplotlib", file=sys.stderr)
         return 2
@@ -467,21 +626,20 @@ def command_graph(path: Path, variables: List[str], output: Path, title: str) ->
     result = simulate(equations, t0, tf, dt, sp)
 
     if not variables:
-        print("ERROR: 至少指定一个变量 --var", file=sys.stderr)
+        variables = [v for v in equations if v not in ("INITIAL TIME", "FINAL TIME", "TIME STEP", "SAVEPER")]
+    if not variables:
+        print("ERROR: 模型无可绘变量", file=sys.stderr)
         return 2
 
-    fig, ax = plt.subplots(figsize=(10, 6), dpi=120)
-    for v in variables:
-        if v in result.series:
-            ax.plot(result.times, result.series[v], linewidth=2, label=v)
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Value")
-    ax.set_title(title or "Simulation Result")
-    ax.legend(loc="best")
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
-    fig.savefig(output, bbox_inches="tight")
+    # nodata 检测：仅在有求值失败时才报
+    if result.eval_warnings:
+        nodata = [v for v in variables if result.series.get(v) and all(x == 0.0 for x in result.series[v])]
+        if nodata:
+            print(f"警告: 以下变量全程为 0（可能 nodata）: {', '.join(nodata)}", file=sys.stderr)
+
+    _render_plot(result, variables, output, title=title or f"{path.stem} Simulation")
     print(f"折线图已导出: {output}")
+    print(f"变量: {', '.join(variables)}")
     return 0
 
 
@@ -710,10 +868,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_sim.add_argument("model", type=Path)
     p_sim.add_argument("--output", required=True, type=Path)
     p_sim.add_argument("--var", action="append", default=[], help="要导出的变量(可多次)")
+    p_sim.add_argument("--plot", type=Path, default=None, help="同时导出折线图 PNG")
 
     p_graph = sub.add_parser("graph", help="仿真并导出折线图 PNG")
     p_graph.add_argument("model", type=Path)
-    p_graph.add_argument("--var", action="append", required=True, help="绘图变量(可多次)")
+    p_graph.add_argument("--var", action="append", default=[], help="绘图变量(可多次，缺省全部)")
     p_graph.add_argument("--output", required=True, type=Path)
     p_graph.add_argument("--title", default="")
 
@@ -741,7 +900,7 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     if args.command == "simulate":
-        return command_simulate(args.model, args.output, args.var)
+        return command_simulate(args.model, args.output, args.var, getattr(args, "plot", None))
     if args.command == "graph":
         return command_graph(args.model, args.var, args.output, args.title)
     if args.command == "compare":

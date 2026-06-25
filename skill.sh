@@ -75,20 +75,25 @@ case "$cmd" in
     done
     ;;
   simulate)
-    [ $# -ge 1 ] || die "用法: $0 simulate <model.mdl> [--output out.csv] [--var V1 --var V2 ...]"
+    [ $# -ge 1 ] || die "用法: $0 simulate <model.mdl> [--output out.csv] [--var V1 --var V2 ...] [--plot out.png]"
     need_py
     model="$1"; shift
     out=""
     # 检查是否已带 --output，未带则自动补默认输出路径
     has_out=0
     for a in "$@"; do [ "$a" = "--output" ] && has_out=1; done
-    if [ "$has_out" -eq 0 ]; then out="--output"; out="${out} ${model%.mdl}_sim.csv"; fi
+    if [ "$has_out" -eq 0 ]; then out="--output ${model%.mdl}_sim.csv"; fi
     python3 "$ENGINE" simulate "$model" $out "$@"
     ;;
   graph)
-    [ $# -ge 1 ] || die "用法: $0 graph <model.mdl> --var V1 [--var V2] --output out.png [--title T]"
+    [ $# -ge 1 ] || die "用法: $0 graph <model.mdl> [--var V1 --var V2] --output out.png [--title T]  (缺省 --var 画全部变量)"
     need_py
-    python3 "$ENGINE" graph "$@"
+    model="$1"; shift
+    out=""
+    has_out=0
+    for a in "$@"; do [ "$a" = "--output" ] && has_out=1; done
+    if [ "$has_out" -eq 0 ]; then out="--output ${model%.mdl}_graph.png"; fi
+    python3 "$ENGINE" graph "$model" $out "$@"
     ;;
   compare)
     [ $# -ge 1 ] || die "用法: $0 compare <base.mdl> --scenario s1.mdl --var V --output out.png"

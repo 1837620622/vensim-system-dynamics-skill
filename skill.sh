@@ -11,6 +11,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOL="$SCRIPT_DIR/vensim_system_dynamics/tools/vensim_autolayout.py"
+ENGINE="$SCRIPT_DIR/vensim_system_dynamics/tools/vensim_engine.py"
 EXAMPLES_DIR="$SCRIPT_DIR/vensim_system_dynamics/examples"
 TEMPLATES_DIR="$SCRIPT_DIR/vensim_system_dynamics/templates"
 
@@ -73,17 +74,63 @@ case "$cmd" in
       python3 "$TOOL" audit "$f" | tail -3
     done
     ;;
+  simulate)
+    [ $# -ge 1 ] || die "用法: $0 simulate <model.mdl> [--output out.csv] [--var V1 --var V2 ...]"
+    need_py
+    model="$1"; shift
+    out=""; vars=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --output) out="$2"; shift 2;;
+        --var) vars="$vars --var $2"; shift 2;;
+        *) die "未知参数: $1";;
+      esac
+    done
+    [ -n "$out" ] || out="${model%.mdl}_sim.csv"
+    python3 "$ENGINE" simulate "$model" --output "$out" $vars
+    ;;
+  graph)
+    [ $# -ge 1 ] || die "用法: $0 graph <model.mdl> --var V1 [--var V2] --output out.png [--title T]"
+    need_py
+    python3 "$ENGINE" graph "$@"
+    ;;
+  compare)
+    [ $# -ge 1 ] || die "用法: $0 compare <base.mdl> --scenario s1.mdl --var V --output out.png"
+    need_py
+    python3 "$ENGINE" compare "$@"
+    ;;
+  units)
+    [ $# -ge 1 ] || die "用法: $0 units <model.mdl>"
+    need_py; python3 "$ENGINE" units "$1"
+    ;;
+  check)
+    [ $# -ge 1 ] || die "用法: $0 check <model.mdl>"
+    need_py; python3 "$ENGINE" check "$1"
+    ;;
+  fix)
+    [ $# -ge 1 ] || die "用法: $0 fix <model.mdl> --output fixed.mdl"
+    need_py; python3 "$ENGINE" fix "$@"
+    ;;
   help|-h|--help|*)
     cat <<EOF
 Vensim System Dynamics Skill
 用法:
-  $0 inspect  <model.mdl>                 列出草图对象与箭头
-  $0 audit    <model.mdl>                 审计箭头对象引用
-  $0 layout   <model.mdl> [选项]          保守自动排版
-      选项: --output out.mdl --config cfg.json --engine dot|neato|fdp|sfdp --route
-  $0 quick    <model.mdl> [--engine dot]  一键 inspect+audit+layout
-  $0 examples                               审计全部示例
-  $0 doctor                                 检查环境
+  草图与布局:
+    $0 inspect  <model.mdl>                 列出草图对象与箭头
+    $0 audit    <model.mdl>                 审计箭头对象引用
+    $0 layout   <model.mdl> [选项]          保守自动排版
+        选项: --output out.mdl --config cfg.json --engine dot|neato|fdp|sfdp --route
+    $0 quick    <model.mdl> [--engine dot]  一键 inspect+audit+layout
+    $0 examples                               审计全部示例
+  仿真与分析 (不依赖 Vensim):
+    $0 simulate <model.mdl> [--output out.csv] [--var V]   纯 Python 仿真导出 CSV
+    $0 graph    <model.mdl> --var V [--var V2] --output out.png [--title T]  折线图
+    $0 compare  <base.mdl> --scenario s.mdl --var V --output out.png         多场景对比图
+    $0 units    <model.mdl>                 单位量纲校验
+    $0 check    <model.mdl>                 全面检查(未定义/缺单位/循环/断裂引用)
+    $0 fix      <model.mdl> --output f.mdl  自动修复缺失单位与断裂引用
+  环境:
+    $0 doctor                                 检查 python3 与 graphviz
 EOF
     ;;
 esac

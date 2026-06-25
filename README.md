@@ -38,7 +38,8 @@ Vensim 先建立正确模型结构（库存 / 流率 / 阀门 / 云 / 方程）
 - **平滑弧线**：为信息箭头生成单个中间控制点，使普通 Arrow 显示为圆弧；平行边自动分配对称曲率避免重叠；远距离边增大弧度，近距离边小弧度。
 - **安全回写**：自动生成 `*_backup.mdl` 与 `*.layout_report.json`；不改方程区，不新建 / 删除对象，不改箭头 `from/to`。
 - **审计与检查**：`inspect` 列出全部对象与箭头属性；`audit` 检测断裂的箭头对象引用。
-- **纯标准库**：Python 脚本只用标准库，无需 `pip install`；唯一外部依赖是 Graphviz。
+- **纯 Python 仿真引擎**（`vensim_engine.py`，不依赖 Vensim）：解析方程区（INTEG / LOOKUP / WITH LOOKUP / IF THEN ELSE / SMOOTH / DELAY），Euler 积分仿真，导出 CSV；matplotlib 折线图与多场景对比图；单位量纲校验；未定义变量 / 缺失单位 / 循环依赖 / 断裂引用检查与自动修复。
+- **纯标准库**：布局脚本只用标准库，无需 `pip install`；唯一外部依赖是 Graphviz。仿真与绘图需 matplotlib（绘图可选，仿真与校验无需）。
 
 ---
 
@@ -49,13 +50,14 @@ vensim-skill/
 ├── README.md                         # 本文件（英文）
 ├── README_CN.md                      # 中文说明
 ├── LICENSE                           # MIT
-├── skill.sh                          # 便捷 CLI 封装（inspect/audit/layout/quick/examples/doctor）
+├── skill.sh                          # 便捷 CLI 封装（布局/仿真/绘图/校验/修复）
 ├── .gitignore
 ├── vensim_system_dynamics/           # Skill 本体
 │   ├── SKILL.md                      # AI 代理指令：建模原则、工作流、草图格式、安全边界
-│   ├── requirements.txt              # 无 Python 包依赖；仅需 Graphviz
+│   ├── requirements.txt              # 无 Python 包依赖；绘图需 matplotlib（可选）
 │   ├── tools/
-│   │   └── vensim_autolayout.py      # 检查 / 审计 / 自动排版脚本
+│   │   ├── vensim_autolayout.py      # 草图检查 / 审计 / 保守自动排版脚本
+│   │   └── vensim_engine.py          # 纯 Python 仿真引擎（仿真/绘图/单位校验/检查修复）
 │   ├── templates/
 │   │   ├── model_spec_template.json  # 建模前语义规范模板
 │   │   ├── layout_config_sfd.json    # SFD 自动排版配置样例
@@ -116,6 +118,31 @@ chmod +x skill.sh
 ./skill.sh examples                                 # 审计全部示例
 ./skill.sh quick examples/population_demo.mdl       # 一键 inspect + audit + layout
 ./skill.sh layout your_model.mdl --route            # 单步自动排版（默认 SFD 配置）
+```
+
+### 方式一·续：仿真 / 绘图 / 校验 / 修复（不依赖 Vensim）
+
+```bash
+# 纯 Python 仿真，导出 CSV
+./skill.sh simulate examples/population_demo.mdl --var Population --var Births --var Deaths
+
+# 仿真并导出折线图 PNG（需 matplotlib）
+./skill.sh graph examples/population_demo.mdl --var Population --var Deaths \
+       --output pop.png --title "Population Dynamics"
+
+# 多场景对比图（修改 Carrying Capacity 等参数后对比）
+./skill.sh compare examples/population_demo.mdl \
+       --scenario scenario_low.mdl --scenario scenario_high.mdl \
+       --var Population --var "Crowding Effect" --output compare.png
+
+# 单位量纲校验
+./skill.sh units examples/population_demo.mdl
+
+# 全面检查：未定义变量 / 缺失单位 / 循环依赖 / 断裂草图引用
+./skill.sh check examples/population_demo.mdl
+
+# 自动修复缺失单位、断裂草图箭头
+./skill.sh fix broken_model.mdl --output fixed_model.mdl
 ```
 
 ### 方式二：直接调用 Python 脚本

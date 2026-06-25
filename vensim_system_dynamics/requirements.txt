@@ -1,4 +1,7 @@
-# 无需 pip 安装 Python 包。
+# 无需 pip 安装 Python 包（布局/仿真/校验均用标准库）。
 # 可选外部可执行文件：Graphviz（dot / neato / fdp / sfdp）
 # macOS: brew install graphviz
 # Windows: 安装 Graphviz 后把 dot 所在目录加入 PATH
+#
+# 可选 Python 包（仅 graph/compare 绘图命令需要）：
+#   matplotlib  ->  pip install matplotlib

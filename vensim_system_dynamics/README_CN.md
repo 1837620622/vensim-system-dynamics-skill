@@ -6,6 +6,7 @@
 
 - `SKILL.md`：通用建模指令、质量标准、交付工作流、草图格式说明；
 - `tools/vensim_autolayout.py`：读取 `.mdl` 草图，列出对象、审计引用、对普通辅助变量做 Graphviz 布局、为信息箭头生成单控制点圆弧；
+- `tools/vensim_engine.py`：纯 Python 仿真引擎（不依赖 Vensim），支持方程解析、Euler 积分仿真、CSV 导出、matplotlib 折线图与多场景对比图、单位量纲校验、模型检查与自动修复；
 - `templates/model_spec_template.json`：建模前语义规范模板；
 - `templates/layout_config_sfd.json`、`layout_config_cld.json`：自动排版配置样例；
 - `examples/population_demo.mdl`：最小示例模型；
@@ -53,6 +54,35 @@ python tools/vensim_autolayout.py audit /path/to/your_model_autolayout.mdl
 ```
 
 在 Vensim 中打开 `your_model_autolayout.mdl`：先看图，再 `Model > Check Model`，再 `Model > Units Check`，手工微调少数交叉关系后保存为最终版本。
+
+## 仿真 / 绘图 / 校验 / 修复（不依赖 Vensim）
+
+`vensim_engine.py` 提供纯 Python 仿真引擎，无需打开 Vensim 即可完成仿真、导出对比图、单位校验与模型检查修复：
+
+```bash
+# 仿真导出 CSV
+./skill.sh simulate examples/population_demo.mdl --var Population --var Births --var Deaths
+
+# 折线图 PNG（需 matplotlib）
+./skill.sh graph examples/population_demo.mdl --var Population --var Deaths \
+       --output pop.png --title "种群动态"
+
+# 多场景对比图（净利润、植被盖度、耦合度等任意变量）
+./skill.sh compare examples/population_demo.mdl \
+       --scenario scenario_low.mdl --scenario scenario_high.mdl \
+       --var Population --var "Crowding Effect" --output compare.png
+
+# 单位量纲校验
+./skill.sh units examples/population_demo.mdl
+
+# 全面检查：未定义变量 / 缺失单位 / 循环依赖 / 断裂草图引用
+./skill.sh check examples/population_demo.mdl
+
+# 自动修复缺失单位、断裂草图箭头
+./skill.sh fix broken_model.mdl --output fixed_model.mdl
+```
+
+支持函数：`INTEG`、`SMOOTH`、`SMOOTH3`、`DELAY1`、`DELAY3`、`DELAY FIXED`、`IF THEN ELSE`、`WITH LOOKUP`、`LOOKUP`、`ABS`、`SQRT`、`EXP`、`LN`、`MIN`、`MAX`、`MODULO`。
 
 ## 必须先在 Vensim 中做好的部分
 

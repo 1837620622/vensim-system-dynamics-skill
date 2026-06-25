@@ -4,7 +4,7 @@
 
 ## 包含内容
 
-- `SKILL.md`：通用建模指令、质量标准、交付工作流、草图格式说明；
+- `OPERATIONS_GUIDE.md`：通用建模指令、质量标准、交付工作流、草图格式说明；
 - `tools/vensim_autolayout.py`：读取 `.mdl` 草图，列出对象、审计引用、对普通辅助变量做 Graphviz 布局、为信息箭头生成单控制点圆弧；
 - `tools/vensim_engine.py`：纯 Python 仿真引擎（不依赖 Vensim），支持方程解析、Euler 积分仿真、CSV 导出、matplotlib 折线图与多场景对比图、单位量纲校验、模型检查与自动修复；
 - `templates/model_spec_template.json`：建模前语义规范模板；

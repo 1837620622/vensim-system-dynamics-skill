@@ -1,8 +1,11 @@
 ---
-name: vensim-system-dynamics
+name: vensim-skill
 description: Vensim 系统动力学建模与 .mdl 草图审计、保守自动布局与仿真辅助技能。用于课程作业、政策分析与管理研究的因果回路图(CLD)、存量流量图(SFD)、方程、单位校验、仿真、情景对比、论文图表，以及在保留方程与对象 ID 的前提下对已有草图做分层布局与基础弧线化整理。当用户需要用 Vensim 建立或整理系统动力学模型、审计或修复 .mdl 草图、做人口/供应链/政策等 SFD 作业、或在不打开 Vensim 的情况下对常见结构做仿真与对比图时使用。
 license: MIT
 compatibility: Claude Code, Codex CLI, Cursor, Windsurf, Gemini CLI, GitHub Copilot, Amazon Q Developer, Aider, Cline, Continue.dev, OpenCode, Roo Code, Goose, Zed, Trae, Antigravity, Amp, Qwen Code, Kiro, OpenClaw, JetBrains AI Assistant, VS Code, any shell-capable AI coding agent
+metadata:
+  author: 传康kk
+  version: "1.0"
 ---
 
 # Vensim 系统动力学通用技能
@@ -48,7 +51,7 @@ compatibility: Claude Code, Codex CLI, Cursor, Windsurf, Gemini CLI, GitHub Copi
 - 布局与审计：`vensim_system_dynamics/tools/vensim_autolayout.py`（`inspect` / `audit` / `layout`）
 - 仿真与绘图：`vensim_system_dynamics/tools/vensim_engine.py`（`simulate` / `graph` / `compare` / `units` / `check` / `fix`）
 - 便捷封装：`skill.sh`（根目录）
-- 建模规范与流程：`vensim_system_dynamics/SKILL.md`
+- 建模规范与流程：`vensim_system_dynamics/OPERATIONS_GUIDE.md`
 - 示例模型：`vensim_system_dynamics/examples/`
 
 ## 快速使用
@@ -63,4 +66,4 @@ compatibility: Claude Code, Codex CLI, Cursor, Windsurf, Gemini CLI, GitHub Copi
 ./skill.sh fix broken.mdl --output fixed.mdl      # 自动修复
 ```
 
-详细说明见 `README.md` 与 `vensim_system_dynamics/SKILL.md`。
+详细说明见 `README.md` 与 `vensim_system_dynamics/OPERATIONS_GUIDE.md`。

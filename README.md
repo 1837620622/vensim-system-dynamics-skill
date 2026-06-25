@@ -109,7 +109,7 @@ vensim-skill/
 ├── skill.sh                          # 便捷 CLI 封装（布局/仿真/绘图/校验/修复）
 ├── .gitignore
 ├── vensim_system_dynamics/           # Skill 本体
-│   ├── SKILL.md                      # AI 代理指令：建模原则、工作流、草图格式、安全边界
+│   ├── OPERATIONS_GUIDE.md           # 详细操作手册：建模原则、工作流、草图格式、安全边界
 │   ├── requirements.txt              # 无 Python 包依赖；绘图需 matplotlib（可选）
 │   ├── tools/
 │   │   ├── vensim_autolayout.py      # 草图检查 / 审计 / 保守自动排版脚本

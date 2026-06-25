@@ -1,11 +1,6 @@
----
-name: vensim-system-dynamics
-description: Vensim 系统动力学建模与 .mdl 草图自动排版技能。用于课程作业、政策分析与管理研究的因果回路图(CLD)、存量流量图(SFD)、方程、单位校验、仿真、情景/敏感性分析、控制面板、论文图表，以及在保留方程与对象 ID 的前提下对已有草图做"半固定 + Graphviz 自动布局 + 信息箭头平滑弧线"整理。当用户需要用 Vensim 建立或整理系统动力学模型、生成或修复 .mdl 草图、把乱箭头/重叠变量自动排版成论文级 SFD/CLD、做汽车销售/人口/供应链/政策等 SFD 作业时使用。
-license: MIT
-compatibility: Claude Code, Codex CLI, Cursor, Windsurf, Gemini CLI, GitHub Copilot, Amazon Q Developer, Aider, Cline, Continue.dev, OpenCode, Roo Code, Goose, Zed, Trae, Antigravity, Amp, Qwen Code, Kiro, OpenClaw, JetBrains AI Assistant, VS Code, any shell-capable AI coding agent
----
+# Vensim 系统动力学操作手册
 
-# Vensim 系统动力学通用技能
+> 本文件是 `vensim-skill` 技能的详细操作参考文档，配合根目录 `SKILL.md` 使用。技能元数据（name/description/license/compatibility）以根目录 `SKILL.md` 为准。
 
 ## 0. 兼容性（全球 IDE / AI 编程助手）
 

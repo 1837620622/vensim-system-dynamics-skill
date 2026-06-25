@@ -19,6 +19,8 @@ compatibility: Claude Code, Codex CLI, Cursor, Windsurf, Gemini CLI, GitHub Copi
 
 > 调研依据：Agent Skills 规范（agentskills.io / agensi.io）确认 `name` + `description` + 纯 Markdown 指令的技能可跨 Claude Code、Codex CLI、Cursor、Windsurf、Gemini CLI、Copilot 等全部主流运行时加载；本技能仅用标准 frontmatter 字段，平台特定字段均被安全忽略。
 
+**跨平台入口**：macOS/Linux 用 `./skill.sh`，Windows 用 `skill.cmd`（cmd/PowerShell）或 Git Bash/WSL 下的 `./skill.sh`；两入口命令一致，自动检测 `python3`/`python`/`py`。Python 脚本用 `pathlib`+`shutil.which`+`subprocess`（不依赖 shell），读文件兼容 UTF-8 BOM 与 GB 编码，CSV 用 `newline=""` 避免 Windows 双换行。
+
 ## 1. 核心结论（必须先理解）
 
 Vensim PLE **没有**一键全图自动布局或自动避让按钮。原生 Layout 菜单只做对齐、统一大小、等间距。但 Vensim 的普通 Arrow 在存在**一个中间控制点**时会形成平滑圆弧；按住 `Command/Ctrl` 绘制的是 Spline Arrow。因此"AI 自动排版 + 连线自动变平滑曲线"是可行的，但实现路径是：

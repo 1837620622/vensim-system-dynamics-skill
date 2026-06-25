@@ -17,24 +17,30 @@ TEMPLATES_DIR="$SCRIPT_DIR/vensim_system_dynamics/templates"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-need_py() { command -v python3 >/dev/null 2>&1 || die "未找到 python3"; }
-need_dot() { command -v dot >/dev/null 2>&1 || die "未找到 graphviz dot，请 brew install graphviz 或加入 PATH"; }
+# 跨平台 Python 检测：macOS/Linux 通常为 python3，Windows 常为 python
+PY=""
+for c in python3 python py; do
+  if command -v "$c" >/dev/null 2>&1; then PY="$c"; break; fi
+done
+need_py() { [ -n "$PY" ] || die "未找到 python3/python，请安装 Python 3.8+ 并加入 PATH"; }
+need_dot() { command -v dot >/dev/null 2>&1 || die "未找到 graphviz dot，请安装 Graphviz 并加入 PATH（macOS: brew install graphviz；Windows: 官网安装后加 bin 到 PATH）"; }
 
 cmd="${1:-help}"; shift || true
 
 case "$cmd" in
   doctor)
     need_py
-    echo "python3: $(python3 --version)"
+    echo "python: $($PY --version)"
     if command -v dot >/dev/null 2>&1; then echo "graphviz: $(dot -V 2>&1)"; else echo "graphviz: 未安装"; fi
+    if $PY -c "import matplotlib" 2>/dev/null; then echo "matplotlib: 可用"; else echo "matplotlib: 未安装（绘图命令需要）"; fi
     ;;
   inspect)
     [ $# -ge 1 ] || die "用法: $0 inspect <model.mdl>"
-    need_py; python3 "$TOOL" inspect "$1"
+    need_py; "$PY" "$TOOL" inspect "$1"
     ;;
   audit)
     [ $# -ge 1 ] || die "用法: $0 audit <model.mdl>"
-    need_py; python3 "$TOOL" audit "$1"
+    need_py; "$PY" "$TOOL" audit "$1"
     ;;
   layout)
     [ $# -ge 1 ] || die "用法: $0 layout <model.mdl> [--output out.mdl] [--config cfg.json] [--engine dot] [--route]"
@@ -52,7 +58,7 @@ case "$cmd" in
     done
     [ -n "$out" ] || out="${model%.mdl}_autolayout.mdl"
     [ -n "$cfg" ] || cfg="$TEMPLATES_DIR/layout_config_sfd.json"
-    python3 "$TOOL" layout "$model" --output "$out" --config "$cfg" --engine "$engine" $route
+    "$PY" "$TOOL" layout "$model" --output "$out" --config "$cfg" --engine "$engine" $route
     echo "完成: $out"
     ;;
   quick)
@@ -61,17 +67,17 @@ case "$cmd" in
     model="$1"; shift
     engine="dot"
     [ "${1:-}" = "--engine" ] && engine="$2"
-    echo "=== inspect ==="; python3 "$TOOL" inspect "$model"
-    echo "=== audit ==="; python3 "$TOOL" audit "$model"
+    echo "=== inspect ==="; "$PY" "$TOOL" inspect "$model"
+    echo "=== audit ==="; "$PY" "$TOOL" audit "$model"
     out="${model%.mdl}_autolayout.mdl"
-    echo "=== layout ==="; python3 "$TOOL" layout "$model" --output "$out" --config "$TEMPLATES_DIR/layout_config_sfd.json" --engine "$engine" --route-information-arrows
+    echo "=== layout ==="; "$PY" "$TOOL" layout "$model" --output "$out" --config "$TEMPLATES_DIR/layout_config_sfd.json" --engine "$engine" --route-information-arrows
     echo "完成: $out  (请在 Vensim 打开并运行 Check Model 与 Units Check)"
     ;;
   examples)
     need_py
     for f in "$EXAMPLES_DIR"/*.mdl; do
       echo "========== $(basename "$f") =========="
-      python3 "$TOOL" audit "$f" | tail -3
+      "$PY" "$TOOL" audit "$f" | tail -3
     done
     ;;
   simulate)
@@ -83,7 +89,7 @@ case "$cmd" in
     has_out=0
     for a in "$@"; do [ "$a" = "--output" ] && has_out=1; done
     if [ "$has_out" -eq 0 ]; then out="--output ${model%.mdl}_sim.csv"; fi
-    python3 "$ENGINE" simulate "$model" $out "$@"
+    "$PY" "$ENGINE" simulate "$model" $out "$@"
     ;;
   graph)
     [ $# -ge 1 ] || die "用法: $0 graph <model.mdl> [--var V1 --var V2] --output out.png [--title T]  (缺省 --var 画全部变量)"
@@ -93,24 +99,24 @@ case "$cmd" in
     has_out=0
     for a in "$@"; do [ "$a" = "--output" ] && has_out=1; done
     if [ "$has_out" -eq 0 ]; then out="--output ${model%.mdl}_graph.png"; fi
-    python3 "$ENGINE" graph "$model" $out "$@"
+    "$PY" "$ENGINE" graph "$model" $out "$@"
     ;;
   compare)
     [ $# -ge 1 ] || die "用法: $0 compare <base.mdl> --scenario s1.mdl --var V --output out.png"
     need_py
-    python3 "$ENGINE" compare "$@"
+    "$PY" "$ENGINE" compare "$@"
     ;;
   units)
     [ $# -ge 1 ] || die "用法: $0 units <model.mdl>"
-    need_py; python3 "$ENGINE" units "$1"
+    need_py; "$PY" "$ENGINE" units "$1"
     ;;
   check)
     [ $# -ge 1 ] || die "用法: $0 check <model.mdl>"
-    need_py; python3 "$ENGINE" check "$1"
+    need_py; "$PY" "$ENGINE" check "$1"
     ;;
   fix)
     [ $# -ge 1 ] || die "用法: $0 fix <model.mdl> --output fixed.mdl"
-    need_py; python3 "$ENGINE" fix "$@"
+    need_py; "$PY" "$ENGINE" fix "$@"
     ;;
   help|-h|--help|*)
     cat <<EOF

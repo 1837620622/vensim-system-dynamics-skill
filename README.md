@@ -51,6 +51,12 @@
 
 **运行前提**：Python 3.8+、可选 Graphviz（布局命令）、可选 matplotlib（绘图命令）。用 `./skill.sh doctor` 一键自检。
 
+**跨平台入口**：
+- macOS / Linux：`./skill.sh <命令>`（bash）
+- Windows：`skill.cmd <命令>`（cmd / PowerShell），或在 Git Bash / WSL 下用 `./skill.sh`
+- 两个入口命令与参数完全一致，均自动检测 `python3` / `python` / `py`，无需手动配置
+- Python 脚本用 `pathlib` + `shutil.which` + `subprocess`（不依赖 shell），读文件兼容 UTF-8 BOM 与 GB 编码，写 CSV 用 `newline=""` 避免 Windows 双换行
+
 ---
 
 ## 这个项目解决什么问题

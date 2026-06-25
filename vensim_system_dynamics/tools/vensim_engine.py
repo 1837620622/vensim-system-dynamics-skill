@@ -529,7 +529,13 @@ def simulate(equations: "OrderedDict[str, Equation]", t0: float, tf: float, dt: 
 # ---------------------------------------------------------------------------
 
 def load_mdl_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    # 兼容 Windows UTF-8 BOM 与中文 GB 编码遗留文件
+    for encoding in ("utf-8-sig", "utf-8", "gb18030", "latin-1"):
+        try:
+            return path.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    raise RuntimeError(f"Cannot decode file: {path}")
 
 
 def _resolve_number(rhs: str, equations: "OrderedDict[str, Equation]") -> float:

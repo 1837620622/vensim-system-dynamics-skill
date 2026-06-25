@@ -21,6 +21,8 @@ compatibility: Claude Code, Codex CLI, Cursor, Windsurf, Gemini CLI, GitHub Copi
 
 > 调研依据：Agent Skills 规范（agentskills.io / agensi.io）确认 `name` + `description` + 纯 Markdown 指令的技能可跨 Claude Code、Codex CLI、Cursor、Windsurf、Gemini CLI、Copilot 等全部主流运行时加载；本技能仅用标准 frontmatter 字段，平台特定字段均被安全忽略。
 
+**跨平台入口**：macOS/Linux 用 `./skill.sh`，Windows 用 `skill.cmd`（cmd/PowerShell）或 Git Bash/WSL 下的 `./skill.sh`；两入口命令一致，自动检测 `python3`/`python`/`py`。Python 脚本用 `pathlib`+`shutil.which`+`subprocess`（不依赖 shell），读文件兼容 UTF-8 BOM 与 GB 编码，CSV 用 `newline=""` 避免 Windows 双换行。
+
 ## 能力边界
 
 **已支持：**

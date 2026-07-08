@@ -1,6 +1,6 @@
 # 实现依据与限制
 
-本技能依据以下官方/原始文档设计与实现。访问日期：2026-06-25。
+本技能依据以下官方/原始文档设计与实现。
 
 ## 1. Vensim 官方文档
 
@@ -16,6 +16,7 @@ https://www.vensim.com/documentation/ref_sketch_format.html
 - `shape` 低 5 位为形状；bit6(32)=附着到阀门；bit7=形状由类型决定。
 - `bits`(官方称 arrows_in_allowed)：bit1(1)=允许入箭头，bit2(2)=允许出箭头，bit3(4)=有注释续行，bit4(8)=IO 对象，bit7(128)=因果不穿透，bit8(256)=用户设定尺寸；**偶数 = shadow variable**。
 - 箭头字段顺序：`1,id,from,to,shape,hid,pol,thick,hasf,dtype,res,color,font,np|plist`；`from,to` 为对象 ID；`thick` 为线宽(物理流=22，信息箭头=0)；`np` 为控制点个数；`|(x,y)|` 为控制点列表。
+- 中文变量名可正常出现在方程区和 Sketch 对象名中；解析工具不能假设变量名只由英文字母开头。
 
 ### Sketch Object Detail
 https://www.vensim.com/documentation/24305.html
@@ -57,6 +58,7 @@ https://pysd.readthedocs.io/en/master/structure/vensim_translation.html
 https://www.vensim.com/documentation/22890.html
 - Defined 变量：本视图定义，有入箭头(显示全部 causes)；Shadow 变量：别处定义，无入箭头，显示为 `<Name>`，默认灰色。
 - 一个变量在一个视图只能 Defined 一次，可多次 Shadow；Shadow 不可接入箭头，只可发出箭头。
+- Defined 变量下方出现灰色 `<变量名>` 时，通常表示当前 View 未展开该变量方程中的原因变量，不等于方程错误。论文图应通过拆 View、补充必要流率/辅助变量、使用 Shadow 做长距离来源引用或参数表来处理。
 
 ## 4. 重要限制
 

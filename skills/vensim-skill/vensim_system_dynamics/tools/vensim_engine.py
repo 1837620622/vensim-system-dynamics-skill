@@ -64,8 +64,9 @@ HELPER_TOKENS = {
     "_delay_fixed": "@15@",
 }
 
-# 方程块以 "变量名 = ..." 开头，后续 ~ 单位 ~ 注释 | 结束
-_EQ_START = re.compile(r"^\s*([A-Za-z_][\w\$\s]*?)\s*=\s*(.+)$")
+# 方程块以 "变量名 = ..." 开头，后续 ~ 单位 ~ 注释 | 结束。
+# 变量名不能只按英文标识符识别；课程和论文模型常用中文变量名。
+_EQ_START = re.compile(r"^\s*([^=~|\\\\][^=]*?)\s*=\s*(.+)$")
 _LOOKUP_DEF = re.compile(r"\[(.*?)\]\s*$")
 
 
@@ -367,7 +368,6 @@ def _parse_lookup_pairs(text: str) -> List[Tuple[float, float]]:
 # 依赖分析
 # ---------------------------------------------------------------------------
 
-_VAR_TOKEN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_$ ]*?)\b")
 # 排除函数名与关键字
 _KEYWORDS = {
     "INTEG", "SMOOTH", "SMOOTH3", "DELAY1", "DELAY3", "DELAY", "DELAY FIXED",
@@ -375,6 +375,16 @@ _KEYWORDS = {
     "MIN", "MAX", "MODULO", "PULSE", "RAMP", "STEP", "TIME", "TRUE", "FALSE",
     "INITIAL", "FINAL", "STEP", "SAVEPER",
 }
+
+
+def _name_pattern(name: str) -> str:
+    """返回变量名匹配模式，兼容中文、空格和美元符号变量名。
+
+    Python 的 ``\b`` 对中文和带空格变量名不稳定，因此使用显式的
+    “变量字符”负向边界，避免短变量名误匹配到长变量名内部。
+    """
+    boundary_chars = r"A-Za-z0-9_\$\u4e00-\u9fff"
+    return rf"(?<![{boundary_chars}]){re.escape(name)}(?![{boundary_chars}])"
 
 
 def extract_deps(rhs: str, known_names: set) -> List[str]:
@@ -393,11 +403,10 @@ def extract_deps(rhs: str, known_names: set) -> List[str]:
     for name in sorted_names:
         if name.upper() in _KEYWORDS:
             continue
-        # 转义变量名中的空格与特殊字符
-        pattern = re.escape(name)
-        if re.search(rf"\b{pattern}\b", remaining):
+        pattern = _name_pattern(name)
+        if re.search(pattern, remaining):
             deps.append(name)
-            remaining = re.sub(rf"\b{pattern}\b", " ", remaining)
+            remaining = re.sub(pattern, " ", remaining)
     return deps
 
 
@@ -648,9 +657,9 @@ def _to_python_expr(rhs: str, name_map: Dict[str, str]) -> str:
     s = re.sub(r"\bINTEGER\s*\(", f"{_helper('_sd_int')}(", s, flags=re.I)
     # 幂运算 ^ -> **
     s = s.replace("^", "**")
-    # 变量名替换：按长度降序，带空格的名替换为 _vN
+    # 变量名替换：按长度降序，中文/带空格变量名映射为合法 Python 标识符。
     for orig, alias in sorted(name_map.items(), key=lambda x: -len(x[0])):
-        s = re.sub(rf"\b{re.escape(orig)}\b", alias, s)
+        s = re.sub(_name_pattern(orig), alias, s)
     for helper_name, token in HELPER_TOKENS.items():
         s = s.replace(token, helper_name)
     return s
@@ -1119,11 +1128,34 @@ def command_simulate(
     return 0
 
 
+def _legend_strategy(series_count: int) -> Tuple[str, dict, list]:
+    """根据曲线数量选择图例位置，避免遮挡和过多留白。"""
+    if series_count <= 2:
+        return "inside", {"loc": "best", "framealpha": 0.88, "fontsize": 10}, [0, 0, 1, 1]
+    if series_count <= 6:
+        return (
+            "right",
+            {"loc": "upper left", "bbox_to_anchor": (1.02, 1.0), "borderaxespad": 0, "framealpha": 0.9, "fontsize": 10},
+            [0, 0, 0.80, 1],
+        )
+    return (
+        "bottom",
+        {"loc": "upper center", "bbox_to_anchor": (0.5, -0.16), "ncol": min(4, series_count), "framealpha": 0.9, "fontsize": 9},
+        [0, 0.14, 1, 1],
+    )
+
+
 def _render_plot(result, variables: List[str], output: Path, title: str = "") -> None:
-    """Vensim 风格折线图：白底、细网格、左下图例、Time 轴标签。"""
+    """Vensim 风格折线图：白底、细网格、动态图例、Time 轴标签。"""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib import font_manager
+
+    candidates = ["PingFang SC", "Heiti SC", "Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Arial Unicode MS"]
+    available = {font.name for font in font_manager.fontManager.ttflist}
+    selected = next((font for font in candidates if font in available), "DejaVu Sans")
+    plt.rcParams.update({"font.family": [selected, "sans-serif"], "axes.unicode_minus": False})
 
     fig, ax = plt.subplots(figsize=(10, 6), dpi=120)
     colors = ["#1f77b4", "#d62728", "#2ca02c", "#ff7f0e", "#9467bd",
@@ -1135,10 +1167,11 @@ def _render_plot(result, variables: List[str], output: Path, title: str = "") ->
     ax.set_xlabel("Time", fontsize=11)
     ax.set_ylabel("Value", fontsize=11)
     ax.set_title(title or "Simulation Result", fontsize=13)
-    ax.legend(loc="upper left", framealpha=0.9, fontsize=10)
+    _legend_mode, legend_kwargs, layout_rect = _legend_strategy(len(variables))
+    ax.legend(**legend_kwargs)
     ax.grid(True, alpha=0.25, linestyle="--")
     ax.axhline(0, color="black", linewidth=0.5)
-    fig.tight_layout()
+    fig.tight_layout(rect=layout_rect)
     fig.savefig(output, bbox_inches="tight")
     plt.close(fig)
 
@@ -1184,9 +1217,15 @@ def command_compare(base: Path, scenarios: List[Path], variables: List[str],
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        from matplotlib import font_manager
     except ImportError:
         print("ERROR: 需要 matplotlib", file=sys.stderr)
         return 2
+
+    candidates = ["PingFang SC", "Heiti SC", "Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Arial Unicode MS"]
+    available = {font.name for font in font_manager.fontManager.ttflist}
+    selected = next((font for font in candidates if font in available), "DejaVu Sans")
+    plt.rcParams.update({"font.family": [selected, "sans-serif"], "axes.unicode_minus": False})
 
     if not variables:
         print("ERROR: 至少指定一个变量 --var", file=sys.stderr)
@@ -1195,6 +1234,7 @@ def command_compare(base: Path, scenarios: List[Path], variables: List[str],
     fig, axes = plt.subplots(len(variables), 1, figsize=(10, 4 * len(variables)), dpi=120, squeeze=False)
     all_models = [base] + scenarios
     labels = ["base"] + [p.stem for p in scenarios]
+    _, legend_kwargs, layout_rect = _legend_strategy(len(labels))
 
     for ax, v in zip(axes[:, 0], variables):
         for model, label in zip(all_models, labels):
@@ -1209,10 +1249,10 @@ def command_compare(base: Path, scenarios: List[Path], variables: List[str],
         ax.set_title(v)
         ax.set_xlabel("Time")
         ax.set_ylabel(v)
-        ax.legend(loc="best")
+        ax.legend(**legend_kwargs)
         ax.grid(True, alpha=0.3)
     fig.suptitle(title or "Scenario Comparison", fontsize=14)
-    fig.tight_layout()
+    fig.tight_layout(rect=layout_rect)
     fig.savefig(output, bbox_inches="tight")
     print(f"对比图已导出: {output}")
     return 0

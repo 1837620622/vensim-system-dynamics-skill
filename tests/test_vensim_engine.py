@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "skills" / "vensim-skill" / "vensim_system_dynamics" / "tools"
 sys.path.insert(0, str(TOOLS))
 
-from vensim_engine import get_time_bounds, parse_equations, simulate  # noqa: E402
+from vensim_engine import _legend_strategy, get_time_bounds, parse_equations, simulate  # noqa: E402
 
 
 def run_model(text: str):
@@ -253,3 +253,34 @@ X = ACTIVE INITIAL( 2 * Time, 10 )
         assert "ACTIVE INITIAL" in str(exc)
     else:
         raise AssertionError("unsupported function should fail in strict mode")
+
+
+def test_chinese_variable_names_are_parsed_and_simulated():
+    text = """
+库存量 = INTEG( 入库量 - 出库量, 初始库存 )
+    ~ 件
+    |
+初始库存 = 10
+    ~ 件
+    |
+入库量 = 3
+    ~ 件/Month
+    |
+出库量 = 库存量 * 出库率
+    ~ 件/Month
+    |
+出库率 = 0.1
+    ~ 1/Month
+    |
+""" + control_block(final_time=2)
+
+    equations, result = run_model(text)
+
+    assert "库存量" in equations
+    assert result.series["库存量"] == [10.0, 12.0, 13.8]
+
+
+def test_legend_strategy_avoids_one_size_fits_all_layout():
+    assert _legend_strategy(2)[0] == "inside"
+    assert _legend_strategy(4)[0] == "right"
+    assert _legend_strategy(8)[0] == "bottom"

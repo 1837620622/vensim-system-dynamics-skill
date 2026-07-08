@@ -30,8 +30,10 @@ from typing import Dict, Iterable, List, Optional, Tuple
 # 草图起始标记（.mdl 中写作 \\\---///）
 SKETCH_MARKER = r"\\\---///"
 
-# 方程区 INTEG 正则：匹配 "变量名 = INTEG ( ..., 初值 )"
-_INTEG_EQ = re.compile(r"^\s*([A-Za-z_][\w\$\s]*?)\s*=\s*INTEG\s*\(", re.I)
+# 方程区 INTEG 正则：匹配 "变量名 = INTEG ( ..., 初值 )"。
+# 变量名支持中文、空格、美元符号等 Vensim 常见写法。
+_INTEG_EQ = re.compile(r"^\s*([^=~|\\\\][^=]*?)\s*=\s*INTEG\s*\(", re.I)
+_EQ_START = re.compile(r"^\s*([^=~|\\\\][^=]*?)\s*=\s*(.+)$")
 
 
 def parse_stock_names(mdl_text: str) -> set:
@@ -67,6 +69,10 @@ MAX_GRAPHVIZ_EDGES = 5_000
 MAX_DOT_LABEL_CHARS = 256
 GRAPHVIZ_TIMEOUT_SECONDS = 20
 ALLOWED_RANKDIR = {"TB", "BT", "LR", "RL"}
+LONG_ARROW_DISTANCE = 520
+MAX_VISIBLE_DIRECT_ARROWS = 5
+MAX_VIEW_CROSSINGS = 3
+MAX_LABEL_CHARS = 12
 
 # shape 字段位标志：低 5 位为形状码；bit6(1<<5=32)=附着到阀门；bit7=形状由类型决定
 SHAPE_ATTACHED_TO_VALVE = 32
@@ -285,6 +291,38 @@ def parse_views(lines: List[str], stock_names: Optional[set] = None) -> List[Vie
                 )
         views.append(View(view_index, name, marker, end, objects, arrows))
     return views
+
+
+def _has_cjk(text: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff]", text))
+
+
+def _looks_like_business_variable(name: str) -> bool:
+    if name in {"INITIAL TIME", "FINAL TIME", "TIME STEP", "SAVEPER", "Time"}:
+        return False
+    return bool(name.strip())
+
+
+def _segments_intersect(a, b, c, d) -> bool:
+    """判断两条线段是否相交；共享端点的相邻箭头不计为交叉。"""
+    def orient(p, q, r):
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+
+    if a in (c, d) or b in (c, d):
+        return False
+    o1 = orient(a, b, c)
+    o2 = orient(a, b, d)
+    o3 = orient(c, d, a)
+    o4 = orient(c, d, b)
+    return o1 * o2 < 0 and o3 * o4 < 0
+
+
+def _arrow_polyline(view: View, arrow: Arrow) -> List[Tuple[float, float]]:
+    from_obj = view.objects.get(arrow.from_id)
+    to_obj = view.objects.get(arrow.to_id)
+    if not from_obj or not to_obj:
+        return []
+    return [(from_obj.x, from_obj.y), *arrow.points, (to_obj.x, to_obj.y)]
 
 
 def load_mdl(path: Path) -> Tuple[List[str], List[View]]:
@@ -654,7 +692,7 @@ def _equation_semantics_audit(path: Path) -> Tuple[int, int]:
     body = text[:sketch_pos] if sketch_pos >= 0 else text
     seen: Dict[str, int] = {}
     for line in body.splitlines():
-        m = re.match(r"^\s*([A-Za-z_][\w\$\s]*?)\s*=\s*(.+)$", line)
+        m = _EQ_START.match(line)
         if not m:
             continue
         name = m.group(1).strip()
@@ -714,6 +752,10 @@ def command_audit(path: Path) -> int:
     for view in views:
         print(f"\n[Sketch] VIEW: {view.name}")
         ids = set(view.objects)
+        variable_names = [obj.name for obj in view.objects.values() if obj.kind == T_VARIABLE]
+        cjk_model = any(_has_cjk(name) for name in variable_names)
+        degree: Dict[int, int] = defaultdict(int)
+        info_arrows = [arrow for arrow in view.arrows if not arrow.is_physical_flow]
         for arrow in view.arrows:
             if arrow.from_id not in ids or arrow.to_id not in ids:
                 errors += 1
@@ -724,18 +766,67 @@ def command_audit(path: Path) -> int:
             if not arrow.points:
                 warnings += 1
                 print(f"  WARNING arrow {arrow.obj_id}: 无中间控制点记录。")
+            if not arrow.is_physical_flow and arrow.from_id in view.objects and arrow.to_id in view.objects:
+                degree[arrow.from_id] += 1
+                degree[arrow.to_id] += 1
+                src = view.objects[arrow.from_id]
+                dst = view.objects[arrow.to_id]
+                dist = math.hypot(dst.x - src.x, dst.y - src.y)
+                if dist > LONG_ARROW_DISTANCE:
+                    warnings += 1
+                    print(
+                        f"  WARNING arrow {arrow.obj_id}: 信息箭头距离 {dist:.0f}px，"
+                        "建议拆 View 或用 Shadow Variable 做长距离来源引用。"
+                    )
         for obj in view.objects.values():
             if obj.kind == T_VARIABLE and not obj.name.strip():
                 warnings += 1
                 print(f"  WARNING object {obj.obj_id}: 变量名为空。")
+            if obj.kind == T_VARIABLE and _looks_like_business_variable(obj.name):
+                if cjk_model and not _has_cjk(obj.name):
+                    warnings += 1
+                    print(f"  WARNING object {obj.obj_id}: 中文模型中出现非中文业务变量 '{obj.name}'。")
+                if len(obj.name) > MAX_LABEL_CHARS:
+                    warnings += 1
+                    print(
+                        f"  WARNING object {obj.obj_id}: 变量名 '{obj.name}' 较长，"
+                        "图中建议用精炼中文名，完整解释放变量表。"
+                    )
+                if degree.get(obj.obj_id, 0) > MAX_VISIBLE_DIRECT_ARROWS:
+                    warnings += 1
+                    print(
+                        f"  WARNING object {obj.obj_id}: 可见直接箭头 {degree[obj.obj_id]} 条，"
+                        "建议拆子系统或减少参数可见箭头。"
+                    )
+
+        crossing_count = 0
+        polylines = [(arrow.obj_id, _arrow_polyline(view, arrow)) for arrow in info_arrows]
+        for i, (aid, pts) in enumerate(polylines):
+            for bid, other in polylines[i + 1:]:
+                if not pts or not other:
+                    continue
+                for a, b in zip(pts, pts[1:]):
+                    for c, d in zip(other, other[1:]):
+                        if _segments_intersect(a, b, c, d):
+                            crossing_count += 1
+                            break
+                    else:
+                        continue
+                    break
+        if crossing_count > MAX_VIEW_CROSSINGS:
+            warnings += 1
+            print(
+                f"  WARNING view '{view.name}': 信息箭头交叉约 {crossing_count} 处，"
+                "建议按子系统拆 View，主路径左到右，反馈从右下绕回左上。"
+            )
 
     if errors == 0:
         print("\nPASS: 未发现错误。")
     else:
         print(f"\nFAIL: 发现 {errors} 处错误。")
     print(f"Warnings: {warnings}")
-    print("\n注意：audit 仅检查 Sketch 对象 ID 断裂与方程区基础语义，")
-    print("不替代 Vensim Check Model 与 Units Check。")
+    print("\n注意：audit 是预检工具，覆盖 Sketch 引用、方程基础语义、")
+    print("中文业务变量和图面质量启发式提醒；不替代 Vensim Check Model 与 Units Check。")
     return 1 if errors else 0
 
 

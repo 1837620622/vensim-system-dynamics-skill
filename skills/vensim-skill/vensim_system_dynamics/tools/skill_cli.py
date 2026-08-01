@@ -18,6 +18,7 @@ if str(TOOLS_DIR) not in sys.path:
 
 import vensim_autolayout  # noqa: E402
 import vensim_engine  # noqa: E402
+import academic_gate  # noqa: E402
 
 
 def _default_output(model: str, suffix: str) -> str:
@@ -146,6 +147,8 @@ def _help() -> int:
     skill.cmd auto     <model.mdl> [--var V] [--keep-going]  一键 check+simulate+graph
     skill.cmd units    <model.mdl>                 单位缺失预检
     skill.cmd check    <model.mdl>                 全面检查
+    skill.cmd academic <model.mdl> [选项]          研究设计、历史内生性、耦合输出和文献门禁
+    skill.cmd visual   <model.mdl>                 弧线、影子、重叠和交叉预检＋原生 Vensim 复核提示
     skill.cmd fix      <model.mdl> --output f.mdl  自动修复
   环境:
     skill.cmd doctor                               检查 python 与 graphviz
@@ -192,6 +195,15 @@ def main(argv: List[str] | None = None) -> int:
         return _invoke_engine(forwarded)
     if cmd in {"compare", "units", "check", "fix"}:
         return _invoke_engine(args)
+    if cmd == "academic":
+        return _invoke(academic_gate.main, rest)
+    if cmd == "visual":
+        if not rest:
+            print("ERROR: 用法: skill.cmd visual <model.mdl>", file=sys.stderr)
+            return 2
+        rc = _invoke_layout(["audit", *rest[:1]])
+        print("\nNATIVE VISUAL GATE: 请在全新 Vensim 进程打开模型，确认无灰色 <…>、变量不重叠、深蓝弧形信息箭头与黑色存量—流率管道；随后运行 Check Model 与 Units Check。")
+        return rc
     if cmd == "auto":
         return _auto(rest)
     return _help()

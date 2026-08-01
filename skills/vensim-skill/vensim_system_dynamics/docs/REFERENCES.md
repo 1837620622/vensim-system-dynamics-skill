@@ -71,3 +71,23 @@ Vensim 官方明确指出 Sketch Information 并非面向用户直接修改。`v
 - 物理流率管道(thick≥20 或端点为阀门/云)保持原样。
 
 任何输出必须在目标 Vensim 版本中重新打开并运行 Check Model 与 Units Check 后方可使用。出现错位/浮动箭头/阀门脱离时立即恢复 `*_backup.mdl` 改用手动调整。
+
+## 5. 系统动力学研究与验证依据
+
+### Sterman：结构、边界和行为验证
+
+- John D. Sterman, *Business Dynamics*，模型开发与验证章节：<https://web.mit.edu/jsterman/www/BusDyn2.html>
+- Empirical validation 讨论：<https://web.mit.edu/jsterman/www/RO1.html>
+
+本技能据此把研究问题、边界、动态假设、结构/单位/极端条件/行为再现/敏感性检验放在图形美化之前。历史期比较应使用模型内生生成的行为与观测序列，而不是用观测值替换模型输出。
+
+### 形式验证与校准
+
+- Barlas Y. Formal aspects of model validity and validation in system dynamics. *System Dynamics Review*, 1996, 12(3): 183–210.
+- Oliva R. Model calibration as a testing strategy for system dynamics models. *European Journal of Operational Research*, 2003, 151(3): 552–568.
+
+校准只能在边界、结构和单位已明确后用于检验行为量级；不能把逐年历史路径回放当作历史验证。
+
+### 耦合协调与区域物流参考
+
+项目使用者应在本地 references 目录提供实际阅读过的领域文献。涉及区域物流/经济耦合时，应说明 U1、U2、C、T、D 的指标、权重、归一化和与系统动力学状态/输出之间的连接；不能只附一张历史耦合度表而不进入模型方程。

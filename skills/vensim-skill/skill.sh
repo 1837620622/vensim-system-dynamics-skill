@@ -12,6 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOL="$SCRIPT_DIR/vensim_system_dynamics/tools/vensim_autolayout.py"
 ENGINE="$SCRIPT_DIR/vensim_system_dynamics/tools/vensim_engine.py"
+ACADEMIC_GATE="$SCRIPT_DIR/vensim_system_dynamics/tools/academic_gate.py"
 EXAMPLES_DIR="$SCRIPT_DIR/vensim_system_dynamics/examples"
 TEMPLATES_DIR="$SCRIPT_DIR/vensim_system_dynamics/templates"
 
@@ -128,6 +129,16 @@ case "$cmd" in
     [ $# -ge 1 ] || die "用法: $0 check <model.mdl>"
     need_py; "$PY" "$ENGINE" check "$1"
     ;;
+  academic)
+    [ $# -ge 1 ] || die "用法: $0 academic <model.mdl> [--references dir] [--spec model_spec.json] [--require-coupling]"
+    need_py; "$PY" "$ACADEMIC_GATE" "$@"
+    ;;
+  visual)
+    [ $# -ge 1 ] || die "用法: $0 visual <model.mdl>"
+    need_py; "$PY" "$TOOL" audit "$1"
+    echo
+    echo "NATIVE VISUAL GATE: 请在全新 Vensim 进程打开模型，确认无灰色 <…>、变量不重叠、深蓝弧形信息箭头与黑色存量—流率管道；随后运行 Check Model 与 Units Check。"
+    ;;
   fix)
     [ $# -ge 1 ] || die "用法: $0 fix <model.mdl> --output fixed.mdl"
     need_py; "$PY" "$ENGINE" fix "$@"
@@ -150,6 +161,8 @@ Vensim System Dynamics Skill
     $0 auto     <model.mdl> [--var V] [--keep-going]  一键 check+simulate+graph
     $0 units    <model.mdl>                 单位缺失预检
     $0 check    <model.mdl>                 全面检查(未定义/缺单位/循环/断裂引用)
+    $0 academic <model.mdl> [选项]          研究设计、历史内生性、耦合输出和文献门禁
+    $0 visual   <model.mdl>                 弧线、影子、重叠和交叉预检＋原生 Vensim 复核提示
     $0 fix      <model.mdl> --output f.mdl  自动修复缺失单位与断裂引用
   环境:
     $0 doctor                                 检查 python3 与 graphviz

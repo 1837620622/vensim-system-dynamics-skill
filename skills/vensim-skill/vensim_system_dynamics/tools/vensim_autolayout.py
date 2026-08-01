@@ -73,6 +73,8 @@ LONG_ARROW_DISTANCE = 520
 MAX_VISIBLE_DIRECT_ARROWS = 5
 MAX_VIEW_CROSSINGS = 3
 MAX_LABEL_CHARS = 12
+REPORT_OUTPUT_TERMS = ("耦合协调度", "相对发展度")
+SHADOW_HIDE_SETTING = re.compile(r"(?m)^27:64,?\s*$")
 
 # shape 字段位标志：低 5 位为形状码；bit6(1<<5=32)=附着到阀门；bit7=形状由类型决定
 SHAPE_ATTACHED_TO_VALVE = 32
@@ -172,10 +174,15 @@ def _safe_float(value: str, default: float = 0.0) -> float:
 
 
 def _read_text(path: Path) -> str:
+    # Vensim 原生保存长中文方程时可能插入反斜杠续行；续行有时落在
+    # UTF-8 多字节字符中间。先按字节删除纯格式续行，再尝试常见编码，
+    # 这样审计和布局不会因合法的 Vensim 文件被 Python 误判为乱码。
+    raw = path.read_bytes()
+    raw = re.sub(rb"\\\r?\n[ \t]*", b"", raw)
     # 兼容 Windows UTF-8 BOM 与中文 GB 编码遗留文件
     for encoding in ("utf-8-sig", "utf-8", "gb18030", "latin-1"):
         try:
-            return path.read_text(encoding=encoding)
+            return raw.decode(encoding)
         except UnicodeDecodeError:
             continue
     raise RuntimeError(f"Cannot decode file: {path}")
@@ -315,6 +322,23 @@ def _segments_intersect(a, b, c, d) -> bool:
     o3 = orient(c, d, a)
     o4 = orient(c, d, b)
     return o1 * o2 < 0 and o3 * o4 < 0
+
+
+def _boxes_overlap(left: Obj, right: Obj, padding: float = 8.0) -> bool:
+    """按 Vensim 的半宽/半高字段检查变量文字框是否互相覆盖。"""
+    return (
+        abs(left.x - right.x) < left.w + right.w + padding
+        and abs(left.y - right.y) < left.h + right.h + padding
+    )
+
+
+def _shadows_hidden(text: str) -> bool:
+    """检查模型级 Sketch Appearance 是否设置为隐藏所有影子变量。
+
+    这是 Vensim 的可移植草图设置字段；仅依赖当前窗口的显示深度或手工
+    隐藏不可靠，模型在全新进程打开时仍可能出现灰色 ``<原因>`` 节点。
+    """
+    return bool(SHADOW_HIDE_SETTING.search(text))
 
 
 def _arrow_polyline(view: View, arrow: Arrow) -> List[Tuple[float, float]]:
@@ -549,14 +573,37 @@ def _curve_point(
     return mx + direction * nx * amplitude, my + direction * ny * amplitude
 
 
-def update_arrow_line(line: str, point: Tuple[float, float]) -> str:
-    """把箭头改写为单控制点圆弧：np=1，控制点列表只有一个点。"""
+def update_arrow_line(
+    line: str,
+    point: Tuple[float, float],
+    config: Optional[dict] = None,
+) -> str:
+    """把普通信息箭头改写成实线深蓝色原生圆弧。
+
+    Vensim 的 ``shape=1`` 和至少一个控制点才会渲染为圆弧；只写控制点而
+    保留 ``shape=0`` 仍可能得到直线。这里同时清除隐藏、点线和旧颜色字段，
+    但只对已判定为信息箭头的记录调用，不触碰存量—流率实体管道。
+    """
     ending = _line_ending(line)
     body = _line_body(line)
     prefix, sep, _ = body.partition("|")
     if not sep:
         return line
     fields = prefix.split(",")
+    if len(fields) < 13:
+        # 极旧版本记录字段不足时不猜测其余字段，避免破坏未知格式。
+        return line
+    # 官方字段：shape,hid,pol,thick,hasf,dtype,res,color,font,np。
+    fields[4] = "1"  # 普通 Arrow + 控制点 = 原生圆弧
+    fields[5] = "0"  # 不隐藏
+    fields[6] = "0"  # 不使用旧的极性/样式标志
+    fields[7] = "0"  # 信息线保持细实线，实体管道不会调用本函数
+    fields[8] = "0"  # 不使用点线/填充标志
+    fields[9] = str(config.get("information_arrow_dtype", 64) if config else 64)
+    fields[10] = "0"
+    arrow_color = (config or {}).get("information_arrow_color", "0-0-150")
+    fields[11] = str(arrow_color)
+    fields[12] = ""
     # 末字段为 np（控制点个数），普通 Arrow 圆弧 = 1 个中间点
     fields[-1] = "1"
     return ",".join(fields) + "|" + format_points([point]) + ending
@@ -636,7 +683,7 @@ def route_arrows(
                 slot,
                 config,
             )
-            lines[arrow.line_index] = update_arrow_line(lines[arrow.line_index], point)
+            lines[arrow.line_index] = update_arrow_line(lines[arrow.line_index], point, config)
             changed += 1
     return changed
 
@@ -723,8 +770,14 @@ def _equation_semantics_audit(path: Path) -> Tuple[int, int]:
         if name in ("INITIAL TIME", "FINAL TIME", "TIME STEP", "SAVEPER"):
             continue
         if name not in referenced:
-            warnings += 1
-            print(f"  WARNING 变量 '{name}' 已定义但从未被引用。")
+            # 论文模型经常把 D、相对发展度等作为报告型终端输出；Vensim
+            # 原生 Check Model 会给出 USE FLAG，但这不是方程或单位错误。
+            # 保留可见 INFO，避免把有意输出误报成布局/语义缺陷。
+            if any(term in name for term in REPORT_OUTPUT_TERMS):
+                print(f"  INFO 变量 '{name}' 是报告型终端输出，原生 Vensim 可能显示 USE FLAG。")
+            else:
+                warnings += 1
+                print(f"  WARNING 变量 '{name}' 已定义但从未被引用。")
 
     # 4. 缺失单位
     for name, eq in equations.items():
@@ -738,6 +791,7 @@ def _equation_semantics_audit(path: Path) -> Tuple[int, int]:
 
 
 def command_audit(path: Path) -> int:
+    text = _read_text(path)
     _, views = load_mdl(path)
     errors = warnings = 0
     print(f"AUDIT: {path}")
@@ -747,6 +801,18 @@ def command_audit(path: Path) -> int:
     eq_errors, eq_warnings = _equation_semantics_audit(path)
     errors += eq_errors
     warnings += eq_warnings
+
+    # 影子变量的隐藏必须写进模型草图设置，不能只依赖当前 Vensim 窗口状态。
+    # 如果本视图确实存在影子节点而设置缺失，fresh-process 打开仍可能显示灰色
+    # ``<原因变量>`` 提示，因此把它列为视觉质量警告。
+    has_any_shadow = any(
+        obj.kind == T_VARIABLE and obj.is_shadow
+        for view in views
+        for obj in view.objects.values()
+    )
+    if has_any_shadow and not _shadows_hidden(text):
+        warnings += 1
+        print("  WARNING 模型存在影子变量，但缺少 27:64 隐藏设置；全新 Vensim 进程可能显示灰色 <…>。")
 
     # Sketch 引用审计
     for view in views:
@@ -763,10 +829,26 @@ def command_audit(path: Path) -> int:
                     f"  ERROR arrow {arrow.obj_id}: {arrow.from_id} -> {arrow.to_id} "
                     "引用了本视图不存在的对象 ID。"
                 )
-            if not arrow.points:
-                warnings += 1
-                print(f"  WARNING arrow {arrow.obj_id}: 无中间控制点记录。")
             if not arrow.is_physical_flow and arrow.from_id in view.objects and arrow.to_id in view.objects:
+                if not arrow.points:
+                    warnings += 1
+                    print(f"  WARNING arrow {arrow.obj_id}: 信息箭头无中间控制点，无法稳定呈现弧线。")
+                if (arrow.shape & SHAPE_MASK) != 1:
+                    warnings += 1
+                    print(
+                        f"  WARNING arrow {arrow.obj_id}: shape={arrow.shape} 不是普通圆弧；"
+                        "应使用 shape=1 并保留至少一个控制点。"
+                    )
+                if len(arrow.fields) >= 12:
+                    if _safe_int(arrow.fields[7], 0) != 0:
+                        warnings += 1
+                        print(f"  WARNING arrow {arrow.obj_id}: 信息箭头 thick={arrow.fields[7]}，应为实线细箭头。")
+                    if arrow.fields[11] in {"31-41-55", "0-0-0", "-1--1--1"}:
+                        # -1--1--1 表示继承视图颜色；不判错，但提示最终颜色需在
+                        # fresh-process 截图中人工确认，避免把黑/灰线带入论文图。
+                        if arrow.fields[11] != "-1--1--1":
+                            warnings += 1
+                            print(f"  WARNING arrow {arrow.obj_id}: 信息箭头颜色为 {arrow.fields[11]}，建议深蓝 0-0-150。")
                 degree[arrow.from_id] += 1
                 degree[arrow.to_id] += 1
                 src = view.objects[arrow.from_id]
@@ -798,6 +880,24 @@ def command_audit(path: Path) -> int:
                         f"  WARNING object {obj.obj_id}: 可见直接箭头 {degree[obj.obj_id]} 条，"
                         "建议拆子系统或减少参数可见箭头。"
                     )
+
+        # 变量框相互覆盖会让箭头吸附对象和标签都难以辨认；这是比“看起来很挤”
+        # 更稳定的自动检查。阀门/云与文字框的贴合不在此处判为重叠。
+        variable_objects = [obj for obj in view.objects.values() if obj.kind == T_VARIABLE]
+        overlap_count = 0
+        for i, left in enumerate(variable_objects):
+            for right in variable_objects[i + 1:]:
+                if _boxes_overlap(left, right):
+                    overlap_count += 1
+                    if overlap_count <= 8:
+                        warnings += 1
+                        print(
+                            f"  WARNING objects {left.obj_id}/{right.obj_id}: 变量框重叠，"
+                            "应移动节点或拆分 View。"
+                        )
+        if overlap_count > 8:
+            warnings += overlap_count - 8
+            print(f"  WARNING view '{view.name}': 另有 {overlap_count - 8} 处变量框重叠。")
 
         crossing_count = 0
         polylines = [(arrow.obj_id, _arrow_polyline(view, arrow)) for arrow in info_arrows]

@@ -100,3 +100,17 @@ def test_academic_gate_rejects_bare_numeric_unit_anchor(tmp_path):
     report = check_model(path, None, None, True, ["U1", "U2", "C", "T", "D"])
     assert report["pass"] is False
     assert any("裸数字边界" in item for item in report["errors"])
+
+
+def test_academic_gate_treats_policy_time_switch_as_boundary_input(tmp_path):
+    path = tmp_path / "scenario.mdl"
+    text = _model("流量") + (
+        "基础设施投入情景 = IF THEN ELSE( Time < 1, 1, 1.15 )\n"
+        "    ~ Dmnl\n"
+        "    |\n"
+    )
+    path.write_text(text, encoding="utf-8")
+    report = check_model(path, None, None, True, ["U1", "U2", "C", "T", "D"])
+    assert report["pass"] is True
+    assert not any("按 TIME 分段切换" in warning for warning in report["warnings"])
+    assert report["boundary_time_switches"] == ["基础设施投入情景"]

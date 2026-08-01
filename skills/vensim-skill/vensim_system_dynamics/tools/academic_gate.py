@@ -30,6 +30,7 @@ TIME_SWITCH = re.compile(r"IF\s+THEN\s+ELSE\s*\([^)]*\bTIME\b", re.I)
 COUPLING_HINTS = ("耦合", "协调", "U1", "U2", "coupling", "coordination")
 STANDARDIZATION_HINT = re.compile(r"标准化|归一化|normaliz", re.I)
 BARE_UNIT_SUBTRACTION = re.compile(r"-\s*\d+(?:\.\d+)?")
+BOUNDARY_SWITCH_HINTS = ("情景", "policy", "scenario")
 
 
 def _iter_reference_files(path: Path) -> Iterable[Path]:
@@ -82,6 +83,7 @@ def check_model(
     equations = parse_equations(text)
     errors: list[str] = []
     warnings: list[str] = []
+    boundary_time_switches: list[str] = []
     names = set(equations)
 
     if not equations:
@@ -112,7 +114,12 @@ def check_model(
         if eq.integ_flow is not None and HISTORY_TERMS.search(rhs):
             history_hits.append(f"{name}: 存量流率含历史/观测回填词")
         if TIME_SWITCH.search(rhs):
-            warnings.append(f"{name}: 方程按 TIME 分段切换；请证明这是边界输入而非历史输出回放")
+            # 情景/政策乘数是模型边界输入，按 TIME 在政策起始年切换属于
+            # 正常实验设置；核心存量、流率和综合输出仍必须保持同一套方程。
+            if any(hint.lower() in name.lower() for hint in BOUNDARY_SWITCH_HINTS):
+                boundary_time_switches.append(name)
+            else:
+                warnings.append(f"{name}: 方程按 TIME 分段切换；请证明这是边界输入而非历史输出回放")
     if history_hits:
         errors.append("检测到可能的历史路径注入：" + "；".join(history_hits[:4]))
 
@@ -173,6 +180,7 @@ def check_model(
         "stock_count": len(stocks),
         "stocks": stocks,
         "history_mode": "endogenous",
+        "boundary_time_switches": boundary_time_switches,
         "require_coupling": require_coupling,
         "errors": errors,
         "warnings": warnings,

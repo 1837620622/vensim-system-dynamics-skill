@@ -60,6 +60,15 @@ npx skills add 1837620622/vensim-system-dynamics-skill --skill vensim-skill --ag
 - 变量框不得重叠；直接可见箭头一般不超过 5 条；信息线交叉超过 3 处拆分子系统/反馈 View，不能继续把线堆在一张图里。
 - `visual` 命令做机器预检，但最终必须在全新 Vensim 进程截图确认颜色、弧度、吸附、字体和布局。
 
+**论文成稿与最终交付门禁（新增）**：
+
+- 先完成模型结构、量纲、历史行为、时间步长、极端条件和敏感性检验，再写正文结论；论文正文写研究逻辑和结果，不写软件操作、脚本调用、人工修图或 AI 生成过程。
+- 统一学术术语、符号、单位和指标口径，删除无必要引号、口语化和草稿措辞；正文、方程表、变量表、图题和三线表必须相互一致。
+- 历史期与预测期沿用同一套内生状态方程；观测序列仅作边界输入或模拟—观测对照。耦合协调的 U1、U2、C、T、D 必须来自模型内生变量并延伸到预测期。
+- 表格使用黑色标准三线表，脚注说明数据来源、单位、权重和有效数字；不得把未核验截图或临时调参结果当作正文表格。
+- 交付前抽取 PDF 文本扫描旧稿措辞、AI/软件过程词和无关引号，检查页数、字体嵌入和逐页版式；DOCX 保留为可编辑源稿，PDF 作为版式交付稿。
+- 最终项目只保留一个最终交付目录，旧版本、渲染目录、`tmp`、`.DS_Store` 和 `__pycache__` 必须在发布前移出；发布前检查 `git ls-files`、`git diff --check` 和源码归档，禁止把缓存或个人路径发布到仓库。
+
 **暂不承诺：**
 - 全部 Vensim 函数的解析与仿真（数组下标、宏、部分特殊函数未实现）；
 - 原生 Vensim 语法检查与完整单位量纲推导（单位一致性需回到 Vensim `Units Check` 确认）；
@@ -114,7 +123,7 @@ npx skills add 1837620622/vensim-system-dynamics-skill --skill vensim-skill --ag
 gh skill install 1837620622/vensim-system-dynamics-skill
 
 # 固定到指定版本（可复现）
-gh skill install 1837620622/vensim-system-dynamics-skill vensim-skill --pin v1.0.5
+gh skill install 1837620622/vensim-system-dynamics-skill vensim-skill --pin v1.0.8
 ```
 
 ### 方式二：npx skills（无需全局安装）

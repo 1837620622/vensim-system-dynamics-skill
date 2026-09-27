@@ -1,0 +1,2 @@
+-c constraints.txt
+matplotlib>=3.10,<4

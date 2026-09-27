@@ -1,0 +1,13 @@
+{
+  "name": "填写中文模型名",
+  "language": "zh",
+  "time": {
+    "initial": null,
+    "final": null,
+    "step": null,
+    "saveper": null,
+    "unit": null
+  },
+  "variables": [],
+  "links": []
+}

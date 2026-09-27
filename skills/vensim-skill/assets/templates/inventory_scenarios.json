@@ -1,0 +1,25 @@
+{
+  "mode": "scenarios",
+  "variables": [
+    "库存",
+    "补货"
+  ],
+  "scenarios": [
+    {
+      "name": "基准",
+      "params": {}
+    },
+    {
+      "name": "快速调整",
+      "params": {
+        "调整时间": 2
+      }
+    },
+    {
+      "name": "需求增加",
+      "params": {
+        "需求": 30
+      }
+    }
+  ]
+}

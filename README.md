@@ -1,599 +1,249 @@
 # Vensim System Dynamics Skill
 
-> 作者 **传康kk** · 微信 `1837620622` · GitHub [@1837620622](https://github.com/1837620622) · [商务合作见文末](#关于作者与商务合作)
+面向 Agent 的专业 Vensim 建模与仿真 Skill。直接处理可编辑的 `.mdl`，默认中文业务变量和中文视图，支持自然圆弧、影子变量避让、情景实验与 Python 论文图件。Windows、macOS、Linux 共用 Python 核心；MCP 是可选接入方式。
 
-> 一个可复用的 **AI 代理指令 + Python 工具脚本** 包，用于 Vensim 系统动力学建模、课程作业、政策分析与管理研究，并在 **保留方程与对象 ID** 的前提下把已建模的草图做保守的分层布局与基础弧线化整理。
+**最终模型结构图必须来自真实 MDL 在 Vensim 原生打开后的导出或截图。** Graphviz 只用于辅助定位；工具生成的几何预览不能代替原生图。项目为独立实现，与 Ventana Systems 无隶属或认证关系。
 
-### 一键安装（skills.sh）
+**作者：传康KK（万能程序员） · 禁止商业使用。** 使用与分发须遵守 [非商业许可证](LICENSE)，保留作者及许可证信息；作者署名放在文档中，不叠加到模型图上。
 
-技能主页：<https://skills.sh/1837620622/vensim-system-dynamics-skill>
+[安装](#安装与运行) · [目录与技能识别](#目录与技能识别) · [MDL 外观](#外观规则) · [Python 结果图](#python-论文结果图) · [实验能力](#仿真与新增实验能力) · [Agent 接入](#agent-与-mcp) · [验收](#检查修复与开发)
 
-```bash
-gh skill install 1837620622/vensim-system-dynamics-skill
-# 或
-npx skills add 1837620622/vensim-system-dynamics-skill --skill vensim-skill --agent codex --yes
+## 目录与技能识别
+
+```text
+vensim-system-dynamics-skill/
+├── README.md                         仓库说明与使用导航
+├── LICENSE                           非商业许可
+├── .github/workflows/validate.yml    跨平台与可选集成检查
+├── docs/                             本仓库的验收记录与真实示例图
+├── tests/                            解析、几何、仿真、绘图、MCP 回归
+└── skills/vensim-skill/              可单独安装、分发的完整 Skill
+    ├── SKILL.md                      标准技能入口，按任务加载说明
+    ├── LICENSE                       分发时保留的许可证
+    ├── skill.sh / skill.cmd          macOS/Linux 与 Windows 入口
+    ├── agents/openai.yaml            名称、描述与默认调用提示
+    ├── scripts/                      确定性建模、排版、仿真与绘图代码
+    ├── references/                   按需阅读的操作、图面、绘图与研究规范
+    ├── assets/templates/             建模、实验、布局和出图配置
+    ├── assets/examples/              中文示例及历史格式回归样例
+    └── requirements/                 按功能安装的可选依赖及版本约束
 ```
 
-已发布到 [skills.sh](https://skills.sh)，可被 Claude Code、Codex CLI、Cursor、Windsurf 等所有兼容 Agent Skills 规范的运行时直接加载。完整安装方式见 [Agent Skill 安装](#agent-skill-安装skillssh)。
+入口目录名与 `SKILL.md` 的 `name: vensim-skill` 一致，文件包含标准 YAML frontmatter。代码和资源都在同一个 skill 目录内，移动或安装后不依赖开发者的绝对路径。启动脚本根据自身位置找到代码，输入与输出路径则相对于调用时的工程目录。
 
-## 目录
+核心不是固定的“库存模板”。[空白建模规范](skills/vensim-skill/assets/templates/model_template.json) 不预填研究参数；Agent 根据资料填写方程、单位、初值和时间设置，再调用工具。库存等数值样例用于演示和回归，不能当作其他任务的默认事实。
 
-- [当前能力边界](#当前能力边界请先阅读)
-- [兼容性](#兼容性全球-ide--ai-编程助手) / [Agent Skill 安装](#agent-skill-安装skillssh)
-- [这个项目解决什么问题](#这个项目解决什么问题) / [核心特性](#核心特性) / [已知限制](#已知限制)
-- [目录结构](#目录结构) / [安装](#安装) / [快速开始](#快速开始)
-- [命令参考](#命令参考) / [示例模型](#示例模型) / [配置文件说明](#配置文件说明)
-- [SFD 推荐布局规范](#sfd-推荐布局规范) / [安全边界](#安全边界必须遵守)
-- [适合的任务](#适合的任务) / [不适合的情况](#不适合的情况)
-- [未来发展方向](#未来发展方向) / [实现依据](#实现依据)
-- [许可证](#许可证) / [关于作者与商务合作](#关于作者与商务合作) / [致谢](#致谢)
+## 安装与运行
 
-## 当前能力边界（请先阅读）
-
-本项目定位为 **Vensim `.mdl` Sketch 审计、保守自动布局与系统动力学建模辅助工具**，不是 Vensim 的全功能替代。
-
-**已支持：**
-- Sketch 对象 ID 与 Arrow 引用审计（`audit` / `check`）；
-- 中文业务变量解析、仿真、审计与绘图；
-- 普通变量节点的分层（`dot`）或力导向（`neato`）布局；
-- 普通信息箭头的基础弧线化（单控制点圆弧）；
-- 保留原方程区、保留对象数量、保留 Arrow 起止对象；
-- 纯 Python 仿真引擎（`vensim_engine.py`）对常见结构（INTEG / LOOKUP / WITH LOOKUP / IF THEN ELSE / SMOOTH / DELAY1 / DELAY3 / DELAY FIXED）的 Euler 积分仿真与 CSV 导出；
-- matplotlib 折线图与多场景对比图导出；
-- 单位缺失预检、未定义变量检查、循环依赖检查、缺失单位自动补齐；
-- nodata 诊断：默认严格模式下遇到不支持函数、变量缺失或求值失败会中止并给出根因；明确传入 `--keep-going` 时才继续输出兼容结果；
-- Vensim 建模流程、单位检查和结果分析模板；
-- 图面质量启发式审计：长距离信息箭头、长变量名、节点箭头过多、信息线交叉过多。
-
-**论文级研究门禁（新增，必须先做）**：
-
-- 先核对领域文献、系统动力学方法文献和数据来源，再确定研究问题、系统边界、外生输入、内生反馈、变量口径和参数依据；不能根据一张截图或变量名凭空构建模型。
-- 历史验证采用“真实起点初值 + 同一套内生方程贯穿历史期和预测期”。历史观测只作真正的外生边界驱动或模拟值—观测值比较，禁止把历史路径、实际输出、预测标志或期末实际值写回存量/流量。
-- 若研究含耦合协调，U1、U2、C、T、D 必须由模型内生变量生成并延伸到预测期；历史熵权 D 只能作外部对照或锚点，不能和系统动力学割裂。
-- 耦合指标归一化时，GDP、开行、TEU、货值、网络和运输时间等带单位变量必须使用同单位期初/期末锚点；禁止“带单位变量−裸数字”。
-- `academic` 命令会检查存量初值、单位、疑似历史回放、耦合输出、参考文献目录和已填写的模型规范；通过后仍必须回到 Vensim 做原生检查。
-
-**论文级图面门禁（新增）**：
-
-- 普通信息箭头强制使用 `shape=1` + 至少一个控制点，建议深蓝 `0-0-150` 实线；存量—流率实体管道保持黑色。
-- 模型级 Sketch Appearance 使用 `27:64` 隐藏影子变量，关闭并全新打开 Vensim 后确认主图无灰色 `<…>`。
-- 变量框不得重叠；直接可见箭头一般不超过 5 条；信息线交叉超过 3 处拆分子系统/反馈 View，不能继续把线堆在一张图里。
-- `visual` 命令做机器预检，但最终必须在全新 Vensim 进程截图确认颜色、弧度、吸附、字体和布局。
-
-**论文成稿与最终交付门禁（新增）**：
-
-- 先完成模型结构、量纲、历史行为、时间步长、极端条件和敏感性检验，再写正文结论；论文正文写研究逻辑和结果，不写软件操作、脚本调用、人工修图或 AI 生成过程。
-- 统一学术术语、符号、单位和指标口径，删除无必要引号、口语化和草稿措辞；正文、方程表、变量表、图题和三线表必须相互一致。
-- 历史期与预测期沿用同一套内生状态方程；观测序列仅作边界输入或模拟—观测对照。耦合协调的 U1、U2、C、T、D 必须来自模型内生变量并延伸到预测期。
-- 表格使用黑色标准三线表，脚注说明数据来源、单位、权重和有效数字；不得把未核验截图或临时调参结果当作正文表格。
-- 交付前抽取 PDF 文本扫描旧稿措辞、AI/软件过程词和无关引号，检查页数、字体嵌入和逐页版式；DOCX 保留为可编辑源稿，PDF 作为版式交付稿。
-- 最终项目只保留一个最终交付目录，旧版本、渲染目录、`tmp`、`.DS_Store` 和 `__pycache__` 必须在发布前移出；发布前检查 `git ls-files`、`git diff --check` 和源码归档，禁止把缓存或个人路径发布到仓库。
-
-**暂不承诺：**
-- 全部 Vensim 函数的解析与仿真（数组下标、宏、部分特殊函数未实现）；
-- 原生 Vensim 语法检查与完整单位量纲推导（单位一致性需回到 Vensim `Units Check` 确认）；
-- 自动识别所有库存、流率、阀门和云（当前库存识别仍部分依赖图形形状，见下文"已知限制"）；
-- 无交叉、无穿框的完全自动布线（当前未读取 Graphviz 边路由，仅做单控制点弧线）；
-- Control Panel、敏感性分析和论文图表的自动生成；
-- 对任意复杂 `.mdl` 文件的无损重写。
-
-**最终质量门槛仍需回到 Vensim**：布局后请在 Vensim 中打开，执行 `Model > Check Model` 与 `Model > Units Check`，手工微调后保存。
-
-[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
-[![Graphviz](https://img.shields.io/badge/graphviz-required-orange.svg)](https://graphviz.org/)
-[![Vensim](https://img.shields.io/badge/Vensim-PLE%2FPro-DSS.svg)](https://vensim.com/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-
-中文说明见 [skills/vensim-skill/vensim_system_dynamics/README_CN.md](skills/vensim-skill/vensim_system_dynamics/README_CN.md)。
-
----
-
-## 兼容性（全球 IDE / AI 编程助手）
-
-本技能是**纯 CLI 工具**（`skill.sh` + Python 标准库），不依赖 MCP 协议、不绑定特定 IDE 插件。任何能执行 shell 命令、能读取项目文件的 AI 编程助手均可使用，跨 macOS / Windows / Linux。设计目标兼容以下全球主流工具：
-
-| 类别 | 兼容工具 |
-|---|---|
-| 云订阅型 | Claude Code、Cursor、Windsurf、Codex CLI、Antigravity、Amp、Mistral Vibe |
-| 免费 / 云托管型 | Gemini CLI、GitHub Copilot（CLI 与 VS Code Chat）、Amazon Q Developer、Kiro、Qwen Code |
-| 开源 BYOK 型 | OpenCode、Aider、Cline、Continue.dev、Goose、Roo Code、OpenClaw、Zed、iFlow、Kimi Code CLI、BLACKBOX |
-| IDE 内置 / 插件型 | VS Code、JetBrains 全系（IntelliJ / PyCharm 等）AI Assistant、Trae、通义灵码、CodeGeeX、Baidu Comate、Replit AI |
-| 自主 Agent 型 | Devin、OpenHands、Bolt.new、v0、Lovable |
-
-**为什么便于跨工具使用**：本技能遵循 Agent Skills 的轻量结构，frontmatter 提供 `name` / `description` 等标准字段，正文为纯 Markdown 指令。工具调用通过各 agent 原生的 shell 执行能力完成，无需安装插件。
-
-**运行前提**：Python 3.8+、可选 Graphviz（布局命令）、可选 matplotlib（绘图命令）。进入 `skills/vensim-skill` 后用 `./skill.sh doctor` 一键自检。
-
-**跨平台入口**：
-- macOS / Linux：`./skill.sh <命令>`（bash）
-- Windows：`skill.cmd <命令>`（cmd / PowerShell），或在 Git Bash / WSL 下用 `./skill.sh`
-- 两个入口命令与参数完全一致，均自动检测 `python3` / `python` / `py`，无需手动配置
-- Python 脚本用 `pathlib` + `shutil.which` + `subprocess`（不依赖 shell），读文件兼容 UTF-8 BOM 与 GB 编码，写 CSV 用 `newline=""` 避免 Windows 双换行
-
-## Agent Skill 安装（skills.sh）
-
-本技能已发布到 [skills.sh](https://skills.sh) —— Agent Skills 公共目录，可被 Claude Code、Codex CLI、Cursor、Windsurf 等所有兼容 Agent Skills 规范的运行时直接发现和安装。
-
-**技能主页**：<https://skills.sh/1837620622/vensim-system-dynamics-skill>
-
-### 方式一：gh skill（GitHub CLI 扩展）
+需要 Python 3.10+。检查、局部布局、建模、内置仿真只依赖标准库。Graphviz、绘图、PySD 和 MCP 按需安装。
 
 ```bash
-# 安装最新版
-gh skill install 1837620622/vensim-system-dynamics-skill
-
-# 固定到指定版本（可复现）
-gh skill install 1837620622/vensim-system-dynamics-skill vensim-skill --pin v1.0.8
+npx skills add 1837620622/vensim-system-dynamics-skill --skill vensim-skill
 ```
 
-### 方式二：npx skills（无需全局安装）
+支持 `gh skill` 的 GitHub CLI 也可安装：
 
 ```bash
-# 查看仓库内可安装的技能
-npx skills add 1837620622/vensim-system-dynamics-skill --list
-
-# 安装到指定 Agent（如 Codex）
-npx skills add 1837620622/vensim-system-dynamics-skill \
-  --skill vensim-skill \
-  --agent codex \
-  --yes
-
-# 全局安装到当前用户目录
-npx skills add 1837620622/vensim-system-dynamics-skill --skill vensim-skill --global --yes
+gh skill install 1837620622/vensim-system-dynamics-skill vensim-skill --agent codex --scope user
 ```
 
-### 方式三：从 GitHub 克隆后本地使用
+本地开发或直接运行：
 
 ```bash
 git clone https://github.com/1837620622/vensim-system-dynamics-skill.git
 cd vensim-system-dynamics-skill/skills/vensim-skill
-./skill.sh doctor          # 自检环境
-./skill.sh examples        # 审计全部示例
+./skill.sh doctor
 ```
 
-> 安装后仍需在本机安装 Graphviz 才能使用自动布局命令；仿真、检查和修复命令只依赖 Python 标准库。各 Agent 的技能目录位置不同，`npx skills` 会自动写入对应目录，无需手动配置。
+Windows PowerShell：
 
----
-
-## 这个项目解决什么问题
-
-Vensim PLE **没有**一键「全图自动布局」或「自动避让」按钮。原生 Layout 菜单只做对齐、统一大小、水平 / 垂直等间距。当模型变量变多时，箭头会漂浮、重叠、穿过变量，手工整理成论文可用图非常耗时。
-
-但 Vensim 的普通 Arrow 在存在 **一个中间控制点** 时会形成平滑圆弧；按住 `Command/Ctrl` 绘制的是 Spline Arrow。因此「AI 自动排版 + 连线自动变平滑曲线」是可行的——实现路径是：
-
-```
-Vensim 先建立正确模型结构（库存 / 流率 / 阀门 / 云 / 方程）
-        ↓  Python 解析 .mdl 草图，提取真实对象 ID、坐标、箭头 from/to、控制点
-        ↓  Graphviz 计算可移动辅助变量的坐标（库存 / 流率骨架锁定）
-        ↓  Python 为每条信息箭头生成单控制点圆弧（平行边自动错开曲率）
-        ↓  回写新坐标与控制点到 *_autolayout.mdl（方程区不动）
-        ↓  Vensim 打开 → Check Model → Units Check → 手工微调
+```powershell
+cd vensim-system-dynamics-skill\skills\vensim-skill
+.\skill.cmd doctor
 ```
 
-**它不是「让 AI 代替建模」**，而是把 **已正确建模** 的复杂图整理得更易读、更符合论文规范。
+也可跨平台直接执行 `python scripts/skill_cli.py doctor`。路径含空格时加引号。命令从当前 skill 目录运行，所有输出放入明确指定的工程目录。
 
----
+| 可选功能 | 依赖 | 安装方式 |
+| --- | --- | --- |
+| 时间序列和实验结果图 | matplotlib | `python -m pip install -r requirements/plots.txt` |
+| PySD 翻译与仿真 | pysd | `python -m pip install -r requirements/pysd.txt` |
+| 本地 stdio MCP | MCP Python SDK 1.x | `python -m pip install -r requirements/mcp.txt` |
+| 全局节点位置建议 | Graphviz | macOS：`brew install graphviz`；Windows：使用 [官方安装包](https://graphviz.org/download/)，将 `dot` 加入 PATH |
 
-## 核心特性
+安装 Vensim 请使用 [官方渠道](https://vensim.com/download/)，并遵守其独立许可。公开版本线为 Vensim 10.5，[官方会议资源](https://vensim.com/conference/) 注明 DSS 10.5.2；本机原生检查环境为 PLE 10.5.0。下载页与发布说明可能更新不同步，应核对实际产品通道与安装版本。平台自动化测试不等于每个版本的原生 UI 都已实测。
 
-- **保守的草图解析**：严格依据 Vensim 官方 Sketch Format 文档，准确识别变量(10)、阀门(11)、源汇云(12)、箭头(1) 的真实字段。
-- **物理流 vs 信息箭头自动区分**：通过箭头 `thick` 字段（≥20 为物理流率管道，<20 为信息箭头）和端点对象类型判定，物理流管道保持原样不被破坏。
-- **半固定 + 自动布局**：默认锁定库存、阀门、云、流率标签、shadow variable、控制面板对象；只让 Graphviz 排布普通辅助变量。
-- **基础弧线化**：为普通信息箭头生成单个中间控制点，使普通 Arrow 显示为圆弧；平行边自动分配对称曲率避免重叠。**注意：当前未读取 Graphviz 边路由控制点，layout 不会自动完成节点避障；audit 会提示明显长线、过密节点和交叉风险。**
-- **安全回写**：自动生成 `*_backup.mdl` 与 `*.layout_report.json`；不改方程区，不新建 / 删除对象，不改箭头 `from/to`。
-- **审计与检查**：`inspect` 列出全部对象与箭头属性；`audit` 检测断裂的箭头对象引用、重复定义、未定义引用、中文变量规范和图面质量风险；`check` 额外检测缺失单位、循环依赖、缺失控制变量。
-- **纯 Python 仿真引擎**（`vensim_engine.py`，不依赖 Vensim）：对常见结构（INTEG / LOOKUP / WITH LOOKUP / IF THEN ELSE / SMOOTH / DELAY1 / DELAY3 / DELAY FIXED）做 Euler 积分仿真，导出 CSV；matplotlib 折线图与多场景对比图；缺失单位补齐与断裂草图箭头修复。**注意：这不是原生 Vensim 语法检查，复杂函数、数组结构、宏与外部数据尚未完整支持。**
-- **纯标准库**：布局脚本只用标准库，无需 `pip install`；唯一外部依赖是 Graphviz。仿真与绘图需 matplotlib（绘图可选，仿真与校验无需）。
+可选依赖引用 `requirements/constraints.txt` 中的已知安全修复下限，不要求核心安装整套科学计算或 MCP 包。`doctor` 会报告解释器、Graphviz、可选包、原生 Vensim 与中文绘图字体。中文绘图前还会按实际文字检查字形覆盖。
 
-## 已知限制
+## 外观规则
 
-1. **仿真引擎仍是 Vensim 子集**，不支持数组下标、宏、`GET DATA`、优化、敏感性分析等高级功能；复杂模型建议优先接入 PySD 作为可选后端。
-2. **箭头类型未严格区分**：当前对信息箭头统一写入单控制点，未区分 Polyline / Perpendicular / Spline。未来将仅对普通 Arrow 写控制点，其他类型保持原样。
-3. **未实现自动避障布线**：当前只读取 Graphviz 节点坐标，未读取边路由 spline；箭头控制点由中垂线法向量计算，复杂场景可能穿框或交叉。`audit` 会提示明显交叉风险，但不会自动重路由所有线段。
-4. **`audit` 是预检工具**：会检查 Sketch 引用、方程区基础语义、中文业务变量和图面质量风险，但不替代完整单位检查、CLD 极性一致性判断和行为有效性检验。
-5. **图面质量审计是启发式提醒**，能发现长线、交叉和过密节点，但不能替代 Vensim 中的人工排版判断。
-6. **单位检查仍是轻量预检**，仅可靠覆盖缺失单位与部分结构性问题，完整量纲一致性仍需回到 Vensim `Units Check`。
+- 新图默认黑色信息箭头，纯蓝 `0-0-255` 为可选样式；去掉深蓝“学术配色”默认值。实体流量保持黑色双线与原生阀门。
+- 默认中文业务变量，用户指定英文时使用英文；既有模型保留原变量名。
+- 存量—流量是稳定骨架；参数靠近作用对象，初值靠近存量。先局部避让，不把图铺成机械网格，也不加入随机抖动。
+- 普通箭头按三点圆弧计算碰撞，避免把控制点错当 Bézier 手柄。双向关系分开走，优先无交叉、无穿字、无大跨度包围弧。
+- 按 View 和对象 ID 处理影子实例；可移动的影子独立避让，保持引用身份与出线。影子入线报错，不能靠隐藏全部影子或合并同名对象掩盖冲突。
+- 不在图上新增调试编号、生成过程、无依据的回路符号、作者水印和大段注释。已有必要的因果极性与延迟标记保留。
+- 字体大小、文字边界、长变量名和影子括号一起检查；换字体后重新审图。布局按内容调整，不固定业务参数、不照搬示例坐标。
 
-## 中文变量与论文图规范
+完整约束见 [SKILL.md](skills/vensim-skill/SKILL.md) 和 [图面规则与返工判据](skills/vensim-skill/references/APPEARANCE.md)。规则既约束 Agent 工作流，也有对应几何检查和不变量测试；不能承诺任意复杂网络自动得到零交叉结果。
 
-中文课程论文、政策仿真和管理研究模型默认使用中文业务变量。Vensim 控制变量 `INITIAL TIME`、`FINAL TIME`、`TIME STEP`、`SAVEPER` 与函数名 `INTEG`、`MIN`、`MAX` 等保持原生英文；业务变量、CSV 表头、图题、坐标轴、图例和变量表优先使用中文。
+Vensim 原生导出的库存示例（对应 [MDL](skills/vensim-skill/assets/examples/inventory_zh.mdl)，[验收记录](docs/native_example_verification.json)）：
 
-图面默认遵守以下规则：
+![Vensim 原生库存模型](docs/assets/inventory_native.svg)
 
-- 同一模块变量尽量放近，不跨半个页面连线；
-- 长距离关系优先拆分 View；只有必要时使用 Shadow Variable，且主图必须写入 `27:64` 隐藏灰色 `<…>`；Shadow 只能发出箭头，不能作为结果接收入箭头；
-- 一个变量最多保留 3-5 条直接可见箭头，超过就拆 View 或移入参数表；
-- 主路径从左到右，反馈路径从右下绕回左上；
-- 交叉线超过 3 条就拆子系统或反馈/结果辅助 View；
-- 普通信息箭头必须是 `shape=1` + 至少一个控制点的深蓝实线，存量—流率实体管道为黑色；变量框不得重叠，直接可见箭头一般不超过 5 条；
-- 箭头不能压在变量文字上；
-- 图中变量名用精炼中文，完整解释放变量表；
-- 常量参数默认放“参数表”，不要全部画到图里；
-- Python 图表图例采用动态策略：少量曲线可放图内空白角落，中等数量外置，很多曲线放底部多列或拆图，避免遮挡和过度留白；
-- 最终以能解释模型机制为准，不以把所有变量画出来为准。
-
----
-
-## 目录结构
-
-```
-vensim-skill/
-├── README.md                         # 本文件
-├── LICENSE                           # MIT
-├── .gitignore
-├── skills/
-│   └── vensim-skill/                 # GitHub Skill 发布目录，目录名与 name 一致
-│       ├── SKILL.md                  # Agent Skill 入口（name/description/license）
-│       ├── skill.sh                  # macOS/Linux 便捷 CLI
-│       ├── skill.cmd                 # Windows CMD/PowerShell 入口
-│       └── vensim_system_dynamics/   # 工具、模板、示例与说明文档
-│           ├── OPERATIONS_GUIDE.md   # 详细操作手册（建模原则/工作流/草图格式/安全边界）
-│           ├── README_CN.md          # 中文说明
-│           ├── requirements.txt      # 依赖说明（无强制 pip 包）
-│           ├── docs/REFERENCES.md    # 实现依据与官方文档链接
-│           ├── tools/
-│           │   ├── vensim_autolayout.py  # 草图检查/审计/保守自动布局
-│           │   ├── vensim_engine.py      # 纯 Python 仿真引擎（仿真/绘图/校验/修复）
-│           │   └── skill_cli.py          # 跨平台 CLI 包装（供 skill.cmd 调用）
-│           ├── templates/
-│           │   ├── model_spec_template.json  # 建模前语义规范模板
-│           │   ├── layout_config_sfd.json    # SFD 自动排版配置样例
-│           │   └── layout_config_cld.json    # CLD 自动排版配置样例
-│           └── examples/             # 16 个覆盖经典 SD 结构的示例模型
-│               ├── population_demo.mdl              # SFD：库存流率 + 承载力负反馈
-│               ├── s_shaped_growth.mdl              # S 型增长（正负反馈复合）
-│               ├── first_order_positive_feedback.mdl  # 一阶正反馈（指数增长）
-│               ├── first_order_negative_feedback.mdl  # 一阶负反馈（目标追赶）
-│               ├── second_order_oscillation.mdl     # 二阶振荡
-│               ├── aging_chain.mdl                  # 老化链（多库存串联）
-│               ├── sir_epidemic.mdl                 # SIR 传染病模型
-│               ├── depreciation.mdl                 # 折旧/衰减稳态
-│               ├── cld_customer_loop.mdl            # CLD：客户增长因果回路
-│               ├── coflow_structure.mdl             # 协流结构
-│               ├── control_panel.mdl                # 控制面板示例
-│               ├── delay_structure.mdl              # 延迟结构
-│               ├── lookup_structure.mdl             # Lookup 表函数结构
-│               ├── multiview_shadow.mdl             # 多视图与 shadow variable
-│               ├── production_chain.mdl             # 生产链
-│               └── smooth_structure.mdl             # SMOOTH 平滑结构
-└── tests/                            # 仿真引擎回归测试（16 个用例）
-```
-
----
-
-## 安装
-
-### 1. Python
-
-Python 3.8+，无需额外包：
+## 从中文模型到实验结果
 
 ```bash
-python3 --version
+./skill.sh build assets/templates/inventory_zh.json --output work/inventory.mdl
+./skill.sh check work/inventory.mdl
+./skill.sh visual work/inventory.mdl --strict --max-crossings 0
+./skill.sh simulate work/inventory.mdl --var 库存 --var 补货 --output results/base.csv
+./skill.sh graph work/inventory.mdl --var 库存 --output results/stock.png
+./skill.sh experiment work/inventory.mdl --spec assets/templates/inventory_scenarios.json --output-dir results/scenarios --plot results/scenarios.png
+./skill.sh experiment work/inventory.mdl --spec assets/templates/inventory_sensitivity.json --output-dir results/sensitivity
+./skill.sh convergence work/inventory.mdl --var 库存 --output results/convergence.json
 ```
 
-### 2. Graphviz
+在 Vensim 打开 `work/inventory.mdl`，执行 `Check Model` 和 `Units Check`，运行模型并核对结果，再从软件中导出结构图。上面的 Python 图是仿真结果曲线，与模型结构图是不同交付物。
 
-**macOS：**
+建模规范明确每个存量的初值和单位、每个流率的来源/去向与方程，以及辅助量。可以给存量和辅助量设置 `position: [x, y]`，保留人工确定的位置。工具不会推断真实世界的参数值、因果极性或研究结论。库存示例仅用于演示，不是经数据校准的预测模型。
+
+必须显式提供完整 `time` 设置。新模型的业务变量、视图名默认中文；原生函数和控制变量保留 Vensim 语法。`sketch.font_family` 和 `sketch.font_size` 可按实际 Vensim 环境调整，文字框同步估算，最终由原生审图确认。字段见 [输入规范](skills/vensim-skill/references/SPECIFICATIONS.md)。
+
+## Python 论文结果图
+
+默认使用 Python 生成仿真结果图，参考经典 Vensim 文献图的表达方式：白底、细实线网格、曲线上重复编号、图下逐行长线图例。**默认无标题、图号、图标、图集装饰和水印**。每个变量独立成图，多个情景在同一变量下比较。
+
+![Python 生成的单因素敏感性结果](docs/assets/inventory_sensitivity.svg)
+
+图中数据来自随仓库提供的库存 MDL：只扰动“调整时间”，每次从相同初值重跑，保留原基准。曲线使用实际 Euler 序列，不根据参考图片描点，也不为美观改变结果。
 
 ```bash
-brew install graphviz
-dot -V
+./skill.sh experiment work/inventory.mdl --spec assets/templates/inventory_perturb.json --output-dir results/perturb --plot results/perturb/stock.png --formats png,pdf,svg
+./skill.sh plot-data results/perturb/series.csv --var 库存 --time-unit Month --output figures/stock.png --dpi 1200
+./skill.sh graph work/inventory.mdl --var 库存 --output figures/stock.pdf --plot-config assets/templates/plot_config_classic.json
 ```
 
-**Windows：** 从 https://graphviz.org/download/ 安装，并把 `dot` 所在目录（如 `C:\Program Files\Graphviz\bin`）加入 `PATH`。
+| 细节 | 默认行为与可调整项 |
+| --- | --- |
+| 位图 | PNG 600 DPI；`--dpi 1200` 可提高输出像素，设置资源上限避免异常大图 |
+| 矢量 | `--formats png,pdf,svg` 同时导出；PDF/SVG 适合论文排版和缩放 |
+| 字体 | 按系统选择；检查实际字形，SVG 字形转路径、PDF 嵌入字体 |
+| 图例 | 变量与情景逐行对应，编号和颜色与曲线一致；过长时提示调整 |
+| 可配置样式 | 尺寸、字体、字号、线宽、色表、网格、编号大小和重复密度 |
+| 多变量 | 分别输出编号文件，在 `.plot.json` 记录变量与文件映射 |
+| 大量敏感性运行 | 中位数与 25–75% / 5–95% 样本区间；可选择分组经典曲线 |
+| 数据核验 | 拒绝重复时间、缺失字段、NaN/Inf、诊断替代值和不一致的分位带时间网格 |
 
-**Linux：**
+经典编号样式是可调整的起点。用户给定期刊、字号或版面要求时按其规范配置，不把一种字体或固定参数强加给所有项目。完整教程、CSV 格式、百分比扰动与图件追溯见 [结果图手册](skills/vensim-skill/references/RESULT_PLOTS.md)。
+
+## 整理已有 MDL
 
 ```bash
-sudo apt-get install graphviz   # Debian/Ubuntu
-sudo dnf install graphviz       # Fedora
+./skill.sh inspect original.mdl
+./skill.sh audit original.mdl
+./skill.sh layout original.mdl --output work/reviewed.mdl --mode refine --style monochrome
+./skill.sh visual work/reviewed.mdl --strict --max-crossings 0
 ```
 
----
+| 模式 | 行为 | Graphviz |
+| --- | --- | --- |
+| `preserve` | 节点不动，整理支持的信息圆弧 | 不需要 |
+| `refine`（默认） | 就近避让辅助量和影子重叠，整理圆弧 | 不需要 |
+| `auto` | 比较原图、局部方案和 Graphviz 位置建议 | 有可移动节点时需要 |
+| `graphviz` | 明确采用全局节点位置建议，再按原生圆弧路由 | 需要 |
 
-## 快速开始
+默认样式 `preserve` 保留原颜色；统一黑色用 `monochrome`，纯蓝信息箭头用 `native-blue`。支持的单控制点信息线可重路由；未知、多点、正交等路由的端点保守锁定，另行原生核验。管道、阀门和附着流量文字默认不移动。
 
-### 方式一：skill.sh 便捷封装
+使用 `--config` 读取 [SFD 配置](skills/vensim-skill/assets/templates/layout_config_sfd.json)。`lock_node_names`、`lock_object_ids` 保护人工位置；`move_shadows` 控制影子避让；`node_positions` 指定唯一可移动变量的坐标。
+
+输出为新 MDL 和 `.mdl.layout_report.json`。报告包含方程哈希、编码、拓扑校验、前后碰撞、交叉、影子实例和未支持的形状。输入文件不覆盖，因此不会在原目录生成冗余 `.backup.mdl`。
+
+如需调试，可另外运行：
 
 ```bash
-cd skills/vensim-skill
-chmod +x skill.sh
-./skill.sh doctor                                   # 检查 python3 与 graphviz
-./skill.sh examples                                 # 审计全部示例
-./skill.sh quick vensim_system_dynamics/examples/population_demo.mdl       # 一键 inspect + audit + layout
-./skill.sh layout your_model.mdl --route            # 单步自动排版（默认 SFD 配置）
+./skill.sh preview work/reviewed.mdl --compare-with original.mdl --output debug/geometry.html
 ```
 
-### 方式一·续：仿真 / 绘图 / 校验 / 修复（不依赖 Vensim）
+这个预览明确标记 `eligible_as_final_model_figure: false`。正式交付时不把它当作结构图。
+
+## 仿真与新增实验能力
+
+| 能力 | 输出或边界 |
+| --- | --- |
+| 内置标量仿真 | Euler；INTEG、常见数学函数、条件、Lookup、平滑和延迟子集 |
+| 可选 PySD | `--backend pysd`；本封装仅处理自包含标量模型，外部数据和高级模型需原项目 PySD/原生 Vensim |
+| 常量覆盖 | `--set '调整时间=2'`；不修改 MDL，不覆盖存量、控制变量或反馈方程 |
+| 时间设置 | `--time-step`、`--final-time`、`--saveper`；记录实际有效值 |
+| 情景实验 | 每个情景从原始初值重新开始，参数与结果可追溯 |
+| 单因素百分比扰动 | 从 MDL 读取基准常量，逐个改变指定参数并保留基准；支持自定义变化幅度 |
+| 网格敏感性 | 参数笛卡尔积，限制总运行规模 |
+| Monte Carlo | 固定种子、独立均匀分布；不宣称样本范围是统计置信区间 |
+| 步长检查 | 对比 dt、dt/2、dt/4；同一保存时间网格上评估归一化误差 |
+| 结果文件 | 带 BOM 的 UTF-8 CSV；运行元数据、模型 SHA-256、后端、种子和参数 |
+
+实验保存 `series.csv`、`summary.csv` 和 `experiment.json`；摘要包括初值、末值、最小值、最大值和峰值时刻。现有目录中同名输出不会被实验命令覆盖。批量实验最多 200 次，输出规模有上限。
+
+`SMOOTH3` 和 `DELAY3` 使用三阶段状态；物料延迟按各阶段的流出传递，避免错误地把上游存量当作下游流入。默认严格求值；不支持的函数和无效参数会报错。`--keep-going` 仅用于诊断，其结果不适合用于研究结论。
+
+`check` 是内置预检，`units` 只检查缺失单位，均不能代替原生量纲验证。复杂数组、宏、外部数据、随机函数及完整 Vensim 函数语义不在内置求解器承诺范围内。
+
+## Agent 与 MCP
+
+能读取技能文件、运行本地 Python 命令的 Agent 可调用 CLI；具体宿主能力仍应实际检查。核心不依赖某个 IDE，也不要求启动服务器。
+
+可选独立 stdio 适配器提供 10 个固定工具：读取模型、方程预检、几何检查、布局、建模、仿真、批量实验、结果绘图、步长检查、调试预览。它限定工作目录、拒绝路径越界和覆盖已有主输出，不接受任意 shell 命令。启动方式与客户端配置见 [MCP 文档](skills/vensim-skill/references/MCP.md)。
+
+后续可以直接这样给 Agent 任务：
+
+> 使用 `$vensim-skill`，根据我的资料建立中文 MDL。先核对方程、单位、初值和参数来源，再安排存量流量骨架与自然连线，检查影子重叠。在原生 Vensim 审图，运行基准及与研究问题相关的实验，用 Python 输出无标题的清晰图件，并保留模型与结果的对应记录。
+
+这是一段调用范式，不固定研究对象、模型规模、业务数值或实验幅度。只修图时可以直接提供 MDL 和具体问题；完整研究才使用相应研究检查，不把无关步骤强加给简单任务。
+
+Ventana 的 [官方会议资源页](https://vensim.com/conference/) 已提供 **VenAgent / VensimMCP / VentityMCP 的 Windows 与 Mac 包入口**，工作坊使用 DSS 10.5.2。这里的适配器是独立实现；PLE 安装不代表已有官方 MCP。官方组件的许可、安装和工具能力仍须按实际环境核对，本仓库未声称已实测官方服务器。
+
+## 检查、修复与开发
 
 ```bash
-# 纯 Python 仿真，导出 CSV
-./skill.sh simulate vensim_system_dynamics/examples/population_demo.mdl --var Population --var Births --var Deaths
-
-# 仿真并导出折线图 PNG（需 matplotlib）
-./skill.sh graph vensim_system_dynamics/examples/population_demo.mdl --var Population --var Deaths \
-       --output pop.png --title "Population Dynamics"
-
-# 多场景对比图（修改 Carrying Capacity 等参数后对比）
-./skill.sh compare vensim_system_dynamics/examples/population_demo.mdl \
-       --scenario scenario_low.mdl --scenario scenario_high.mdl \
-       --var Population --var "Crowding Effect" --output compare.png
-
-# 单位量纲校验
-./skill.sh units vensim_system_dynamics/examples/population_demo.mdl
-
-# 全面检查：未定义变量 / 缺失单位 / 循环依赖 / 断裂草图引用
-./skill.sh check vensim_system_dynamics/examples/population_demo.mdl
-
-# 研究设计门禁：参考文献、边界、存量初值、历史内生性、耦合输出
-./skill.sh academic vensim_system_dynamics/examples/population_demo.mdl \
-       --references ./references --spec ./model_spec.json
-
-# 图面门禁：弧线、深蓝/黑色样式、影子、重叠与交叉预检
-./skill.sh visual vensim_system_dynamics/examples/population_demo.mdl
-
-# 自动修复缺失单位、断裂草图箭头
-./skill.sh fix broken_model.mdl --output fixed_model.mdl
-
-# 一键 check + simulate + graph（适合快速跑通一个模型）
-./skill.sh auto vensim_system_dynamics/examples/population_demo.mdl --var Population --var Births
+./skill.sh units model.mdl
+./skill.sh fix model.mdl --units-map units.json --output work/units_fixed.mdl
+./skill.sh academic model.mdl --references refs --spec research_spec.json
 ```
 
-> 仿真默认严格模式：遇到不支持的函数或求值失败会中止并指出根因。如需兼容输出（失败变量置零继续），加 `--keep-going`。
+`fix` 不再猜测缺失单位：单位表由用户或研究依据明确提供。断裂箭头删除需显式 `--drop-broken-arrows`，不能代替语义修复。研究专项要求见 [研究工作流](skills/vensim-skill/references/RESEARCH_WORKFLOW.md)。
 
-### 方式二：直接调用 Python 脚本
+从仓库根目录运行：
 
 ```bash
-# 1. 查看模型内的对象 ID、坐标、形状、箭头 from/to、控制点
-python3 vensim_system_dynamics/tools/vensim_autolayout.py inspect vensim_system_dynamics/examples/population_demo.mdl
-
-# 2. 审计箭头引用是否指向本视图内有效对象
-python3 vensim_system_dynamics/tools/vensim_autolayout.py audit vensim_system_dynamics/examples/population_demo.mdl
-
-# 3. 复制 SFD 配置，填入要锁定的库存 / 流率名
-cp vensim_system_dynamics/templates/layout_config_sfd.json my_layout.json
-#   编辑 my_layout.json，把 lock_node_names 改成你模型里的库存与流率标签名
-
-# 4. 生成自动排版模型（自动建 .backup.mdl 与 .layout_report.json）
-python3 vensim_system_dynamics/tools/vensim_autolayout.py layout vensim_system_dynamics/examples/population_demo.mdl \
-  --output vensim_system_dynamics/examples/population_demo_autolayout.mdl \
-  --config my_layout.json \
-  --engine dot \
-  --route-information-arrows
-
-# 5. 审计输出
-python3 vensim_system_dynamics/tools/vensim_autolayout.py audit vensim_system_dynamics/examples/population_demo_autolayout.mdl
+PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider
+python3 -m ruff check .
+python3 -m bandit -r skills/vensim-skill/scripts -q
+shellcheck skills/vensim-skill/skill.sh
 ```
 
-在 Vensim 中打开 `*_autolayout.mdl`：先看图，再 `Model > Check Model`，再 `Model > Units Check`，手工微调少数交叉关系后保存为最终版本。
+Windows 测试用 `python -m pytest -q -p no:cacheprovider`。CI 覆盖 Windows、macOS 与 Linux；可选 PySD/MCP/Matplotlib 集成测试在安装对应依赖的任务中运行。解析、真实圆弧、编码续行、影子重叠、不变量、求解器、绘图、技能识别和输出路径是主要回归范围。
 
----
+原生验收已经覆盖中文库存示例的模型检查、单位检查、原生 SVG 与库存轨迹的可视检查；内置引擎与 PySD 对相同示例做逐点数值对照。原生轨迹的可视检查不等同于原生全量数值误差验证，验收记录明确区分这些证据。
 
-## 命令参考
+## 兼容性与升级说明
 
-### `inspect` — 列出草图对象与箭头
+- 公共入口仍为 `skill.sh`、`skill.cmd` 和 `SKILL.md`；内部执行路径统一为 `scripts/`，资料放 `references/`，示例与模板放 `assets/`。旧脚本中引用内部目录的路径需要同步更新。
+- 新建模型和仿真必须有完整时间设置；实验幅度、抽样次数、种子显式提供，不静默套用旧案例。新建 MDL 默认中文，已有变量名保持。
+- 默认局部布局与样式保留；明确选择黑色或原生纯蓝。影子实例独立处理，重复 Defined、错误入影子线和不支持的几何形状会报告。
+- 方程区逐字节保护、BOM/GB18030/续行兼容、箭头极性与延迟标记保留、三阶段物料延迟和状态初始化都有回归覆盖。
+- 结果图统一为可配置 Python 绘图，默认 600 DPI 与独立单变量图件；多变量不再机械拼成一张长图集。
+- 项目输出放明确的 `work/`、`results/` 或用户工程目录；Python 缓存、临时 Vensim 数据集和调试文件不作为 Skill 源码发布。
 
-```bash
-python3 vensim_system_dynamics/tools/vensim_autolayout.py inspect <model.mdl>
-```
+本项目补充 PLE 外的实验与出图工作流，**不解锁 DSS，也不替代 DSS 全部功能**。所有后端都应按模型实际使用的函数、数据源、数组和积分方式确认支持情况；遇到未覆盖语法要报错或切换后端，不静默近似为“正确结果”。
 
-输出每个对象的类型(`var`/`valve`/`src/sink`)、坐标、形状、是否附着阀门、是否 shadow variable、是否库存状；每条箭头标注 `FLOW`(物理流率管道) 或 `info`(信息箭头)、weight、控制点数。
+更多命令见 [操作手册](skills/vensim-skill/references/OPERATIONS_GUIDE.md)，格式和算法来源见 [参考资料](skills/vensim-skill/references/REFERENCES.md)。仓库保留早期示例用于兼容测试，不代表每个历史示例都已完成最新原生图面验收。
 
-### `audit` — 审计箭头对象引用
+## 作者与许可
 
-```bash
-python3 vensim_system_dynamics/tools/vensim_autolayout.py audit <model.mdl>
-```
+- 作者：**传康KK（万能程序员）**
+- GitHub：[1837620622](https://github.com/1837620622)
+- 微信：1837620622（传康Kk）
+- 邮箱：2040168455@qq.com
+- 咸鱼 / B站：万能程序员
 
-检测箭头 `from/to` 是否引用了本视图不存在的对象 ID（会漂浮 / 反向 / 穿变量的根因），并警告无控制点、空名变量、中文模型中的非中文业务变量、长变量名、长距离信息箭头、节点箭头过多和信息线交叉过多。
-
-### `academic` / `visual` — 论文级门禁
-
-```bash
-./skill.sh academic <model.mdl> --references <文献目录> --spec <已填写的model_spec.json> --require-coupling
-./skill.sh visual <model.mdl>
-```
-
-`academic` 会阻止疑似历史路径/实际输出回填、缺少存量初值或单位、耦合协调输出未内生生成和缺少参考文献目录的交付。`visual` 会审计 `27:64` 隐藏影子设置、`shape=1` 控制点、深蓝实线、变量框重叠、直接箭头度数和交叉风险；最后仍需在全新 Vensim 进程人工截图确认。
-对有意作为论文结果导出的 D、相对发展度等终端变量，原生 Vensim 可能显示 USE FLAG；技能将其作为需解释的报告输出，而不是要求用零系数伪造引用。
-
-### `layout` — 应用保守自动排版
-
-```bash
-python3 vensim_system_dynamics/tools/vensim_autolayout.py layout <model.mdl> \
-  --output <out.mdl> \
-  --config <config.json> \
-  --engine {dot|neato|fdp|sfdp} \
-  --route-information-arrows
-```
-
-- `--engine dot`：分层布局，适合 SFD（库存—流率有明确层级）。
-- `--engine neato`/`fdp`：弹簧模型，适合 CLD（关系网图）。
-- `--route-information-arrows`：为可重布线的信息箭头设置单个圆弧控制点。
-
----
-
-## 示例模型
-
-`skills/vensim-skill/vensim_system_dynamics/examples/` 下提供 16 个覆盖经典系统动力学结构的示例，可直接用于学习、测试与作业参考：
-
-| 分类 | 模型 | 说明 |
-|---|---|---|
-| 基础 SFD | `population_demo.mdl` | 库存流率 + 承载力负反馈闭环 |
-| 增长范式 | `s_shaped_growth.mdl` | S 型增长（正负反馈复合） |
-| 反馈结构 | `first_order_positive_feedback.mdl` | 一阶正反馈（指数增长） |
-| 反馈结构 | `first_order_negative_feedback.mdl` | 一阶负反馈（目标追赶） |
-| 反馈结构 | `second_order_oscillation.mdl` | 二阶振荡 |
-| 链式结构 | `aging_chain.mdl` | 老化链（多库存串联） |
-| 应用模型 | `sir_epidemic.mdl` | SIR 传染病模型 |
-| 应用模型 | `depreciation.mdl` | 折旧/衰减稳态 |
-| CLD | `cld_customer_loop.mdl` | 客户增长因果回路图 |
-| 经典结构 | `coflow_structure.mdl` | 协流结构 |
-| 经典结构 | `delay_structure.mdl` | 延迟结构 |
-| 经典结构 | `lookup_structure.mdl` | Lookup 表函数结构 |
-| 经典结构 | `smooth_structure.mdl` | SMOOTH 平滑结构 |
-| 草图特性 | `control_panel.mdl` | 控制面板示例 |
-| 草图特性 | `multiview_shadow.mdl` | 多视图与 shadow variable |
-| 链式结构 | `production_chain.mdl` | 生产链 |
-
-快速验证全部示例：
-
-```bash
-cd skills/vensim-skill
-./skill.sh examples                    # 审计全部示例草图与方程
-./skill.sh simulate vensim_system_dynamics/examples/sir_epidemic.mdl --var Susceptible --var Infected --var Recovered
-```
-
-> 部分模型含诊断变量（如康复比例、稳态指示量），审计时可能出现「未使用变量」警告，属正常现象，不影响仿真。详见 [examples/README.md](skills/vensim-skill/vensim_system_dynamics/examples/README.md)。
-
----
-
-## 配置文件说明
-
-```json
-{
-  "view": "*",
-  "canvas": {"x_min": 120, "x_max": 1180, "y_min": 110, "y_max": 720},
-  "rankdir": "LR",
-  "nodesep": 0.65,
-  "ranksep": 1.05,
-  "move_stocks": false,
-  "lock_node_names": ["Population", "Births", "Deaths"],
-  "lock_object_ids": [],
-  "route_information_arrows_only": true,
-  "curve_strength": 0.18,
-  "parallel_curve_spacing": 0.08,
-  "minimum_curve_pixels": 26,
-  "maximum_curve_pixels": 118,
-  "skip_views": []
-}
-```
-
-| 字段 | 说明 |
-|---|---|
-| `view` | 处理哪个视图，`*` 为全部 |
-| `canvas` | 可移动节点的目标画布范围（像素） |
-| `rankdir` | Graphviz 布局方向：`LR`/`TB`/`BT`/`RL` |
-| `nodesep` / `ranksep` | 节点间距 / 层间距 |
-| `move_stocks` | 是否允许移动库存状变量（SFD 应为 `false`） |
-| `lock_node_names` | 按变量名锁定的对象（库存、流率标签） |
-| `lock_object_ids` | 按对象 ID 锁定 |
-| `route_information_arrows_only` | 只重布线信息箭头，不动物理流 |
-| `curve_strength` | 弧线强度系数 |
-| `parallel_curve_spacing` | 平行边错开曲率增量 |
-| `minimum_curve_pixels` / `maximum_curve_pixels` | 弧度像素上下限 |
-| `skip_views` | 跳过的视图名列表 |
-
----
-
-## SFD 推荐布局规范
-
-系统动力学存量流量图有明确规范，建议采用「半固定 + 自动布局」而非完全交给 Graphviz：
-
-```
-顶部：云 → 流入 → 库存 → 流出 → 云
-中部：辅助变量、比率、效果变量
-右侧 / 下方：参数、价格、比率
-下部：收入、成本、利润
-底部：留存收益 → 投资者回报
-```
-
-- 库存与两侧流率管道固定在顶部中央；
-- 投资者回报等库存及其流率固定在左下；
-- 其余辅助变量交给 Graphviz 按层级排布；
-- 箭头按上下 / 左右关系自动选取弯曲方向；
-- 同方向多条箭头自动分配不同弯曲轨道避免重叠；
-- 远距离关系用大弧度，近距离用小弧度。
-
----
-
-## 安全边界（必须遵守）
-
-- 自动排版 **只整理已正确建模** 的草图；
-- 脚本 **不新建** 库存、阀门、云或物理流；
-- 脚本 **不改** 方程区、箭头 `from/to`、对象 ID；
-- 默认 **锁定** 库存、阀门、源汇云、流率标签、shadow variable、控制面板对象；
-- 输出 **必须** 在目标 Vensim 版本重新打开并运行 `Check Model` + `Units Check`；
-- 出现错位 / 浮动箭头 / 阀门脱离时 **立即恢复** `*_backup.mdl` 改用手动。
-
----
-
-## 适合的任务
-
-- 汽车销售、人口、供应链韧性、政策执行、光伏治沙、城市交通等 SFD；
-- 区域运输、公共治理、生态经济等 CLD；
-- 作业要求的 Control Panel、政策情景、敏感性分析；
-- 把原始 Vensim 图整理为论文可用图。
-
-## 不适合的情况
-
-- 模型尚未确认时直接批量生成 `.mdl`；
-- 希望一个按钮自动设计理论机制或自动给参数；
-- 多个库存—流率骨架已乱接、阀门与标签脱离；
-- 不愿在 Vensim 中打开验证。
-
----
-
-## 未来发展方向
-
-本项目后续将由"Vensim 草图审计与自动布局工具"逐步扩展为面向系统动力学建模全过程的智能辅助平台。总体目标是在不破坏原始模型方程、变量关系和 Vensim 文件兼容性的前提下，实现模型构建、逻辑审查、单位校验、仿真分析、可视化输出与论文材料生成的一体化支持。
-
-1. **模型语义解析模块**：不再仅依赖 Sketch 图形形状识别库存、流率和辅助变量，而是从 `.mdl` 方程区解析变量定义、`INTEG`、`DELAY`、`SMOOTH`、`WITH LOOKUP`、数组下标和初始条件，建立统一的模型中间表示，识别库存—流率结构、变量依赖、反馈回路、变量单位和政策杠杆。
-2. **模型质量审查模块**：覆盖重复定义、未定义变量引用、未使用变量、库存方程缺失、流率量纲不匹配、比例变量越界、概率变量越界、负库存风险、循环依赖、方程与因果箭头不一致等问题，输出变量名、位置、影响范围、严重等级和修复建议。
-3. **自动布局与自动布线**：采用"语义锚点 + 图结构布局 + 几何避障"组合方法，引入节点边界检测、线段交叉检测、曲线碰撞检测、平行箭头分轨和跨层箭头重路由，降低箭头穿框与反馈回路混乱。
-4. **Vensim 兼容的仿真与情景分析**：支持基准情景、政策情景、敏感性分析、参数组合实验和极端条件测试，自动导出净利润、植被盖度、耦合协调度、碳减排量、客户规模、库存水平等指标的折线图、对比图、统计表和 CSV，保存完整参数配置保证可复现。
-5. **论文与课程作业交付模块**：自动生成变量定义表、方程表、参数表、政策情景表、模型检验表、仿真结果表和图表说明文字，提供因果回路分析、正负反馈识别、主导结构迁移分析、模型边界说明与局限性分析模板。
-6. **多层质量门槛**：输出前依次完成方程语法检查、变量依赖检查、单位检查、结构一致性检查、图形重叠检查、仿真稳定性检查和结果合理性检查，全部通过后才生成最终文件。
-7. **明确工具边界**：优先保证对常见 Vensim 建模结构的稳定支持，不将"完全替代 Vensim"作为短期目标，对复杂函数、特殊分析工具、原生 Control Panel、数组结构保留回到 Vensim 检查的流程。
-
----
-
-## 实现依据
-
-依据 Vensim 官方文档与开源解析器实现，完整链接见 [skills/vensim-skill/vensim_system_dynamics/docs/REFERENCES.md](skills/vensim-skill/vensim_system_dynamics/docs/REFERENCES.md)：
-
-- Vensim Help — [Sketch Format](https://www.vensim.com/documentation/ref_sketch_format.html)
-- Vensim Help — [Sketch Object Detail](https://www.vensim.com/documentation/24305.html)
-- Vensim Help — [Arrow Class](https://www.vensim.com/documentation/22925.html)
-- Vensim Help — [Layout Menu](https://www.vensim.com/documentation/layoutmenu.html)
-- Graphviz — [splines](https://graphviz.org/docs/attrs/splines/)
-- PySD — [Vensim Translation](https://pysd.readthedocs.io/en/master/structure/vensim_translation.html)（辅助验证）
-
----
-
-## 许可证
-
-MIT License。见 [LICENSE](LICENSE)。
-
-## 关于作者与商务合作
-
-**传康kk**（chuankangkk）—— 系统动力学建模与 AI Agent 工具开发者。
-
-- 微信：`1837620622`（备注「Vensim 技能合作」）
-- GitHub：[@1837620622](https://github.com/1837620622)
-- 技能主页：<https://skills.sh/1837620622/vensim-system-dynamics-skill> · 安装 `gh skill install 1837620622/vensim-system-dynamics-skill`
-
-**合作方向**：
-
-- **商务合作**：系统动力学建模咨询、Vensim 模型搭建与排版、政策仿真与情景分析、论文图表与交付物定制、企业内训与课程开发、工具二次开发与私有部署。
-- **问题反馈**：使用中遇到 bug、解析错误、布局异常、仿真 nodata 等，请附 `.mdl` 文件与复现命令，便于定位。
-- **功能建议**：希望支持的新函数、新结构、新输出格式或工作流改进。
-- **学术合作**：研究项目中的模型构建、仿真验证、论文图表协作。
-- **其他合作**：技术交流、开源贡献、社区共建。
-
-**联系方式**：
-
-| 用途 | 渠道 |
-|---|---|
-| 商务合作 / 项目委托 | 微信 `1837620622`（备注「Vensim 技能合作」） |
-| 问题反馈 / Bug 报告 | GitHub [Issues](https://github.com/1837620622/vensim-system-dynamics-skill/issues) |
-| 功能建议 / 技术交流 | 微信 `1837620622` 或 GitHub Issues |
-| 开源贡献 | GitHub [Pull Requests](https://github.com/1837620622/vensim-system-dynamics-skill/pulls) |
-
-> 提交 Issue 或 PR 时请说明：使用场景、操作系统、Python 版本、复现命令、`.mdl` 文件（可脱敏）。商务合作请直接加微信，备注来意以便快速响应。
-
-## 致谢
-
-- [Ventana Systems](https://www.vensim.com/) — Vensim 与官方文档
-- [SDXorg/pysd](https://github.com/SDXorg/pysd) — Vensim `.mdl` 解析参考
-- [Graphviz](https://graphviz.org/) — 自动布局引擎
+当前代码及文档按 [非商业许可证](LICENSE) 提供，禁止商业使用、付费分发、收费服务集成或商业客户交付。复制和非商业修改须保留署名与许可证。第三方软件使用各自许可证；此前已按其他许可证发布的版本继续按其随附条款处理。

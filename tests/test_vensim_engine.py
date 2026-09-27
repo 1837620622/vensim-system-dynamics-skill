@@ -2,10 +2,10 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOLS = ROOT / "skills" / "vensim-skill" / "vensim_system_dynamics" / "tools"
+TOOLS = ROOT / "skills" / "vensim-skill" / "scripts"
 sys.path.insert(0, str(TOOLS))
 
-from vensim_engine import _legend_strategy, get_time_bounds, parse_equations, simulate  # noqa: E402
+from vensim_engine import get_time_bounds, parse_equations, simulate  # noqa: E402
 
 
 def run_model(text: str):
@@ -278,9 +278,3 @@ def test_chinese_variable_names_are_parsed_and_simulated():
 
     assert "库存量" in equations
     assert result.series["库存量"] == [10.0, 12.0, 13.8]
-
-
-def test_legend_strategy_avoids_one_size_fits_all_layout():
-    assert _legend_strategy(2)[0] == "inside"
-    assert _legend_strategy(4)[0] == "right"
-    assert _legend_strategy(8)[0] == "bottom"

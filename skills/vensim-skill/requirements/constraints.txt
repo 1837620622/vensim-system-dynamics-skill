@@ -1,0 +1,11 @@
+# 可选依赖的已知安全修复下限；约束文件本身不会安装任何包。
+anyio>=4.14.2
+click>=8.3.3
+idna>=3.15
+lxml>=6.1.0
+mcp>=1.28.1,<2
+pillow>=12.3.0
+pydantic-settings>=2.14.2
+pyjwt>=2.13.0
+python-multipart>=0.0.31
+starlette>=1.3.1

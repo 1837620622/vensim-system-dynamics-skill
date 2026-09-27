@@ -1,0 +1,2 @@
+-c constraints.txt
+pysd>=3.14,<4

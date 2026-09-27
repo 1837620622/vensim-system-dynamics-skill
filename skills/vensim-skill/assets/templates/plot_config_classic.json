@@ -1,0 +1,17 @@
+{
+  "width_inches": 7.2,
+  "plot_height_inches": 3.3,
+  "legend_row_inches": 0.28,
+  "font_family": [],
+  "font_size": 11,
+  "legend_font_size": 10,
+  "line_width": 0.85,
+  "marker_size": 6.5,
+  "marker_repeats": 6,
+  "legend_repeats": 5,
+  "max_classic_curves": 12,
+  "number_lines": true,
+  "colors": ["#0000ff", "#ff0000", "#008000", "#808080", "#000000", "#800080", "#008080", "#a0522d"],
+  "grid_color": "#d5d5d5",
+  "border_color": "#888888"
+}

@@ -1,0 +1,6 @@
+{
+  "mode": "perturb",
+  "variables": ["库存"],
+  "parameters": ["调整时间"],
+  "changes": [-0.2, -0.1, 0.2, 0.1]
+}

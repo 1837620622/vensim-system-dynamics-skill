@@ -1,0 +1,119 @@
+{
+  "spec": {
+    "mode": "perturb",
+    "variables": [
+      "库存"
+    ],
+    "parameters": [
+      "调整时间"
+    ],
+    "changes": [
+      -0.2,
+      -0.1,
+      0.2,
+      0.1
+    ]
+  },
+  "runs": [
+    {
+      "name": "调整时间 -20%",
+      "backend": "builtin",
+      "model_sha256": "6399e1abebd1c494159d3670c062cd9e1fefdb11999c6ee8c8a96d491c0b0ee9",
+      "parameters": {
+        "调整时间": 3.2
+      },
+      "initial_time": 0.0,
+      "time_step": 0.25,
+      "final_time": 60.0,
+      "time_unit": "Month",
+      "saveper": 1.0,
+      "native_verified": false,
+      "variables": [
+        "库存"
+      ],
+      "numerical_method": "Euler",
+      "status": "completed",
+      "warnings": []
+    },
+    {
+      "name": "调整时间 -10%",
+      "backend": "builtin",
+      "model_sha256": "6399e1abebd1c494159d3670c062cd9e1fefdb11999c6ee8c8a96d491c0b0ee9",
+      "parameters": {
+        "调整时间": 3.6
+      },
+      "initial_time": 0.0,
+      "time_step": 0.25,
+      "final_time": 60.0,
+      "time_unit": "Month",
+      "saveper": 1.0,
+      "native_verified": false,
+      "variables": [
+        "库存"
+      ],
+      "numerical_method": "Euler",
+      "status": "completed",
+      "warnings": []
+    },
+    {
+      "name": "调整时间 +20%",
+      "backend": "builtin",
+      "model_sha256": "6399e1abebd1c494159d3670c062cd9e1fefdb11999c6ee8c8a96d491c0b0ee9",
+      "parameters": {
+        "调整时间": 4.8
+      },
+      "initial_time": 0.0,
+      "time_step": 0.25,
+      "final_time": 60.0,
+      "time_unit": "Month",
+      "saveper": 1.0,
+      "native_verified": false,
+      "variables": [
+        "库存"
+      ],
+      "numerical_method": "Euler",
+      "status": "completed",
+      "warnings": []
+    },
+    {
+      "name": "调整时间 +10%",
+      "backend": "builtin",
+      "model_sha256": "6399e1abebd1c494159d3670c062cd9e1fefdb11999c6ee8c8a96d491c0b0ee9",
+      "parameters": {
+        "调整时间": 4.4
+      },
+      "initial_time": 0.0,
+      "time_step": 0.25,
+      "final_time": 60.0,
+      "time_unit": "Month",
+      "saveper": 1.0,
+      "native_verified": false,
+      "variables": [
+        "库存"
+      ],
+      "numerical_method": "Euler",
+      "status": "completed",
+      "warnings": []
+    },
+    {
+      "name": "current",
+      "backend": "builtin",
+      "model_sha256": "6399e1abebd1c494159d3670c062cd9e1fefdb11999c6ee8c8a96d491c0b0ee9",
+      "parameters": {},
+      "initial_time": 0.0,
+      "time_step": 0.25,
+      "final_time": 60.0,
+      "time_unit": "Month",
+      "saveper": 1.0,
+      "native_verified": false,
+      "variables": [
+        "库存"
+      ],
+      "numerical_method": "Euler",
+      "status": "completed",
+      "warnings": []
+    }
+  ],
+  "run_count": 5,
+  "native_verified": false
+}

@@ -1,0 +1,19 @@
+{
+  "mode": "monte-carlo",
+  "variables": [
+    "库存",
+    "补货"
+  ],
+  "parameters": {
+    "调整时间": [
+      2,
+      8
+    ],
+    "需求": [
+      15,
+      35
+    ]
+  },
+  "samples": 30,
+  "seed": 42
+}

@@ -1,0 +1,156 @@
+{
+  "artifact_kind": "simulation_result",
+  "style": "classic",
+  "dpi": 600,
+  "title": "",
+  "time_unit": "Month",
+  "native_verified": false,
+  "sample_bands_are_confidence_intervals": false,
+  "figures": [
+    {
+      "variable": "库存",
+      "file": "inventory_sensitivity.png",
+      "sha256": "a49beef2df1034bb7e508cbe24e335b46bf761dcee68c03063db758bb4e5a2e8"
+    },
+    {
+      "variable": "库存",
+      "file": "inventory_sensitivity.pdf",
+      "sha256": "a9ede4a3c9c51045402628d0a58365f75bfefd6f4525d88c70962aafdd054420"
+    },
+    {
+      "variable": "库存",
+      "file": "inventory_sensitivity.svg",
+      "sha256": "766b699f9bfe1d7f45d39366ad98584fdc079ea368c3661067cd856d564e3d19"
+    }
+  ],
+  "plot_config": {
+    "width_inches": 7.2,
+    "plot_height_inches": 3.3,
+    "legend_row_inches": 0.28,
+    "font_family": [],
+    "font_size": 11,
+    "legend_font_size": 10,
+    "line_width": 0.85,
+    "marker_size": 6.5,
+    "marker_repeats": 6,
+    "legend_repeats": 5,
+    "max_classic_curves": 12,
+    "number_lines": true,
+    "colors": [
+      "#0000ff",
+      "#ff0000",
+      "#008000",
+      "#808080",
+      "#000000",
+      "#800080",
+      "#008080",
+      "#a0522d"
+    ],
+    "grid_color": "#d5d5d5",
+    "border_color": "#888888"
+  },
+  "runs": [
+    {
+      "name": "调整时间 -20%",
+      "backend": "builtin",
+      "model_sha256": "6399e1abebd1c494159d3670c062cd9e1fefdb11999c6ee8c8a96d491c0b0ee9",
+      "parameters": {
+        "调整时间": 3.2
+      },
+      "initial_time": 0.0,
+      "time_step": 0.25,
+      "final_time": 60.0,
+      "time_unit": "Month",
+      "saveper": 1.0,
+      "native_verified": false,
+      "variables": [
+        "库存"
+      ],
+      "numerical_method": "Euler",
+      "status": "completed",
+      "warnings": []
+    },
+    {
+      "name": "调整时间 -10%",
+      "backend": "builtin",
+      "model_sha256": "6399e1abebd1c494159d3670c062cd9e1fefdb11999c6ee8c8a96d491c0b0ee9",
+      "parameters": {
+        "调整时间": 3.6
+      },
+      "initial_time": 0.0,
+      "time_step": 0.25,
+      "final_time": 60.0,
+      "time_unit": "Month",
+      "saveper": 1.0,
+      "native_verified": false,
+      "variables": [
+        "库存"
+      ],
+      "numerical_method": "Euler",
+      "status": "completed",
+      "warnings": []
+    },
+    {
+      "name": "调整时间 +20%",
+      "backend": "builtin",
+      "model_sha256": "6399e1abebd1c494159d3670c062cd9e1fefdb11999c6ee8c8a96d491c0b0ee9",
+      "parameters": {
+        "调整时间": 4.8
+      },
+      "initial_time": 0.0,
+      "time_step": 0.25,
+      "final_time": 60.0,
+      "time_unit": "Month",
+      "saveper": 1.0,
+      "native_verified": false,
+      "variables": [
+        "库存"
+      ],
+      "numerical_method": "Euler",
+      "status": "completed",
+      "warnings": []
+    },
+    {
+      "name": "调整时间 +10%",
+      "backend": "builtin",
+      "model_sha256": "6399e1abebd1c494159d3670c062cd9e1fefdb11999c6ee8c8a96d491c0b0ee9",
+      "parameters": {
+        "调整时间": 4.4
+      },
+      "initial_time": 0.0,
+      "time_step": 0.25,
+      "final_time": 60.0,
+      "time_unit": "Month",
+      "saveper": 1.0,
+      "native_verified": false,
+      "variables": [
+        "库存"
+      ],
+      "numerical_method": "Euler",
+      "status": "completed",
+      "warnings": []
+    },
+    {
+      "name": "current",
+      "backend": "builtin",
+      "model_sha256": "6399e1abebd1c494159d3670c062cd9e1fefdb11999c6ee8c8a96d491c0b0ee9",
+      "parameters": {},
+      "initial_time": 0.0,
+      "time_step": 0.25,
+      "final_time": 60.0,
+      "time_unit": "Month",
+      "saveper": 1.0,
+      "native_verified": false,
+      "variables": [
+        "库存"
+      ],
+      "numerical_method": "Euler",
+      "status": "completed",
+      "warnings": []
+    }
+  ],
+  "resolved_font_families": [
+    "Times New Roman",
+    "SimSun"
+  ]
+}

@@ -1,0 +1,8 @@
+# 原生模型和验收图件保留导出字节，避免跨平台检出改变哈希。
+*.mdl -text
+*.csv -text whitespace=cr-at-eol
+docs/assets/*.svg -text whitespace=-blank-at-eol linguist-generated=true
+
+# 入口脚本使用目标平台的换行。
+*.sh text eol=lf
+*.cmd text eol=crlf

@@ -1,0 +1,19 @@
+{
+  "view": "*",
+  "layout_mode": "refine",
+  "style": "preserve",
+  "rankdir": "LR",
+  "nodesep": 0.65,
+  "ranksep": 1.05,
+  "move_stocks": true,
+  "lock_node_names": [],
+  "lock_object_ids": [],
+  "clearance": 6,
+  "node_spacing": 24,
+  "curve_strength": 0.12,
+  "minimum_curve_pixels": 14,
+  "maximum_curve_pixels": 180,
+  "routing_passes": 2,
+  "max_allowed_crossings": 0,
+  "skip_views": []
+}

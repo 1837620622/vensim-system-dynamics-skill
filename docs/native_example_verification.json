@@ -1,0 +1,25 @@
+{
+  "model": "skills/vensim-skill/assets/examples/inventory_zh.mdl",
+  "model_sha256": "6399e1abebd1c494159d3670c062cd9e1fefdb11999c6ee8c8a96d491c0b0ee9",
+  "figure": "docs/assets/inventory_native.svg",
+  "figure_sha256": "0ea3c96e3e0c60ea64e02f7081ad6a6c5842109cdf06b7e85488ab58d333e6c8",
+  "renderer": "Vensim PLE 10.5.0 on macOS",
+  "method": "Native View > Export to SVG",
+  "check_model": "passed in native UI",
+  "units_check": "passed in native UI",
+  "native_sketch_review": "black information arrows, no crossing or extra generated connections observed",
+  "native_simulation": {
+    "status": "run completed and trajectory visually inspected in native custom graph",
+    "run_name": "inventory_verified",
+    "variable": "库存",
+    "time_range": [
+      0,
+      60
+    ],
+    "time_unit": "Month",
+    "observed_initial": 100,
+    "observed_behavior": "monotonic approach to 200",
+    "pointwise_native_numeric_comparison": false
+  },
+  "note": "This record applies only to this model and figure, not all historical examples."
+}

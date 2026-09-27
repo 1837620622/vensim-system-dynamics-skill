@@ -1,0 +1,101 @@
+{
+  "name": "库存调整",
+  "language": "zh",
+  "time": {
+    "initial": 0,
+    "final": 60,
+    "step": 0.25,
+    "saveper": 1,
+    "unit": "Month"
+  },
+  "variables": [
+    {
+      "name": "库存",
+      "kind": "stock",
+      "initial": "初始库存",
+      "unit": "件",
+      "position": [
+        400,
+        220
+      ]
+    },
+    {
+      "name": "补货",
+      "kind": "flow",
+      "from": null,
+      "to": "库存",
+      "equation": "MAX(0, 需求 + (目标库存 - 库存) / 调整时间)",
+      "unit": "件/Month"
+    },
+    {
+      "name": "销售",
+      "kind": "flow",
+      "from": "库存",
+      "to": null,
+      "equation": "MIN(需求, 库存 / 发货时间)",
+      "unit": "件/Month"
+    },
+    {
+      "name": "需求",
+      "kind": "constant",
+      "equation": "20",
+      "unit": "件/Month",
+      "position": [
+        430,
+        430
+      ]
+    },
+    {
+      "name": "目标库存",
+      "kind": "constant",
+      "equation": "200",
+      "unit": "件",
+      "position": [
+        105,
+        355
+      ]
+    },
+    {
+      "name": "调整时间",
+      "kind": "constant",
+      "equation": "4",
+      "unit": "Month",
+      "position": [
+        260,
+        435
+      ]
+    },
+    {
+      "name": "发货时间",
+      "kind": "constant",
+      "equation": "1",
+      "unit": "Month",
+      "position": [
+        665,
+        360
+      ]
+    },
+    {
+      "name": "初始库存",
+      "kind": "constant",
+      "equation": "100",
+      "unit": "件",
+      "position": [
+        400,
+        95
+      ]
+    }
+  ],
+  "links": [
+    {
+      "from": "库存",
+      "to": "补货",
+      "polarity": "-"
+    },
+    {
+      "from": "目标库存",
+      "to": "补货",
+      "polarity": "+"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vensim 建模与仿真"
+  short_description: "中文 MDL 建模、自然圆弧排版、影子变量修复与可复现仿真和论文图件"
+  default_prompt: "使用 $vensim-skill，根据当前资料建立中文 MDL，不套用旧案例的变量、参数或公式；核对字体、结构和仿真，再整理自然布局与清晰结果图。"

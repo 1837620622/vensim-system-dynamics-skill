@@ -2,7 +2,7 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOLS = ROOT / "skills" / "vensim-skill" / "vensim_system_dynamics" / "tools"
+TOOLS = ROOT / "skills" / "vensim-skill" / "scripts"
 sys.path.insert(0, str(TOOLS))
 
 from academic_gate import check_model  # noqa: E402
@@ -56,7 +56,7 @@ D = SQRT( C * T )
 def test_academic_gate_accepts_endogenous_coupling_model(tmp_path):
     path = tmp_path / "pass.mdl"
     path.write_text(_model("流量"), encoding="utf-8")
-    report = check_model(path, None, None, True, ["U1", "U2", "C", "T", "D"])
+    report = check_model(path, None, None, True, ["U1", "C", "T", "D"])
     assert report["pass"] is True
     assert report["stock_count"] == 1
 
@@ -64,9 +64,20 @@ def test_academic_gate_accepts_endogenous_coupling_model(tmp_path):
 def test_academic_gate_rejects_observed_replay_in_stock_flow(tmp_path):
     path = tmp_path / "replay.mdl"
     path.write_text(_model("Observed Stock - 存量") + "Observed Stock = 10\n    ~ Unit\n    |\n", encoding="utf-8")
-    report = check_model(path, None, None, False, [])
+    report = check_model(path, None, None, False, [], strict_endogenous=True)
     assert report["pass"] is False
     assert any("历史路径注入" in item for item in report["errors"])
+
+
+def test_academic_gate_does_not_bind_general_model_to_one_case(tmp_path):
+    path = tmp_path / "general.mdl"
+    path.write_text(_model("Observed Demand - 存量") + "Observed Demand = 10\n    ~ Unit/Year\n    |\n", encoding="utf-8")
+    report = check_model(path, None, None, False, [])
+    assert report["pass"]
+    assert any("边界驱动" in warning for warning in report["warnings"])
+    report = check_model(path, None, None, True, [])
+    assert not report["pass"]
+    assert any("明确本项目" in error for error in report["errors"])
 
 
 def test_academic_gate_requires_coupling_outputs(tmp_path):
@@ -74,15 +85,15 @@ def test_academic_gate_requires_coupling_outputs(tmp_path):
     path.write_text(_model("流量", coupling=False), encoding="utf-8")
     report = check_model(path, None, None, True, ["U1", "U2", "C", "T", "D"])
     assert report["pass"] is False
-    assert any("耦合协调门禁缺少" in item for item in report["errors"])
+    assert any("缺少所选输出" in item for item in report["errors"])
 
 
-def test_layout_route_forces_native_arc_and_navy_solid_style():
+def test_layout_route_preserves_polarity_and_enables_arrow_color():
     line = "1,9,1,2,0,0,43,2,1,64,0,31-41-55,,,1|(0,0)|\n"
-    output = update_arrow_line(line, (80, 40), {"information_arrow_color": "0-0-150"})
+    output = update_arrow_line(line, (80, 40), {"style": "monochrome"})
     fields = output.split("|", 1)[0].rstrip("\n").split(",")
-    assert fields[4:9] == ["1", "0", "0", "0", "0"]
-    assert fields[11] == "0-0-150"
+    assert fields[4:9] == ["1", "0", "43", "2", "1"]
+    assert fields[11] == "0-0-0"
     assert fields[-1] == "1"
     assert "|(80,40)|" in output
 
@@ -110,7 +121,16 @@ def test_academic_gate_treats_policy_time_switch_as_boundary_input(tmp_path):
         "    |\n"
     )
     path.write_text(text, encoding="utf-8")
-    report = check_model(path, None, None, True, ["U1", "U2", "C", "T", "D"])
+    report = check_model(path, None, None, True, ["U1", "C", "T", "D"])
     assert report["pass"] is True
     assert not any("按 TIME 分段切换" in warning for warning in report["warnings"])
     assert report["boundary_time_switches"] == ["基础设施投入情景"]
+
+
+def test_derived_output_check_uses_project_names_and_dependencies(tmp_path):
+    path = tmp_path / "different_domain.mdl"
+    path.write_text("病房需求=病人数/床位数~Dmnl~|\n病人数=70~Person~|\n床位数=100~Person~|\n", encoding="utf-8")
+    assert check_model(path, None, None, True, ["病房需求"])["pass"]
+    report = check_model(path, None, None, True, ["病房需求", "床位数"])
+    assert not report["pass"]
+    assert any("床位数" in error and "计算依赖" in error for error in report["errors"])

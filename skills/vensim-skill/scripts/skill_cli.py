@@ -64,7 +64,7 @@ def _invoke_engine(argv: List[str]) -> int:
 
 def doctor_report():
     packages = {}
-    for name in ("matplotlib", "pysd", "mcp"):
+    for name in ("matplotlib", "pysd", "scipy", "mcp"):
         try:
             packages[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
@@ -190,6 +190,9 @@ def _help() -> int:
                        --time-step 步长 --final-time 终点 --saveper 保存间隔
   experiment model.mdl --spec experiment.json --output-dir results [--plot out.png]
   convergence model.mdl --var 变量 --output convergence.json [--tolerance 0.01]
+  calibrate model.mdl --spec calibration.json --data observed.csv --output-dir fit
+  optimize model.mdl --spec policy.json --output-dir policy
+         搜索需可选 SciPy；边界、目标、种子与仿真次数必须明确
   academic model.mdl --references refs --spec model_spec.json
   units model.mdl                  缺失单位预检，不能替代原生量纲检查
   fix model.mdl --output fixed.mdl 显式选择修复项，详见 fix --help
@@ -219,6 +222,9 @@ def main(argv: List[str] | None = None) -> int:
         return _invoke(model_builder.main, rest)
     if cmd in {"experiment", "convergence"}:
         return _invoke(experiments.main, args)
+    if cmd in {"calibrate", "optimize"}:
+        from optimization import main as optimization_main
+        return _invoke(optimization_main, args)
     if cmd == "plot-data":
         from result_plotting import main as plot_main
         return _invoke(plot_main, rest)

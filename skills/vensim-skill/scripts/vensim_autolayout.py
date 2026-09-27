@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from mdl_document import MdlDocument, atomic_write, separate_output
+from mdl_document import MdlDocument, atomic_write, preflight_outputs, separate_output
 from sketch_geometry import arrow_path, measure_view, quality_pass
 
 # 草图起始标记（.mdl 中写作 \\\---///）
@@ -60,8 +60,8 @@ OBJECT_TYPES = {T_VARIABLE, T_VALVE, T_SOURCE_SINK, *T_OTHER}
 # 箭头字段顺序(官方 Sketch Objects 文档)：
 #   1,id,from,to,shape,hid,pol,thick,hasf,dtype,res,color,font,np|plist
 # field[7] = thick(线宽)。物理流率管道 thick=22，信息箭头 thick=0。
-# thick >= 此阈值视为物理流率管道(粗管)，< 视为信息箭头(细线)。
-FLOW_THICK_THRESHOLD = 20
+# 官方格式中 thick 大于 20 才是双线；整数阈值从 21 开始。
+FLOW_THICK_THRESHOLD = 21
 MAX_GRAPHVIZ_NODES = 1_000
 MAX_GRAPHVIZ_EDGES = 5_000
 MAX_DOT_LABEL_CHARS = 256
@@ -128,7 +128,7 @@ class Arrow:
     from_id: int
     to_id: int
     shape: int
-    thick: int          # field[7] thick：物理管道(>=20) vs 信息箭头(<20)
+    thick: int          # field[7] thick：物理管道(>20) vs 信息箭头(<=20)
     fields: List[str]
     points: List[Tuple[float, float]]
 
@@ -678,10 +678,10 @@ def validate_config(config):
     anchors = config.get("node_positions", {})
     if not isinstance(anchors, dict) or any(not isinstance(p, list) or len(p) != 2 or any(not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 for v in p) for p in anchors.values()):
         raise ValueError("node_positions 必须为变量名到 [x, y] 非负有限坐标的映射")
-    if "information_arrow_color" in config and not re.fullmatch(r"(?:\d{1,3}-){2}\d{1,3}", str(config["information_arrow_color"])):
-        raise ValueError("information_arrow_color 必须为 R-G-B")
-    if "information_arrow_color" in config and any(int(c) > 255 for c in config["information_arrow_color"].split("-")):
-        raise ValueError("颜色分量必须为 0 到 255")
+    if "information_arrow_color" in config:
+        expected = {"monochrome": "0-0-0", "academic": "0-0-0", "native-blue": "0-0-255"}.get(config.get("style"))
+        if expected is None or config["information_arrow_color"] != expected:
+            raise ValueError("信息箭头颜色必须与明确的黑色/纯蓝 style 一致；preserve 保留原生设置，不接收颜色覆盖")
     return config
 
 
@@ -709,7 +709,7 @@ def command_layout(path: Path, output: Path, config_path: Optional[Path] = None,
     if any(len(v.objects) > MAX_GRAPHVIZ_NODES or len(v.arrows) > MAX_GRAPHVIZ_EDGES for v in selected):
         raise ValueError("草图超过布局规模上限，请先按子系统拆分视图")
     report_path = output.with_suffix(output.suffix + ".layout_report.json")
-    separate_output(report_path, [path, *([config_path] if config_path else [])])
+    preflight_outputs([output, report_path, *([preview] if preview else [])], [path, *([config_path] if config_path else [])])
     if preview:
         separate_output(preview, [path, output, report_path, *([config_path] if config_path else [])])
         if preview.suffix.lower() not in {".svg", ".html"}:

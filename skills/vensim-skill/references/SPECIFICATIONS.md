@@ -47,6 +47,10 @@
 
 `changes`、`samples`、`seed` 必须在相应模式中显式提供，不默认沿用参考图的百分比或其他实验设置。最多 200 次运行，输出最多 200 万个变量值；这些是资源保护上限，不是推荐的实验规模。实验不修改模型，每次都重新初始化。未知常量、覆盖反馈方程、不合理保存网格和输出冲突会报错。
 
+## 校准与政策 JSON
+
+独立入口为 `calibrate` 与 `optimize`，不属于 `experiment` 的 mode。规范、字段与统计定义见 [Python 高级分析](ADVANCED_ANALYSIS.md)，空白文件分别为 [calibration_template.json](../assets/templates/calibration_template.json) 与 [policy_template.json](../assets/templates/policy_template.json)。输入必须来自当前模型与资料；空模板不能自动补成演示值。
+
 ## 布局配置
 
 从 [SFD 配置](../assets/templates/layout_config_sfd.json) 或 [CLD 配置](../assets/templates/layout_config_cld.json) 开始，按实际图面修改；不要机械复制示例中的变量名或坐标。

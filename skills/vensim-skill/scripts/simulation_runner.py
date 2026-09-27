@@ -46,9 +46,11 @@ def run_model(path: Path, variables=None, backend="builtin", params=None,
             float(originals[name].rhs)
         except ValueError as exc:
             raise ValueError(f"{name}: 只能覆盖数值常量参数，不能替换反馈方程或延迟状态") from exc
-        if not isinstance(value, (int, float)) or not math.isfinite(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"参数 {name} 必须是有限数")
     selected = variables or [name for name in originals if name not in CONTROL_NAMES]
+    if isinstance(selected, str) or any(not isinstance(name, str) for name in selected) or len(set(selected)) != len(selected):
+        raise ValueError("变量必须为不重复的名称列表")
     if not selected:
         raise ValueError("模型没有可导出的变量")
     if any(name not in originals for name in selected):
@@ -59,7 +61,7 @@ def run_model(path: Path, variables=None, backend="builtin", params=None,
     tf = tf if final_time is None else final_time
     dt = dt if time_step is None else time_step
     sp = sp if saveper is None else saveper
-    if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in (t0, tf, dt, sp)) or tf < t0 or dt <= 0 or sp <= 0:
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in (t0, tf, dt, sp)) or tf < t0 or dt <= 0 or sp <= 0:
         raise ValueError("仿真时间必须有限，终点不能早于起点，时间步长与保存间隔必须为正数")
     if (tf - t0) / dt > 1_000_000 or ((tf - t0) / sp + 1) * len(originals) > 5_000_000:
         raise ValueError("仿真规模超限，请缩短区间或增大保存间隔")

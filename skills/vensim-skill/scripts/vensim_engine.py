@@ -27,7 +27,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from mdl_document import MdlDocument, atomic_write, separate_output
+from mdl_document import MdlDocument, atomic_write, preflight_outputs, separate_output
 
 # ---------------------------------------------------------------------------
 # 方程区解析
@@ -39,13 +39,6 @@ MAX_EXPR_CHARS = 20_000
 MAX_AST_NODES = 2_000
 MAX_AST_DEPTH = 80
 MAX_POWER_EXPONENT = 1_000
-RESERVED_EVAL_NAMES = {
-    "math", "_wl",
-    "_sd_abs", "_sd_min", "_sd_max", "_sd_sqrt", "_sd_exp", "_sd_log",
-    "_sd_sin", "_sd_cos", "_sd_tan", "_sd_int", "_sd_float",
-    "_pulse", "_ramp", "_step", "_delay_fixed",
-    "__delay_fixed_history__",
-}
 HELPER_TOKENS = {
     "_wl": "@0@",
     "_sd_abs": "@1@",
@@ -581,8 +574,10 @@ def _to_python_expr(rhs: str, name_map: Dict[str, str]) -> str:
     # 幂运算 ^ -> **
     s = s.replace("^", "**")
     # 变量名替换：按长度降序，中文/带空格变量名映射为合法 Python 标识符。
-    for orig, alias in sorted(name_map.items(), key=lambda x: -len(x[0])):
-        s = re.sub(_name_pattern(orig), alias, s)
+    # 单次替换，防止刚生成的内部别名又被另一个真实变量名匹配。
+    pattern = "|".join(_name_pattern(name) for name in sorted(name_map, key=len, reverse=True))
+    if pattern:
+        s = re.sub(pattern, lambda match: name_map[match.group(0)], s)
     for helper_name, token in HELPER_TOKENS.items():
         s = s.replace(token, helper_name)
     return s
@@ -854,10 +849,7 @@ def simulate(
     # 构建变量名到合法 Python 标识符的映射（带空格/特殊字符的变量名）
     name_map: Dict[str, str] = {}
     for i, name in enumerate(equations.keys()):
-        if re.fullmatch(r"[A-Za-z_]\w*", name) and name not in RESERVED_EVAL_NAMES:
-            name_map[name] = name
-        else:
-            name_map[name] = f"_v{i}"
+        name_map[name] = f"_v{i}"
 
     # 递归求初值依赖；库存的流率依赖不参与初始化，避免用临时零值污染辅助量。
     ctx: Dict = {"Time": t0}
@@ -986,17 +978,18 @@ def command_simulate(path: Path, output: Path, variables: List[str],
     from simulation_runner import run_model
     _ensure_output_separate(output, [path, *([plot_config] if plot_config else [])])
     metadata = output.with_suffix(output.suffix + ".run.json")
-    _ensure_output_separate(metadata, [path])
+    protected = [path, *([plot_config] if plot_config else [])]
+    preflight_outputs([output, metadata], protected)
     if plot:
         _ensure_output_separate(plot, [path, output, metadata])
     result = run_model(path, variables, strict=strict, **options)
     variables = list(result.series)
     from experiments import csv_bytes
     rows = [[t, *[result.series[name][index] for name in variables]] for index, t in enumerate(result.times)]
-    atomic_write(output, csv_bytes(["Time", *variables], rows))
-    atomic_write(metadata, json.dumps(result.metadata, ensure_ascii=False, indent=2).encode())
     if plot:
         _render_plot(result, variables, plot, dpi=dpi, formats=formats, inputs=[path, output, metadata], plot_config=plot_config)
+    atomic_write(output, csv_bytes(["Time", *variables], rows))
+    atomic_write(metadata, json.dumps(result.metadata, ensure_ascii=False, indent=2).encode())
     print(f"仿真完成: {len(result.times)} 个时间点 -> {output}")
     return 0
 

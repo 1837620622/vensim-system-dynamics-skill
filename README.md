@@ -1,12 +1,12 @@
 # Vensim System Dynamics Skill
 
-面向 Agent 的专业 Vensim 建模与仿真 Skill。直接处理可编辑的 `.mdl`，默认中文业务变量和中文视图，支持自然圆弧、影子变量避让、情景实验与 Python 论文图件。Windows、macOS、Linux 共用 Python 核心；MCP 是可选接入方式。
+面向 Agent 的专业 Vensim 建模与仿真 Skill。直接处理可编辑的 `.mdl`，默认中文业务变量和中文视图，支持自然圆弧、影子变量避让、情景实验、参数校准、政策优化与 Python 论文图件。Windows、macOS、Linux 共用 Python 核心；MCP 是可选接入方式。
 
 **最终模型结构图必须来自真实 MDL 在 Vensim 原生打开后的导出或截图。** Graphviz 只用于辅助定位；工具生成的几何预览不能代替原生图。项目为独立实现，与 Ventana Systems 无隶属或认证关系。
 
 **作者：传康KK（万能程序员） · 禁止商业使用。** 使用与分发须遵守 [非商业许可证](LICENSE)，保留作者及许可证信息；作者署名放在文档中，不叠加到模型图上。
 
-[安装](#安装与运行) · [目录与技能识别](#目录与技能识别) · [MDL 外观](#外观规则) · [Python 结果图](#python-论文结果图) · [实验能力](#仿真与新增实验能力) · [Agent 接入](#agent-与-mcp) · [验收](#检查修复与开发)
+[安装](#安装与运行) · [目录与技能识别](#目录与技能识别) · [MDL 外观](#外观规则) · [Python 结果图](#python-论文结果图) · [实验能力](#仿真与新增实验能力) · [校准与优化](#python-参数校准与政策优化) · [Agent 接入](#agent-与-mcp) · [验收](#检查修复与开发)
 
 ## 目录与技能识别
 
@@ -68,6 +68,7 @@ cd vensim-system-dynamics-skill\skills\vensim-skill
 | --- | --- | --- |
 | 时间序列和实验结果图 | matplotlib | `python -m pip install -r requirements/plots.txt` |
 | PySD 翻译与仿真 | pysd | `python -m pip install -r requirements/pysd.txt` |
+| 参数校准与政策优化 | scipy | `python -m pip install -r requirements/analysis.txt` |
 | 本地 stdio MCP | MCP Python SDK 1.x | `python -m pip install -r requirements/mcp.txt` |
 | 全局节点位置建议 | Graphviz | macOS：`brew install graphviz`；Windows：使用 [官方安装包](https://graphviz.org/download/)，将 `dot` 加入 PATH |
 
@@ -78,6 +79,7 @@ cd vensim-system-dynamics-skill\skills\vensim-skill
 ## 外观规则
 
 - 新图默认黑色信息箭头，纯蓝 `0-0-255` 为可选样式；去掉深蓝“学术配色”默认值。实体流量保持黑色双线与原生阀门。
+- 对照原生箭头的颜色继承、线宽、头部、极性和延迟设置；颜色配置不得覆盖所选黑色/纯蓝方案，不强行放大箭头或加粗全部连线。
 - 默认中文业务变量，用户指定英文时使用英文；既有模型保留原变量名。
 - 存量—流量是稳定骨架；参数靠近作用对象，初值靠近存量。先局部避让，不把图铺成机械网格，也不加入随机抖动。
 - 普通箭头按三点圆弧计算碰撞，避免把控制点错当 Bézier 手柄。双向关系分开走，优先无交叉、无穿字、无大跨度包围弧。
@@ -180,6 +182,8 @@ Vensim 原生导出的库存示例（对应 [MDL](skills/vensim-skill/assets/exa
 | 网格敏感性 | 参数笛卡尔积，限制总运行规模 |
 | Monte Carlo | 固定种子、独立均匀分布；不宣称样本范围是统计置信区间 |
 | 步长检查 | 对比 dt、dt/2、dt/4；同一保存时间网格上评估归一化误差 |
+| 观测数据校准 | 显式参数边界、观测单位、权重和尺度；从真实 CSV 计算误差，实际运行候选模型 |
+| 有约束政策搜索 | 终值、极值、均值或积分等目标，支持上下界约束；分别报告可行性、收敛和预算终止 |
 | 结果文件 | 带 BOM 的 UTF-8 CSV；运行元数据、模型 SHA-256、后端、种子和参数 |
 
 实验保存 `series.csv`、`summary.csv` 和 `experiment.json`；摘要包括初值、末值、最小值、最大值和峰值时刻。现有目录中同名输出不会被实验命令覆盖。批量实验最多 200 次，输出规模有上限。
@@ -188,11 +192,39 @@ Vensim 原生导出的库存示例（对应 [MDL](skills/vensim-skill/assets/exa
 
 `check` 是内置预检，`units` 只检查缺失单位，均不能代替原生量纲验证。复杂数组、宏、外部数据、随机函数及完整 Vensim 函数语义不在内置求解器承诺范围内。
 
+## Python 参数校准与政策优化
+
+PLE 用户可以借助 Python 完成这两类高级分析。SciPy 差分进化负责搜索，内置引擎或 PySD 负责每次仿真。每次都从原始初值开始，保存基准与最佳可行方案；源 MDL 的方程、原始参数和图面保持不变。
+
+```bash
+python -m pip install -r requirements/analysis.txt
+./skill.sh calibrate work/model.mdl --spec calibration.json --data observations.csv --output-dir results/calibration
+./skill.sh optimize work/model.mdl --spec policy.json --output-dir results/policy
+./skill.sh plot-data results/calibration/comparison.csv --var 目标变量 --time-unit 实际单位 --output figures/calibration.png --formats png,pdf,svg
+```
+
+这里的模型、规范、观测文件、变量和单位由当前工程提供。使用 [校准模板](skills/vensim-skill/assets/templates/calibration_template.json) 和 [政策模板](skills/vensim-skill/assets/templates/policy_template.json) 填写资料；模板不预设业务参数、目标、随机种子或次数。空值不能直接运行。
+
+| 项目 | 参数校准 `calibrate` | 政策优化 `optimize` |
+| --- | --- | --- |
+| 依据 | 实际观测 CSV，变量及时间单位明确 | 明确的政策目标、方向、尺度与约束 |
+| 得分 | 加权、归一化的均方误差 | 加权统计目标，分别指定最小化/最大化 |
+| 参数 | 有界数值常量，可包含独立初值参数 | 有界可调常量，不能替换反馈方程 |
+| 时间 | 观测必须落在实际保存网格，不静默插值 | 所有方案使用同一时间区间与保存网格 |
+| 约束 | 严格检查数据字段、单位声明、有限值 | 支持变量初值、终值、极值、均值或积分的上下界 |
+| 结果 | baseline、best、observed 的对应轨迹 | baseline 与最佳可行方案的对应轨迹 |
+
+每次输出 `optimization.json`、`evaluations.csv`、`baseline.csv`、`comparison.csv`；找到可行解才生成 `best.csv`。报告记录源文件哈希、后端、NumPy/SciPy 版本、参数、实际仿真次数及终止原因。无可行解仍保留审计记录，不编造最优方案；重复运行使用新的目录。
+
+`seed` 与 `max_evaluations` 必须显式给出，实际次数包含基准且不会超过设置上限。默认资源保护可在评估机器能力后调整。找到可行解、预算耗尽、求解器收敛分别记录，**不把搜索所得最好结果称为已证明的全局最优**。
+
+这两项能力覆盖 Vensim 高级版本中校准与政策搜索的使用场景，属于独立实现。保存点上的梯形积分与 DSS 原生 payoff 累积规则不同，不能宣称分数逐位等价。暂不实现 Kalman 滤波、MCMC、参数置信区间或 DSS 全部优化选项。输入字段、计算定义、输出和验证方法见 [Python 高级分析手册](skills/vensim-skill/references/ADVANCED_ANALYSIS.md)。
+
 ## Agent 与 MCP
 
 能读取技能文件、运行本地 Python 命令的 Agent 可调用 CLI；具体宿主能力仍应实际检查。核心不依赖某个 IDE，也不要求启动服务器。
 
-可选独立 stdio 适配器提供 10 个固定工具：读取模型、方程预检、几何检查、布局、建模、仿真、批量实验、结果绘图、步长检查、调试预览。它限定工作目录、拒绝路径越界和覆盖已有主输出，不接受任意 shell 命令。启动方式与客户端配置见 [MCP 文档](skills/vensim-skill/references/MCP.md)。
+可选独立 stdio 适配器提供 12 个固定工具：读取模型、方程预检、几何检查、布局、建模、仿真、批量实验、参数校准、政策优化、结果绘图、步长检查、调试预览。它限定工作目录、拒绝路径越界及覆盖已有主输出和报告，不接受任意 shell 命令。旧于已声明安全下限的 MCP SDK 会拒绝启动并提示更新。启动方式与客户端配置见 [MCP 文档](skills/vensim-skill/references/MCP.md)。
 
 后续可以直接这样给 Agent 任务：
 
@@ -221,11 +253,13 @@ python3 -m bandit -r skills/vensim-skill/scripts -q
 shellcheck skills/vensim-skill/skill.sh
 ```
 
-Windows 测试用 `python -m pytest -q -p no:cacheprovider`。CI 已配置 Windows、macOS 与 Linux 矩阵；可选 PySD/MCP/Matplotlib 集成检查在安装对应依赖的任务中运行。配置存在不等于远程测试已通过，实际执行状态见 [GitHub Actions](https://github.com/1837620622/vensim-system-dynamics-skill/actions/workflows/validate.yml)，每次发布分别说明本机与远程验证情况。解析、真实圆弧、编码续行、影子重叠、不变量、求解器、绘图、技能识别和输出路径是主要回归范围。
+Windows 测试用 `python -m pytest -q -p no:cacheprovider`。CI 已配置 Windows、macOS 与 Linux 矩阵；可选 PySD/MCP/Matplotlib/SciPy 集成检查在安装对应依赖的任务中运行。配置存在不等于远程测试已通过，实际执行状态见 [GitHub Actions](https://github.com/1837620622/vensim-system-dynamics-skill/actions/workflows/validate.yml)，每次发布分别说明本机与远程验证情况。解析、真实圆弧、编码续行、影子重叠、不变量、求解器、校准和约束优化、绘图、技能识别和输出路径是主要回归范围。
 
 原生验收已经覆盖中文库存示例的模型检查、单位检查、原生 SVG 与库存轨迹的可视检查；内置引擎与 PySD 对相同示例做逐点数值对照。原生轨迹的可视检查不等同于原生全量数值误差验证，验收记录明确区分这些证据。
 
 ## 兼容性与升级说明
+
+`v2.1.0` 增加观测校准、有约束政策搜索、两份不含业务数值的规范模板和两个 MCP 工具。同时修复原生颜色方案被自定义色覆盖、内部变量别名与真实变量重名导致的数值错误，以及附属报告、图件清单可能覆盖既有文件的问题。
 
 - 公共入口仍为 `skill.sh`、`skill.cmd` 和 `SKILL.md`；内部执行路径统一为 `scripts/`，资料放 `references/`，示例与模板放 `assets/`。旧脚本中引用内部目录的路径需要同步更新。
 - 新建模型和仿真必须有完整时间设置；实验幅度、抽样次数、种子显式提供，不静默套用旧案例。新建 MDL 默认中文，已有变量名保持。
@@ -233,6 +267,7 @@ Windows 测试用 `python -m pytest -q -p no:cacheprovider`。CI 已配置 Windo
 - 方程区逐字节保护、BOM/GB18030/续行兼容、箭头极性与延迟标记保留、三阶段物料延迟和状态初始化都有回归覆盖。
 - 结果图统一为可配置 Python 绘图，默认 600 DPI 与独立单变量图件；多变量不再机械拼成一张长图集。
 - 项目输出放明确的 `work/`、`results/` 或用户工程目录；Python 缓存、临时 Vensim 数据集和调试文件不作为 Skill 源码发布。
+- 主输出与附属文件一起检查；默认拒绝覆盖所有已有输出及断裂符号链接。写入采用同文件系统的原子新建，要求输出位置支持硬链接（例如常用 APFS、NTFS、ext4）。不支持的文件系统会报错，应改用本地工程目录；不会退回静默覆盖。
 
 本项目补充 PLE 外的实验与出图工作流，**不解锁 DSS，也不替代 DSS 全部功能**。所有后端都应按模型实际使用的函数、数据源、数组和积分方式确认支持情况；遇到未覆盖语法要报错或切换后端，不静默近似为“正确结果”。
 

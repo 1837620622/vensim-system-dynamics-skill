@@ -195,7 +195,7 @@ def test_mcp_protocol_and_workspace_boundary(inventory, tmp_path):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 listed = await session.list_tools()
-                assert len(listed.tools) == 10
+                assert len(listed.tools) == 12
                 result = await session.call_tool("inspect_model", {"model": str(inventory.relative_to(tmp_path))})
                 assert not result.isError
                 escaped = await session.call_tool("inspect_model", {"model": "../outside.mdl"})
@@ -204,5 +204,12 @@ def test_mcp_protocol_and_workspace_boundary(inventory, tmp_path):
                 assert overwrite.isError
                 simulated = await session.call_tool("simulate_model", {"model": str(inventory), "output": "mcp.csv", "variables": ["库存"]})
                 assert not simulated.isError
+                empty = await session.call_tool("simulate_model", {"model": str(inventory), "output": "empty.csv", "variables": []})
+                assert empty.isError and not (tmp_path / "empty.csv").exists()
+                protected = tmp_path / "protected.csv.run.json"
+                protected.write_bytes(b"keep")
+                blocked = await session.call_tool("simulate_model", {"model": str(inventory), "output": "protected.csv", "variables": ["库存"]})
+                assert blocked.isError and protected.read_bytes() == b"keep"
+                assert not (tmp_path / "protected.csv").exists()
         assert (tmp_path / "mcp.csv").is_file()
     asyncio.run(exercise())

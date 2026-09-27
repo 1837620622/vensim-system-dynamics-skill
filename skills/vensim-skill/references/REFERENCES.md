@@ -32,6 +32,14 @@
 
 官方教程决定基本语义；本项目的具体位置、启发式权重和样式选择是工程实现，不是官方推荐算法或视觉认证。库存示例为本项目构造，并在原生 Vensim 核对，不是临摹图代替模型。
 
+## 参数校准与政策搜索
+
+- [Vensim 优化功能](https://www.vensim.com/documentation/usr18.html) 与 [Optimization](https://www.vensim.com/documentation/ref_optimization.html)：区分数据校准、政策搜索、常量参数与目标。
+- [Payoff Computation](https://www.vensim.com/documentation/payoffcomputation.html)：原生政策 payoff 按 TIME STEP 累积，不能将保存点上的梯形统计声称为相同分数。
+- [SciPy differential_evolution](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.differential_evolution.html)：有界差分进化、`rng`、种群乘数与非线性约束。本工具另加实际仿真次数上限，不直接把 SciPy 代数当作运行次数。
+
+实现与统计边界见 [Python 高级分析](ADVANCED_ANALYSIS.md)。
+
 ## Graphviz
 
 [属性参考](https://graphviz.org/doc/info/attrs.html) 和 [FAQ](https://graphviz.org/faq/) 说明坐标、pin 和布局后处理的边界。Graphviz 的位置单位需换算，固定节点仍可能受坐标变换影响。本工具只取节点位置建议，再依据原生圆弧路由；不直接写入 Graphviz 样条，不把 Graphviz 的图作为最终结构图。

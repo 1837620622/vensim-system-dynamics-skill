@@ -10,7 +10,7 @@ import math
 from pathlib import Path
 import random
 
-from mdl_document import atomic_write, separate_output
+from mdl_document import atomic_write, preflight_outputs, separate_output
 from simulation_runner import run_model
 from vensim_engine import get_time_bounds, load_mdl_text, parse_equations
 
@@ -70,7 +70,7 @@ def experiment_runs(spec, baseline=None):
             # 固定种子的统计抽样，不用于口令或任何密码学用途。
             rng = random.Random(seed)  # nosec B311
             for limits in parameters.values():
-                if not isinstance(limits, list) or len(limits) != 2 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in limits) or limits[0] > limits[1]:
+                if not isinstance(limits, list) or len(limits) != 2 or not all(not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v) for v in limits) or limits[0] > limits[1]:
                     raise ValueError("Monte Carlo 参数必须是 [下限, 上限]，使用独立均匀分布")
             rows = [[rng.uniform(*parameters[name]) for name in names] for _ in range(count)]
         runs = [{"name": f"run_{index + 1:03d}", "params": dict(zip(names, row))} for index, row in enumerate(rows)]
@@ -82,7 +82,7 @@ def experiment_runs(spec, baseline=None):
     if any(not isinstance(label, str) or not label.strip() for label in labels) or len(set(labels)) != len(labels):
         raise ValueError("情景名必须非空且不重复")
     for run in runs:
-        if not isinstance(run["params"], dict) or any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in run["params"].values()):
+        if not isinstance(run["params"], dict) or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in run["params"].values()):
             raise ValueError("参数必须为变量名到有限数值的映射")
     return runs
 
@@ -104,17 +104,12 @@ def execute_experiment(model, spec, output, backend="builtin", plot=None, dpi=60
     outputs = [output / "series.csv", output / "summary.csv", output / "experiment.json"]
     plot_paths, plot_manifest = output_paths(plot, variables, formats) if plot else ([], None)
     plots = [path for _, path in plot_paths] + ([plot_manifest] if plot_manifest else [])
-    for target in outputs + plots:
-        separate_output(target, [model, *protected])
-        if target in plots:
-            separate_output(target, outputs)
-        if target.exists():
-            raise ValueError(f"输出已存在，请使用新的实验目录: {target}")
+    preflight_outputs(outputs + plots, [model, *protected])
     time = spec.get("time", {})
     if not isinstance(time, dict) or set(time) - {"time_step", "final_time", "saveper"}:
         raise ValueError("time 只接受 time_step、final_time、saveper")
     for name, value in time.items():
-        if not isinstance(value, (int, float)) or not math.isfinite(value) or (name != "final_time" and value <= 0):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or (name != "final_time" and value <= 0):
             raise ValueError(f"无效的时间设置: {name}")
     settings = get_time_bounds(parse_equations(load_mdl_text(model)))
     points = (time.get("final_time", settings[1]) - settings[0]) / time.get("saveper", settings[3]) + 1
@@ -146,8 +141,8 @@ def plot_experiment(results, variables, output, title=None, **options):
 
 
 def convergence(model, variables, output, tolerance=0.01):
-    separate_output(output, [model])
-    if not math.isfinite(tolerance) or tolerance <= 0:
+    preflight_outputs([output], [model])
+    if isinstance(tolerance, bool) or not math.isfinite(tolerance) or tolerance <= 0:
         raise ValueError("tolerance 必须为有限正数")
     _, _, dt, sp = get_time_bounds(parse_equations(load_mdl_text(model)))
     runs = [run_model(model, variables, time_step=dt / factor, saveper=sp) for factor in (1, 2, 4)]

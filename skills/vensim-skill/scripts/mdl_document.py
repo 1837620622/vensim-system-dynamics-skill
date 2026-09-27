@@ -18,8 +18,17 @@ def separate_output(output: Path, inputs) -> None:
             raise ValueError(f"输出不能覆盖输入: {output}")
 
 
-def atomic_write(path: Path, data: bytes) -> None:
-    """同目录写入后替换，避免异常留下半个模型；不覆盖输入由调用方检查。"""
+def preflight_outputs(outputs, inputs=(), overwrite=False) -> None:
+    """一次检查主文件和附属文件，避免写完主文件才发现报告覆盖输入。"""
+    outputs = [Path(path) for path in outputs]
+    for index, path in enumerate(outputs):
+        separate_output(path, [*inputs, *outputs[:index]])
+        if not overwrite and (path.exists() or path.is_symlink()):
+            raise ValueError(f"输出已存在，请使用新名称: {path}")
+
+
+def atomic_write(path: Path, data: bytes, *, overwrite=False) -> None:
+    """同目录完整写入后发布；默认以原子硬链接拒绝覆盖，包括并发创建。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -28,7 +37,11 @@ def atomic_write(path: Path, data: bytes) -> None:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        if overwrite:
+            os.replace(temporary, path)
+        else:
+            # 同一文件系统内原子创建新路径；目标存在（包括断链）时由系统拒绝。
+            os.link(temporary, path)
     finally:
         # Windows 不允许删除仍然打开的临时文件，清理必须在 with 结束后执行。
         if temporary is not None:

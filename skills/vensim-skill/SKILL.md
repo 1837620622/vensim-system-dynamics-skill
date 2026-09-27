@@ -1,6 +1,6 @@
 ---
 name: vensim-skill
-description: "Use for Vensim system dynamics modeling, real MDL layout and shadow-variable repair, Chinese model diagrams, reproducible simulation, sensitivity analysis, and Python publication figures on Windows, macOS, or Linux."
+description: "Use for Vensim modeling, native MDL layout and shadow-variable repair, Chinese diagrams, reproducible simulation, calibration, policy optimization, sensitivity analysis, and Python publication figures on Windows, macOS, or Linux."
 license: "Non-commercial; see LICENSE"
 ---
 
@@ -26,6 +26,7 @@ license: "Non-commercial; see LICENSE"
 - 外观返工、弧线、影子重叠：[图面规则](references/APPEARANCE.md)，执行排版任务前必须阅读。
 - 论文、政策或学术结论：[研究与交付检查](references/RESEARCH_WORKFLOW.md)。单纯整理已有图不强行要求重做整份研究。
 - Python 结果图、编号图例、DPI 和敏感性：[结果图手册](references/RESULT_PLOTS.md)。
+- PLE 外的参数校准、有约束政策搜索：[Python 高级分析](references/ADVANCED_ANALYSIS.md)。只有明确观测数据、目标或约束时使用；搜索结果不能称为已证明的全局最优。
 - 准备建模或实验 JSON：[输入规范](references/SPECIFICATIONS.md)。
 - 官方格式、版本、Graphviz 和 PySD 边界：[实现依据](references/REFERENCES.md)。
 - Agent 接入：[MCP 使用边界](references/MCP.md)。MCP 可选，CLI 本身不依赖 MCP。
@@ -65,6 +66,8 @@ license: "Non-commercial; see LICENSE"
 ./skill.sh simulate work/model_layout.mdl --backend pysd --var 目标变量 --output results/pysd.csv
 ./skill.sh experiment work/model_layout.mdl --spec experiment.json --output-dir results/scenarios
 ./skill.sh convergence work/model_layout.mdl --var 目标变量 --output results/convergence.json
+./skill.sh calibrate work/model_layout.mdl --spec calibration.json --data observations.csv --output-dir results/calibration
+./skill.sh optimize work/model_layout.mdl --spec policy.json --output-dir results/policy
 ```
 
 建模 JSON 必须明确单位、流向、方程与存量初值。未知参数不能编造为研究事实。内置引擎支持常见标量子集及 Euler 积分；复杂数组、宏、外部数据、高级函数交给支持它们的 PySD 或原生 Vensim。`units` 只查缺失单位，不是量纲推导。`--keep-going` 产生诊断结果，不能用于论文结论。
@@ -77,6 +80,7 @@ license: "Non-commercial; see LICENSE"
 
 - 路径以工程目录为基准；输入支持 UTF-8/BOM、GB18030 等，布局保留原编码、换行和方程字节。遇到未知格式停止猜测。
 - 不通过 shell 拼接模型内容，不对方程执行 Python `eval`；可选 MCP 只在指定工作目录提供固定工具，不允许任意命令执行。
+- 主输出、运行报告和图件清单一起预检，拒绝覆盖源文件、已有文件或断裂符号链接。重复运行使用新名称或新目录；不得为了重跑而自动删除用户已有结果。
 - 修改解析器、路由或引擎后运行对应回归及跨平台测试；重点覆盖真实圆弧、反向信息线、影子重叠、重复 ID、续行编码、状态初始化、物料延迟守恒与路径越界。
 - 提交前检查文档与代码的一致性。不要承诺“任意 AI 完全兼容”“自动零交叉”“全函数支持”或“官方 MCP 已接入”，除非有相应实测证据。
 - 作者署名及非商业许可保留在 README/LICENSE 和分发包内；不把授权声明压在模型图上。禁止商业使用，详见 [LICENSE](LICENSE)。

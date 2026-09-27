@@ -86,6 +86,16 @@ PySD 是可选后端，临时翻译自包含 MDL，不在输入目录留下 Pyth
 
 输出 `series.csv`、`summary.csv` 和 `experiment.json`。所有运行成功后才写入结果数据，已有同名输出会拒绝覆盖。不同情景均从原始初值开始；敏感性样本不是校准数据，也不是概率置信区间。
 
+## 参数校准与政策优化
+
+```bash
+python -m pip install -r requirements/analysis.txt
+./skill.sh calibrate work/model.mdl --spec calibration.json --data observations.csv --output-dir results/calibration
+./skill.sh optimize work/model.mdl --spec policy.json --output-dir results/policy
+```
+
+参数边界、观测数据、目标、约束、种子和仿真次数依据当前任务填写。每个候选方案重新初始化，源模型不修改；同名结果与附属报告不可覆盖。输入规范、加权误差、保存点统计、预算与收敛的区别见 [Python 高级分析](ADVANCED_ANALYSIS.md)。
+
 ## 步长检查
 
 ```bash

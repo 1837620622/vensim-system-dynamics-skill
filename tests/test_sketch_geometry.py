@@ -140,6 +140,24 @@ def test_style_defaults_and_pure_blue():
     assert int(black[8]) & 1 and int(blue[8]) & 1
 
 
+def test_explicit_style_cannot_be_overridden_by_decorative_color():
+    from vensim_autolayout import validate_config
+    for config in ({"style": "monochrome", "information_arrow_color": "0-0-150"},
+                   {"style": "native-blue", "information_arrow_color": "0-0-0"},
+                   {"style": "preserve", "information_arrow_color": "0-0-255"}):
+        with pytest.raises(ValueError, match="颜色"):
+            validate_config(config)
+    assert validate_config({"style": "native-blue", "information_arrow_color": "0-0-255"})
+
+
+@pytest.mark.parametrize("thickness,physical", [(20, False), (21, True), (22, True)])
+def test_native_double_line_thickness_boundary(thickness, physical):
+    record = arrow(3, 1, 2).split(",")
+    record[7] = str(thickness)
+    view = parse_views(sketch([node(1, "A", 100, 100), node(2, "B", 400, 100)], [",".join(record)]).splitlines(True))[0]
+    assert view.arrows[0].is_physical_flow is physical
+
+
 def test_duplicate_defined_is_reported_without_merging():
     from sketch_geometry import quality_pass
     view = parse_views(sketch([node(1, "Same", 100, 100), node(2, "Same", 300, 100)], []).splitlines(True))[0]

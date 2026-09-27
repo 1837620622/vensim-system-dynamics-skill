@@ -7,7 +7,7 @@ import math
 from pathlib import Path
 import re
 
-from mdl_document import atomic_write, separate_output
+from mdl_document import atomic_write, preflight_outputs, separate_output
 from vensim_engine import _validate_time_settings, extract_deps, get_time_bounds, parse_equations, simulate
 
 
@@ -56,7 +56,7 @@ def build_model(spec):
             if variable["kind"] == "flow":
                 raise ValueError(f"{name}: 流量位置由管道生成，请在原生软件调整阀门与附着文字")
             point = variable["position"]
-            if not isinstance(point, list) or len(point) != 2 or any(not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 for v in point):
+            if not isinstance(point, list) or len(point) != 2 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 for v in point):
                 raise ValueError(f"{name}: position 必须是两个非负有限坐标")
     stocks = {name: item for name, item in names.items() if item["kind"] == "stock"}
     flows = {name: item for name, item in names.items() if item["kind"] == "flow"}
@@ -75,7 +75,7 @@ def build_model(spec):
     unit = _field(controls["unit"], "时间单位")
     values = {"INITIAL TIME": controls["initial"], "FINAL TIME": controls["final"],
               "TIME STEP": controls["step"], "SAVEPER": controls["saveper"]}
-    if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in values.values()):
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in values.values()):
         raise ValueError("时间设置必须为有限数")
     equations = ["{UTF-8}\n"]
     for name, item in names.items():
@@ -188,7 +188,7 @@ def command_build(spec_path, output):
     if output.suffix.lower() != ".mdl":
         raise ValueError("建模输出必须是 .mdl")
     report_path = output.with_suffix(".mdl.build_report.json")
-    separate_output(report_path, [spec_path])
+    preflight_outputs([output, report_path], [spec_path])
     spec = json.loads(spec_path.read_text(encoding="utf-8-sig"))
     text = build_model(spec)
     lines = text.splitlines(keepends=True)

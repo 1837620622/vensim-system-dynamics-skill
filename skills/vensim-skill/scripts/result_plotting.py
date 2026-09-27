@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 from types import SimpleNamespace
 
-from mdl_document import atomic_write, separate_output
+from mdl_document import atomic_write, preflight_outputs
 
 FORMATS = {"png", "pdf", "svg"}
 
@@ -192,7 +192,7 @@ def band_figure(results, variable, xlabel, title="", config=None):
     return figure
 
 
-def export_figures(results, variables, output, dpi=600, formats=None, style="auto", title="", inputs=(), overwrite=True, plot_config=None):
+def export_figures(results, variables, output, dpi=600, formats=None, style="auto", title="", inputs=(), overwrite=False, plot_config=None):
     if isinstance(dpi, bool) or not isinstance(dpi, int) or not 72 <= dpi <= 1200:
         raise ValueError("DPI 必须为 72 到 1200 的整数")
     if style not in {"auto", "classic", "band"}:
@@ -201,12 +201,7 @@ def export_figures(results, variables, output, dpi=600, formats=None, style="aut
     config = load_plot_config(plot_config)
     paths, manifest_path = output_paths(output, variables, formats)
     all_paths = [path for _, path in paths] + [manifest_path]
-    for target in all_paths:
-        separate_output(target, [*inputs, *([plot_config] if plot_config else [])])
-        if not overwrite and target.exists():
-            raise ValueError(f"图件输出已存在: {target}")
-    if len({target.resolve() for target in all_paths}) != len(all_paths):
-        raise ValueError("图件输出路径互相冲突")
+    preflight_outputs(all_paths, [*inputs, *([plot_config] if plot_config else [])], overwrite=overwrite)
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -244,8 +239,8 @@ def export_figures(results, variables, output, dpi=600, formats=None, style="aut
             finally:
                 plt.close(figure)
     for path, content in rendered:
-        atomic_write(path, content)
-    atomic_write(manifest_path, json.dumps(report, ensure_ascii=False, indent=2).encode())
+        atomic_write(path, content, overwrite=overwrite)
+    atomic_write(manifest_path, json.dumps(report, ensure_ascii=False, indent=2).encode(), overwrite=overwrite)
     return {"figures": [str(path) for path, _ in rendered], "manifest": str(manifest_path)}
 
 

@@ -221,7 +221,7 @@ python3 -m bandit -r skills/vensim-skill/scripts -q
 shellcheck skills/vensim-skill/skill.sh
 ```
 
-Windows 测试用 `python -m pytest -q -p no:cacheprovider`。CI 覆盖 Windows、macOS 与 Linux；可选 PySD/MCP/Matplotlib 集成测试在安装对应依赖的任务中运行。解析、真实圆弧、编码续行、影子重叠、不变量、求解器、绘图、技能识别和输出路径是主要回归范围。
+Windows 测试用 `python -m pytest -q -p no:cacheprovider`。CI 已配置 Windows、macOS 与 Linux 矩阵；可选 PySD/MCP/Matplotlib 集成检查在安装对应依赖的任务中运行。配置存在不等于远程测试已通过，实际执行状态见 [GitHub Actions](https://github.com/1837620622/vensim-system-dynamics-skill/actions/workflows/validate.yml)，每次发布分别说明本机与远程验证情况。解析、真实圆弧、编码续行、影子重叠、不变量、求解器、绘图、技能识别和输出路径是主要回归范围。
 
 原生验收已经覆盖中文库存示例的模型检查、单位检查、原生 SVG 与库存轨迹的可视检查；内置引擎与 PySD 对相同示例做逐点数值对照。原生轨迹的可视检查不等同于原生全量数值误差验证，验收记录明确区分这些证据。
 

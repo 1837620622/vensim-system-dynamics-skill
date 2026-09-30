@@ -173,6 +173,10 @@ def measure_view(view, clearance=6.0):
         for obj in objects:
             if obj.obj_id not in (arrow.from_id, arrow.to_id) and path_hits_box(paths[arrow.obj_id], box(obj, clearance)):
                 collisions.append({"arrow": arrow.obj_id, "object": obj.obj_id})
+    physical_collisions = [{"arrow": arrow.obj_id, "object": obj.obj_id}
+                           for arrow in physical for obj in objects
+                           if obj.obj_id not in (arrow.from_id, arrow.to_id)
+                           and path_hits_box(paths[arrow.obj_id], box(obj, clearance))]
     crossings = [[a.obj_id, b.obj_id] for i, a in enumerate(information) for b in information[i + 1:]
                  if paths_cross(paths[a.obj_id], paths[b.obj_id])]
     flow_crossings = [[a.obj_id, b.obj_id] for a in information for b in physical
@@ -189,6 +193,7 @@ def measure_view(view, clearance=6.0):
     duplicate_defined = [{"variable": name, "ids": ids} for name, ids in defined.items() if len(ids) > 1]
     return {
         "node_overlaps": overlaps, "arrow_node_collisions": collisions,
+        "physical_node_collisions": physical_collisions,
         "arrow_crossings": crossings, "flow_crossings": flow_crossings,
         "unsupported_arrows": unsupported, "broken_arrows": broken,
         "shadow_inputs": shadow_inputs,
@@ -203,11 +208,11 @@ def measure_view(view, clearance=6.0):
 def quality_key(metrics):
     """优先避开文字与断链，再减少交叉，最后缩短路径。"""
     return (len(metrics["broken_arrows"]) + len(metrics["shadow_inputs"]) + len(metrics.get("duplicate_defined", [])),
-            len(metrics["node_overlaps"]), len(metrics["arrow_node_collisions"]),
+            len(metrics["node_overlaps"]), len(metrics["arrow_node_collisions"]) + len(metrics.get("physical_node_collisions", [])),
             len(metrics["arrow_crossings"]) + len(metrics["flow_crossings"]),
             metrics["total_information_length"])
 
 
 def quality_pass(metrics, max_crossings=0):
-    return (not any(metrics.get(key) for key in ("broken_arrows", "shadow_inputs", "duplicate_defined", "node_overlaps", "arrow_node_collisions", "unsupported_arrows"))
+    return (not any(metrics.get(key) for key in ("broken_arrows", "shadow_inputs", "duplicate_defined", "node_overlaps", "arrow_node_collisions", "physical_node_collisions", "unsupported_arrows"))
             and len(metrics["arrow_crossings"]) + len(metrics["flow_crossings"]) <= max_crossings)

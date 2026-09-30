@@ -100,7 +100,7 @@ def test_classic_curve_data_legends_and_no_title():
     for i, line in enumerate(axis.lines):
         assert list(line.get_ydata()) == results[i][1].series["Stock"]
         assert line.get_marker() == f"${i + 1}$"
-    assert [line.get_color() for line in legend.lines] == ["#0000ff", "#ff0000", "#008000", "#808080", "#000000"]
+    assert [line.get_color() for line in legend.lines] == ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00"]
     assert len(legend.texts) == 30
     assert all(spine.get_visible() for spine in axis.spines.values())
     plt.close(fig)
@@ -151,3 +151,65 @@ def test_quantile_band_uses_sample_quantiles_and_rejects_different_time_grid():
     results[1][1].times = [0, 1, 2, math.inf]
     with pytest.raises(ValueError, match="Time"):
         validate_results(results, ["Stock"])
+
+
+def test_color_styles_match_legend_and_do_not_change_data():
+    pytest.importorskip("matplotlib")
+    import matplotlib.pyplot as plt
+    config = {**load_plot_config(), "line_styles": ["-", "--", "-.", ":"], "show_grid": False}
+    results = trajectories()
+    fig = classic_figure(results, "Stock", "Time", config=config)
+    axis, legend = fig.axes
+    assert [line.get_linestyle() for line in axis.lines] == [line.get_linestyle() for line in legend.lines]
+    assert len({line.get_linestyle() for line in axis.lines}) == 4
+    assert not any(line.get_visible() for line in [*axis.get_xgridlines(), *axis.get_ygridlines()])
+    assert len({line.get_color() for line in axis.lines}) == len(results)
+    assert axis.get_title() == "" and fig._suptitle is None
+    assert list(axis.lines[2].get_ydata()) == results[2][1].series["Stock"]
+    plt.close(fig)
+
+
+@pytest.mark.parametrize("value", [{"show_grid": "false"}, {"line_styles": []}, {"line_styles": ["invalid"]},
+                                   {"band_outer_alpha": True}, {"band_inner_alpha": 1.1}])
+def test_invalid_line_styles_are_rejected(tmp_path, value):
+    path = tmp_path / "plot.json"
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError):
+        load_plot_config(path)
+
+
+def test_named_scenarios_are_not_silently_replaced_with_quantiles(tmp_path):
+    pytest.importorskip("matplotlib")
+    results = [(str(i), trajectories()[0][1]) for i in range(13)]
+    with pytest.raises(ValueError, match="政策情景"):
+        export_figures(results, ["Stock"], tmp_path / "unsafe.svg")
+    assert not (tmp_path / "unsafe.svg").exists()
+    assert not (tmp_path / "unsafe.plot.json").exists()
+    for _, result in results:
+        result.metadata["experiment_mode"] = "monte-carlo"
+    export_figures(results, ["Stock"], tmp_path / "samples.svg")
+    report = json.loads((tmp_path / "samples.plot.json").read_text())
+    assert report["style"] == "band" and not report["sample_bands_are_confidence_intervals"]
+
+
+def test_single_curve_and_quantile_bands_are_colored_by_default():
+    pytest.importorskip("matplotlib")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import to_rgb
+    for fig in (classic_figure(trajectories()[:1], "Stock", "Time"), band_figure(trajectories(), "Stock", "Time")):
+        axis = fig.axes[0]
+        assert len(set(to_rgb(axis.lines[0].get_color()))) > 1
+        for band in axis.collections:
+            assert len(set(band.get_facecolor()[0][:3])) > 1
+        plt.close(fig)
+
+
+def test_coincident_curves_keep_data_but_do_not_share_number_positions():
+    pytest.importorskip("matplotlib")
+    import matplotlib.pyplot as plt
+    results = [(str(i), SimpleNamespace(times=list(range(60)), series={"Stock": [1]*60})) for i in range(6)]
+    fig = classic_figure(results, "Stock", "Time")
+    indices = [index for line in fig.axes[0].lines for index in line.get_markevery()]
+    assert len(indices) == len(set(indices)) and indices
+    assert all(list(line.get_ydata()) == [1]*60 for line in fig.axes[0].lines)
+    plt.close(fig)

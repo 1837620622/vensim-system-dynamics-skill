@@ -195,9 +195,13 @@ def test_mcp_protocol_and_workspace_boundary(inventory, tmp_path):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 listed = await session.list_tools()
-                assert len(listed.tools) == 12
+                assert len(listed.tools) == 13
                 result = await session.call_tool("inspect_model", {"model": str(inventory.relative_to(tmp_path))})
                 assert not result.isError
+                arranged = await session.call_tool("layout_model", {"model": str(inventory), "output": "circular.mdl", "mode": "circular"})
+                assert not arranged.isError
+                feedback = await session.call_tool("check_feedback", {"model": str(inventory)})
+                assert not feedback.isError
                 escaped = await session.call_tool("inspect_model", {"model": "../outside.mdl"})
                 assert escaped.isError
                 overwrite = await session.call_tool("layout_model", {"model": str(inventory), "output": str(inventory)})

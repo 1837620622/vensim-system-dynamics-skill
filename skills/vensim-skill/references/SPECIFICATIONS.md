@@ -15,7 +15,11 @@
 | `time.unit` | 实际时间单位，不猜测为 Year；所有 time 字段必须显式提供 |
 | `variables` | 变量对象列表，变量名唯一 |
 | `links` | 可选的直接依赖极性与时滞标记，不能增加方程中不存在的关系 |
+| `feedback_loops` | 可选回路列表，每项为 `name`、有向路径 `variables` 与可选 `polarity: R/B`，不含重复首尾节点 |
 | `sketch.font_family / font_size` | 可选原生字体设置；默认 Vensim Sans SC、12 pt，按实际平台和长变量名调整 |
+| `sketch.layout_mode` | 新建默认 `circular`；可选 `refine` 局部避让或 `preserve` 保留初始位置，只整理圆弧 |
+| `sketch.circular_gap / circular_aspect` | 可选环形留白和高宽比，有限正数；默认 64 草图单位和 0.8，半径从实际文字框计算 |
+| `sketch.node_spacing` | 可选节点避让间距，有限正数，默认 24 草图单位 |
 
 变量的公共字段为 `name`、`kind`、`unit`。名字作为实际 MDL 变量名，不能含 MDL 控制分隔符。
 
@@ -28,7 +32,9 @@
 
 存量、辅助量和常量可以指定 `position: [x, y]`。坐标是原生 MDL 草图坐标，不是网页像素坐标；存量坐标用于确定骨架，流量阀门和附着文字由管道生成。不要给 `flow` 指定独立位置使文字与阀门脱离。
 
-`links` 每项使用 `from`、`to`、可选 `polarity`（`+` 或 `-`）和 `delay`。极性应来自公式与领域解释，非单调作用不能凭经验标正负。初值引用也需要原生草图关系检查。
+指定位置优先于环形和局部排版。相互冲突的人工坐标会保留并导致几何报告 `pass: false`，不会静默移动。所有坐标和数值样式拒绝布尔值；`routing_passes` 必须为整数，不能使用浮点数伪装次数。
+
+`links` 每项使用 `from`、`to`、可选 `polarity`（`+`、`-`、`S`、`O`，兼容小写）和 `delay`。极性应来自公式与领域解释，非单调作用不能凭经验标正负。`links` 与 `feedback_loops` 都必须为列表；空白规范是空列表。新建会拒绝可确定的符号冲突，未覆盖的表达式在报告中列为待核对。初值引用也需要原生草图关系检查，但不能用来组成动态回路。算法和符号位置见 [反馈核对](FEEDBACK.md)。
 
 生成器面向明确、简单的标量 SFD，不负责推断因果、自动校准、共享复杂管道或自动创建多 View。结构过复杂时使用已有 MDL 加局部修订，或在原生 Vensim 中组织视图。
 
@@ -58,7 +64,8 @@
 - `lock_object_ids` 适合同名影子实例，`lock_node_names` 适合锁定该名字的全部实例。
 - `node_positions` 只用于指定名字在选定 View 中唯一且可移动的实例。歧义必须明确，不能猜测用户希望移动哪个影子。
 - `move_shadows` 默认开启独立避让，不能改变影子身份；关闭时将冲突留给人工处理并报告。
-- `layout_mode` 在局部修订与整体建议之间选择；`style` 默认保留，黑色用 `monochrome`，纯蓝用 `native-blue`。
+- `layout_mode` 取 `circular`、`refine`、`preserve`、`auto`、`graphviz`。对已有 MDL 默认 `refine`；新建 `build` 默认 `circular`。`style` 默认保留，黑色用 `monochrome`，纯蓝用 `native-blue`。
+- `circular_gap` 与 `circular_aspect` 分别调节环形留白和高宽比，默认值同建模 JSON；环的实际半径依据当前文字框和节点数计算。
 - `clearance`、`node_spacing`、圆弧强度和上下限按字体、长变量名、反馈跨度调整，不是美观的固定公式。
 
 未知路由保持几何并报告；明确选择颜色时只改颜色字段。圆弧与原生文字边界之间仍可能存在渲染差异，最终以原生图面为准。

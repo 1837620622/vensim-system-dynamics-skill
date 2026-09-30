@@ -20,15 +20,22 @@ def _field(value, label):
     return text
 
 
-def build_model(spec):
+def _model_text(spec):
     if not isinstance(spec, dict):
         raise ValueError("模型规范必须为 JSON 对象")
     if spec.get("language", "zh") not in {"zh", "en"}:
         raise ValueError("language 必须为 zh 或 en；业务默认中文")
+    for field in ("links", "feedback_loops"):
+        if not isinstance(spec.get(field, []), list):
+            raise ValueError(f"{field} 必须为列表，空列表表示未指定")
     title = _field(spec.get("name", "System dynamics model" if spec.get("language") == "en" else "系统动力学模型"), "模型名")
     sketch_options = spec.get("sketch", {})
-    if not isinstance(sketch_options, dict) or set(sketch_options) - {"font_family", "font_size"}:
-        raise ValueError("sketch 只接受 font_family 与 font_size")
+    if not isinstance(sketch_options, dict) or set(sketch_options) - {"font_family", "font_size", "layout_mode", "circular_gap", "circular_aspect", "node_spacing"}:
+        raise ValueError("sketch 只接受字体、layout_mode、circular_gap、circular_aspect、node_spacing")
+    if sketch_options.get("layout_mode", "circular") not in {"circular", "refine", "preserve"}:
+        raise ValueError("新建 sketch.layout_mode 必须是 circular/refine/preserve")
+    from vensim_autolayout import validate_config
+    validate_config(sketch_options)
     font = _field(sketch_options.get("font_family", "Vensim Sans SC"), "MDL 字体")
     if "," in font:
         raise ValueError("MDL 字体名不能含逗号")
@@ -148,7 +155,7 @@ def build_model(spec):
         ids[name] = object_record(10, name, x, y, max(32, len(name) * 6 + 6) * font_scale, 12 * font_scale)
     signed_links = {}
     for link in spec.get("links", []):
-        if not isinstance(link, dict) or link.get("from") not in names or link.get("to") not in names:
+        if not isinstance(link, dict) or any(not isinstance(link.get(field), str) or link[field] not in names for field in ("from", "to")):
             raise ValueError("links 的 from/to 必须引用已定义变量")
         key = link["from"], link["to"]
         target_eq = originals[key[1]]
@@ -165,8 +172,8 @@ def build_model(spec):
         for dep in sorted(extract_deps(expression, set(names))):
             annotation = signed_links.get((dep, name), {})
             polarity = annotation.get("polarity", "")
-            if polarity not in {"", "+", "-", "s", "o"}:
-                raise ValueError("polarity 仅支持 +、-、s、o；无依据时留空")
+            if not isinstance(polarity, str) or polarity not in {"", "+", "-", "S", "O", "s", "o"}:
+                raise ValueError("polarity 仅支持 +、-、S、O；无依据时留空")
             links.append((ids[dep], ids[name], False, ord(polarity) if polarity else 0, 1 if annotation.get("delay") else 0))
     for source, target, physical, polarity, delay in links:
         x = round((positions[source][0] + positions[target][0]) / 2)
@@ -179,9 +186,33 @@ def build_model(spec):
     return equation_text + "\n" + "\n".join(sketch)
 
 
-def command_build(spec_path, output):
+def _prepare_model(spec):
     from vensim_autolayout import parse_views
     from sketch_layout import optimize_view
+    text = _model_text(spec)
+    from feedback_audit import audit_feedback
+    feedback = audit_feedback(text, spec.get("feedback_loops", []))
+    if feedback["conflicts"]:
+        raise ValueError("反馈极性与方程冲突: " + json.dumps(feedback["conflicts"], ensure_ascii=False))
+    lines = text.splitlines(keepends=True)
+    view = parse_views(lines, {item["name"] for item in spec["variables"] if item["kind"] == "stock"})[0]
+    config = {"layout_mode": "circular", **spec.get("sketch", {}),
+              "lock_node_names": [item["name"] for item in spec["variables"] if "position" in item]}
+    report = optimize_view(lines, view, config, "dot")
+    report["requested_mode"] = config["layout_mode"]
+    report["fixed_positions"] = {item["name"]: item["position"] for item in spec["variables"] if "position" in item}
+    from sketch_geometry import quality_pass
+    report["pass"] = quality_pass(report["after"])
+    report["native_verified"] = False
+    report["feedback"] = feedback
+    return "".join(lines), report
+
+
+def build_model(spec):
+    return _prepare_model(spec)[0]
+
+
+def command_build(spec_path, output):
     separate_output(output, [spec_path])
     if output.exists():
         raise ValueError("建模输出已存在，请使用新文件名")
@@ -190,14 +221,14 @@ def command_build(spec_path, output):
     report_path = output.with_suffix(".mdl.build_report.json")
     preflight_outputs([output, report_path], [spec_path])
     spec = json.loads(spec_path.read_text(encoding="utf-8-sig"))
-    text = build_model(spec)
-    lines = text.splitlines(keepends=True)
-    view = parse_views(lines, {item["name"] for item in spec["variables"] if item["kind"] == "stock"})[0]
-    report = optimize_view(lines, view, {"layout_mode": "refine"}, "dot")
-    atomic_write(output, "".join(lines).encode("utf-8"))
-    report["native_verified"] = False
+    text, report = _prepare_model(spec)
+    atomic_write(output, text.encode("utf-8"))
     atomic_write(report_path, json.dumps(report, ensure_ascii=False, indent=2).encode())
     print(f"已生成: {output}；请在 Vensim 执行 Check Model 和 Units Check")
+    if not report["pass"]:
+        print(f"几何预检尚有冲突或未覆盖对象，见 {report_path}；不能据此交付最终结构图")
+    if report["feedback"]["status"] == "needs_review":
+        print(f"部分已标极性或回路需要领域与取值范围核对，见 {report_path}")
     return 0
 
 

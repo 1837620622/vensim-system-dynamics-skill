@@ -1,6 +1,6 @@
 {
   "view": "*",
-  "layout_mode": "refine",
+  "layout_mode": "circular",
   "style": "preserve",
   "rankdir": "LR",
   "nodesep": 0.65,

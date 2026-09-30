@@ -10,17 +10,17 @@
     {
       "variable": "库存",
       "file": "inventory_sensitivity.png",
-      "sha256": "a49beef2df1034bb7e508cbe24e335b46bf761dcee68c03063db758bb4e5a2e8"
+      "sha256": "05105a44aadf5fd27e8fd72ca1e0725b2de2e088e29b3e1526c282874df9baff"
     },
     {
       "variable": "库存",
       "file": "inventory_sensitivity.pdf",
-      "sha256": "a9ede4a3c9c51045402628d0a58365f75bfefd6f4525d88c70962aafdd054420"
+      "sha256": "4e7ae8cc4322f39e8ddae9d9e37c75c5d9d9afa118cab80e3a64d8aa9ff9eef5"
     },
     {
       "variable": "库存",
       "file": "inventory_sensitivity.svg",
-      "sha256": "766b699f9bfe1d7f45d39366ad98584fdc079ea368c3661067cd856d564e3d19"
+      "sha256": "1d63ebd011b06538e2ad08671b033fe0603daaec927a9183987f9da72ef7fe65"
     }
   ],
   "plot_config": {
@@ -36,16 +36,22 @@
     "legend_repeats": 5,
     "max_classic_curves": 12,
     "number_lines": true,
-    "colors": [
-      "#0000ff",
-      "#ff0000",
-      "#008000",
-      "#808080",
-      "#000000",
-      "#800080",
-      "#008080",
-      "#a0522d"
+    "show_grid": true,
+    "line_styles": [
+      "-"
     ],
+    "colors": [
+      "#0072B2",
+      "#D55E00",
+      "#009E73",
+      "#CC79A7",
+      "#E69F00",
+      "#56B4E9",
+      "#332288",
+      "#882255"
+    ],
+    "band_outer_alpha": 0.18,
+    "band_inner_alpha": 0.38,
     "grid_color": "#d5d5d5",
     "border_color": "#888888"
   },
@@ -67,8 +73,10 @@
         "库存"
       ],
       "numerical_method": "Euler",
-      "status": "completed",
-      "warnings": []
+      "status": "imported",
+      "warnings": [],
+      "source_csv_sha256": "53a21644ef68a4873b92051e3f976d88b8e28d1ab3657aeced4c83026c90dd27",
+      "experiment_mode": "perturb"
     },
     {
       "name": "调整时间 -10%",
@@ -87,8 +95,10 @@
         "库存"
       ],
       "numerical_method": "Euler",
-      "status": "completed",
-      "warnings": []
+      "status": "imported",
+      "warnings": [],
+      "source_csv_sha256": "53a21644ef68a4873b92051e3f976d88b8e28d1ab3657aeced4c83026c90dd27",
+      "experiment_mode": "perturb"
     },
     {
       "name": "调整时间 +20%",
@@ -107,8 +117,10 @@
         "库存"
       ],
       "numerical_method": "Euler",
-      "status": "completed",
-      "warnings": []
+      "status": "imported",
+      "warnings": [],
+      "source_csv_sha256": "53a21644ef68a4873b92051e3f976d88b8e28d1ab3657aeced4c83026c90dd27",
+      "experiment_mode": "perturb"
     },
     {
       "name": "调整时间 +10%",
@@ -127,8 +139,10 @@
         "库存"
       ],
       "numerical_method": "Euler",
-      "status": "completed",
-      "warnings": []
+      "status": "imported",
+      "warnings": [],
+      "source_csv_sha256": "53a21644ef68a4873b92051e3f976d88b8e28d1ab3657aeced4c83026c90dd27",
+      "experiment_mode": "perturb"
     },
     {
       "name": "current",
@@ -145,12 +159,14 @@
         "库存"
       ],
       "numerical_method": "Euler",
-      "status": "completed",
-      "warnings": []
+      "status": "imported",
+      "warnings": [],
+      "source_csv_sha256": "53a21644ef68a4873b92051e3f976d88b8e28d1ab3657aeced4c83026c90dd27",
+      "experiment_mode": "perturb"
     }
   ],
   "resolved_font_families": [
     "Times New Roman",
-    "SimSun"
+    "Songti SC"
   ]
 }

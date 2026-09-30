@@ -44,7 +44,7 @@
 
 [属性参考](https://graphviz.org/doc/info/attrs.html) 和 [FAQ](https://graphviz.org/faq/) 说明坐标、pin 和布局后处理的边界。Graphviz 的位置单位需换算，固定节点仍可能受坐标变换影响。本工具只取节点位置建议，再依据原生圆弧路由；不直接写入 Graphviz 样条，不把 Graphviz 的图作为最终结构图。
 
-默认局部 refine 不依赖 Graphviz；全局模式也不保证消除所有交叉。超复杂视图应拆分，工具报告不能替代原生视觉验收。
+新建默认 circular 与已有图的局部 refine 都不依赖 Graphviz。[Graphviz circo](https://graphviz.org/docs/layouts/circo/) 可作为多循环结构的布局参考，`oneblock` 可以控制是否强制同圆；本项目的 circular 为独立标准库实现，保留 SFD 骨架并把外围参数放在作用对象附近，不调用 circo，也不宣称复现其算法。任何全局模式都不保证消除所有交叉。超复杂视图应拆分，工具报告不能替代原生视觉验收。
 
 ## PySD 与 MCP
 

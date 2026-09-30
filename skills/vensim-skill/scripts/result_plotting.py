@@ -45,6 +45,12 @@ def load_plot_config(path=None):
         raise ValueError("font_family 必须为字体名列表；空列表表示按系统选择")
     if not isinstance(config["number_lines"], bool):
         raise ValueError("number_lines 必须为布尔值")
+    if not isinstance(config["show_grid"], bool):
+        raise ValueError("show_grid 必须为布尔值")
+    if any(isinstance(config[key], bool) or not isinstance(config[key], (int, float)) or not 0 < config[key] <= 1 for key in ("band_outer_alpha", "band_inner_alpha")):
+        raise ValueError("分位带透明度必须大于 0 且不超过 1")
+    if not isinstance(config["line_styles"], list) or not config["line_styles"] or any(style not in ("-", "--", "-.", ":") for style in config["line_styles"]):
+        raise ValueError("line_styles 必须是非空线型列表，仅支持 -、--、-.、:")
     colors = config["colors"]
     if not isinstance(colors, list) or not colors or any(not isinstance(color, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", color) for color in [*colors, config["grid_color"], config["border_color"]]):
         raise ValueError("颜色必须为 #RRGGBB，colors 至少包含一种颜色")
@@ -109,6 +115,38 @@ def font_settings(text, config=None):
             "mathtext.fontset": "stix", "savefig.facecolor": "white"}
 
 
+def separate_number_markers(axis):
+    """只调整实际采样点上的编号位置；密集处宁可少标，不移动或插值曲线。"""
+    from matplotlib.markers import MarkerStyle
+    from matplotlib.transforms import Bbox
+
+    occupied = []
+    for line in axis.lines:
+        if not line.get_marker():
+            continue
+        marker = MarkerStyle(line.get_marker())
+        glyph = marker.get_path().transformed(marker.get_transform()).get_extents()
+        scale = line.get_markersize() * axis.figure.dpi / 72
+        pixels = axis.transData.transform(list(zip(line.get_xdata(), line.get_ydata())))
+        chosen = []
+        targets = line.get_markevery()
+        # 每个重复位置只在附近寻找，保护长序列的排版时间，不能为了编号改采样网格。
+        radius = min(64, max(1, len(pixels) // max(1, 2 * len(targets))))
+        for target in targets:
+            candidates = sorted(range(max(0, target - radius), min(len(pixels), target + radius + 1)),
+                                key=lambda index: (abs(index - target), index))
+            for index in candidates:
+                x, y = pixels[index]
+                rect = Bbox.from_extents(x + glyph.x0 * scale, y + glyph.y0 * scale,
+                                        x + glyph.x1 * scale, y + glyph.y1 * scale).expanded(1.35, 1.35)
+                if (index not in chosen and axis.bbox.contains(rect.x0, rect.y0) and axis.bbox.contains(rect.x1, rect.y1)
+                        and not any(rect.overlaps(other) for other in occupied)):
+                    chosen.append(index)
+                    occupied.append(rect)
+                    break
+        line.set_markevery(sorted(chosen))
+
+
 def classic_figure(results, variable, xlabel, title="", config=None):
     import matplotlib.pyplot as plt
     import numpy as np
@@ -126,9 +164,10 @@ def classic_figure(results, variable, xlabel, title="", config=None):
     legend.set_axis_off()
     texts = []
     for i, (label, result) in enumerate(results):
-        color = colors[i % len(colors)] if count > 1 else "#000000"
+        color = colors[i % len(colors)]
         values = result.series[variable]
-        line, = axis.plot(result.times, values, color=color, linewidth=config["line_width"], label=label)
+        line_style = config["line_styles"][i % len(config["line_styles"])]
+        line, = axis.plot(result.times, values, color=color, linewidth=config["line_width"], linestyle=line_style, label=label)
         # 在实际采样点上交错编号；不平滑、不改变数据，也不人为错开曲线。
         if len(values) > 1:
             fractions = np.linspace(0.035, 0.88, config["marker_repeats"]) + 0.09 * i / max(1, count)
@@ -140,7 +179,10 @@ def classic_figure(results, variable, xlabel, title="", config=None):
         line.set_markersize(config["marker_size"])
         line.set_markeredgewidth(0.35)
         texts.append(legend.text(0, count - i - 0.5, f"{variable} : {label}", va="center", fontsize=config["legend_font_size"]))
+    style_axis(axis, xlabel, title, config)
     figure.canvas.draw()
+    if config["number_lines"]:
+        separate_number_markers(axis)
     renderer = figure.canvas.get_renderer()
     text_width = max(text.get_window_extent(renderer).width for text in texts)
     legend_width = legend.get_window_extent(renderer).width
@@ -150,12 +192,12 @@ def classic_figure(results, variable, xlabel, title="", config=None):
         raise ValueError("图例文字过长，请缩短情景名称，使文字与线段各有足够空间")
     for i in range(count):
         y = count - i - 0.5
-        color = colors[i % len(colors)] if count > 1 else "#000000"
-        legend.plot([start, 0.995], [y, y], color=color, linewidth=config["line_width"])
+        color = colors[i % len(colors)]
+        legend.plot([start, 0.995], [y, y], color=color, linewidth=config["line_width"],
+                    linestyle=config["line_styles"][i % len(config["line_styles"])])
         if config["number_lines"]:
             for x in np.linspace(start + 0.018, 0.98, config["legend_repeats"]):
                 legend.text(x, y, str(i + 1), color=color, ha="center", va="center", fontsize=config["legend_font_size"])
-    style_axis(axis, xlabel, title, config)
     return figure
 
 
@@ -163,7 +205,10 @@ def style_axis(axis, xlabel, title="", config=None):
     config = config or load_plot_config()
     axis.set_xlabel(xlabel, labelpad=5)
     axis.set_axisbelow(True)
-    axis.grid(True, color=config["grid_color"], linewidth=0.5, linestyle="-")
+    if config["show_grid"]:
+        axis.grid(True, color=config["grid_color"], linewidth=0.5, linestyle="-")
+    else:
+        axis.grid(False)
     axis.tick_params(direction="out", length=0, pad=6)
     for spine in axis.spines.values():
         spine.set_color(config["border_color"])
@@ -183,9 +228,10 @@ def band_figure(results, variable, xlabel, title="", config=None):
     data = np.asarray([result.series[variable] for _, result in results])
     q05, q25, q50, q75, q95 = np.quantile(data, [0.05, 0.25, 0.5, 0.75, 0.95], axis=0)
     figure, axis = plt.subplots(figsize=(config["width_inches"], config["plot_height_inches"] + 1.4))
-    axis.fill_between(times, q05, q95, color="#dddddd", label="5–95% sample range")
-    axis.fill_between(times, q25, q75, color="#aaaaaa", label="25–75% sample range")
-    axis.plot(times, q50, color="black", linewidth=config["line_width"], label=f"{variable} : median")
+    color = config["colors"][0]
+    axis.fill_between(times, q05, q95, color=color, alpha=config["band_outer_alpha"], label="5–95% sample range")
+    axis.fill_between(times, q25, q75, color=color, alpha=config["band_inner_alpha"], label="25–75% sample range")
+    axis.plot(times, q50, color=color, linewidth=config["line_width"], label=f"{variable} : median")
     style_axis(axis, xlabel, title, config)
     axis.legend(loc="upper center", bbox_to_anchor=(0.5, -0.20), frameon=False, fontsize=config["legend_font_size"], ncol=1)
     figure.subplots_adjust(left=0.11, right=0.98, top=0.96, bottom=0.32)
@@ -205,7 +251,12 @@ def export_figures(results, variables, output, dpi=600, formats=None, style="aut
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    style = ("band" if len(results) > config["max_classic_curves"] else "classic") if style == "auto" else style
+    if style == "auto":
+        style = "classic"
+        if len(results) > config["max_classic_curves"]:
+            if not all(getattr(result, "metadata", {}).get("experiment_mode") == "monte-carlo" for _, result in results):
+                raise ValueError("情景曲线过多，请分组或明确选择 band；不能把命名政策情景自动合并成抽样分位带")
+            style = "band"
     height = config["plot_height_inches"] + 0.95 + config["legend_row_inches"] * (len(results) if style == "classic" else 3)
     if config["width_inches"] * height * dpi ** 2 > 100_000_000:
         raise ValueError("图件像素规模过大，请减小尺寸/DPI，或分组出图")

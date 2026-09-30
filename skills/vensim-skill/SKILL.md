@@ -1,6 +1,6 @@
 ---
 name: vensim-skill
-description: "Use for Vensim modeling, native MDL layout and shadow-variable repair, Chinese diagrams, reproducible simulation, calibration, policy optimization, sensitivity analysis, and Python publication figures on Windows, macOS, or Linux."
+description: "Use for Vensim modeling with circular feedback layouts by default, native MDL and shadow-variable repair, polarity and loop checks, Chinese diagrams, reproducible simulation, calibration, policy optimization, sensitivity analysis, and colored Python publication figures on Windows, macOS, or Linux."
 license: "Non-commercial; see LICENSE"
 ---
 
@@ -19,13 +19,20 @@ license: "Non-commercial; see LICENSE"
 7. **通用流程不固定业务参数和布局模板。** 时间范围、时间单位、初值、参数、情景幅度、抽样次数、种子和坐标依据当前任务确定。示例只用于演示与回归，不能复制其中的变量、公式或数值来填补资料空缺；旧案例不参与新任务的规则选择。缺少必要资料时列明缺项，不能自动补成示例值。局部排版、模块位置、圆弧和图件尺寸按实际内容调整，禁止随机抖动或机械套图。可配置的显示默认值与资源保护上限不代表业务假设。
 8. **仿真结果图默认使用 Python。** 默认无标题、图号、图标与水印，优先清晰的独立图件。少量情景可用经典编号曲线与底部图例；复杂实验按分析目的分组或使用分位带。样式可以配置，数据不能为了美观改写。结构图继续遵守第 1 条的真实 MDL 原生来源约束。
 9. **字体必须实际可用。** `doctor` 先检查 Python 绘图环境，出图时按真实文字检查字形；缺字必须处理。MDL 在原生 Vensim 核对中文、字号、长名称与影子括号，字体替换后重新检查碰撞。Python 字体正常不能当作原生字体正常的证据。
+10. **新建 MDL 默认采用环形布局。** 主要反馈链按实际连接沿环展开，外围参数靠近作用对象，独立模块分别组织；SFD 的存量、阀门和管道保留可读的骨架，在其外侧展开反馈弧段。不得为凑圆形增删关系、画装饰圆圈或把所有参数塞进同一个大圆。留白、环的宽高和局部位置按内容调整；用户指定布局或人工坐标时优先遵守。现有图的局部修复保留 `refine`，明确重排为环形时使用 `circular`。
+
+11. **逐条核对正负极性与整条回路性质。** 箭头 `+/-` 与回路 `R/B` 分开判断；依据动态方程和适用域，不能用名称、相关性、曲线上升或顺逆时针代替。正负号靠近所属箭头的目标端空白侧，R/B 仅放在已核对回路的内部留白，不压字、不遮线。初值引用不构成动态反馈。未知非线性报告待核对，不硬填符号。原生符号位置必须实际检查。
+
+12. **仿真结果图默认彩色。** 单曲线、情景比较和样本分位带都使用统一的科研配色；图例、编号、线型与曲线同步，不为“高级感”添加渐变背景或装饰。模型结构图仍执行黑色／纯蓝原生箭头规则。数据保持真实，密集编号通过采样点上的位置选择避让。
 
 ## 先看哪些文件
 
 - 日常建模和命令：[操作手册](references/OPERATIONS_GUIDE.md)。
 - 外观返工、弧线、影子重叠：[图面规则](references/APPEARANCE.md)，执行排版任务前必须阅读。
+- 箭头正负、增强/平衡回路与符号位置：[反馈核对](references/FEEDBACK.md)。
 - 论文、政策或学术结论：[研究与交付检查](references/RESEARCH_WORKFLOW.md)。单纯整理已有图不强行要求重做整份研究。
 - Python 结果图、编号图例、DPI 和敏感性：[结果图手册](references/RESULT_PLOTS.md)。
+- 对照文献完善流图、方程与仿真图：[学术表达与文献依据](references/ACADEMIC_PRESENTATION.md)。按当前模型选择，不照抄文献参数或把一种版式写死。
 - PLE 外的参数校准、有约束政策搜索：[Python 高级分析](references/ADVANCED_ANALYSIS.md)。只有明确观测数据、目标或约束时使用；搜索结果不能称为已证明的全局最优。
 - 准备建模或实验 JSON：[输入规范](references/SPECIFICATIONS.md)。
 - 官方格式、版本、Graphviz 和 PySD 边界：[实现依据](references/REFERENCES.md)。
@@ -35,8 +42,8 @@ license: "Non-commercial; see LICENSE"
 
 1. 读取实际目录、原模型、所有 View、方程和用户给出的示意或截图。截图只用来定位问题，不能据此猜测缺失方程。运行 `doctor`、`inspect`、`audit`、`check`，记录当前可用的原生 Vensim、Python、Graphviz 和可选后端。
 2. 将问题分为模型语义、文字/影子重叠、圆弧/穿线、样式、仿真行为。先处理错误引用、无依据的关系与缺失初值，再美化。对不支持的格式保留原文并报告。
-3. 先读图的主结构：存量和流量是骨架；反馈放在容易循线阅读的位置；参数靠近受影响的流率。不要把全图机械铺满固定网格，也不要加入随机抖动伪装手绘。
-4. 从 `--mode preserve`（只整理圆弧）或默认 `refine`（局部避让）开始。明确需要重新组织整个 View 时才选 `graphviz` 或 `auto`。使用 `node_positions` 固定人工审图后确定的辅助节点位置；管道、阀门和流量文字保持锁定。
+3. 新建模型先按环形组织主要反馈链，`build` 默认执行 `circular`。存量和流量是骨架，外围参数靠近受影响的流率或辅助量；不同模块分别展开。不要把全图机械铺满固定网格，也不要加入随机抖动伪装手绘。
+4. 修改已有图时，从 `--mode preserve`（只整理圆弧）或默认 `refine`（局部避让）开始；明确需要环形重排时选 `circular`。`graphviz` 或 `auto` 是其他位置建议方式。使用 `node_positions` 固定人工审图后确定的辅助节点位置，其他节点会避开锚点；新建 JSON 的 `position` 不会被排版阶段移动。管道、阀门和流量文字保持锁定。
 5. 运行 `visual --strict --max-crossings 0`，逐项看报告中的对象 ID。重叠和穿字必须解决。交叉优先通过就近移动、调整圆弧两侧、拆分子系统视图来消除；非平面关系确实不可避免时在报告中解释，不能虚报零交叉。
 6. 打开输出 MDL，在原生 Vensim 核对每个 View，执行 `Check Model`、`Units Check`。查看是否有软件新补的影子或箭头、文字框变化、管道反向、阀门标签脱离。必要时局部修订，重新保存再打开检查。
 7. 按任务运行基准、情景、敏感性或步长收敛检查；保存 CSV、参数、种子、模型哈希、后端和实际时间设置。使用原生求解器时记录实际版本和运行结果；不能将 PySD 或内置引擎的结果称为原生运行。
@@ -60,6 +67,7 @@ license: "Non-commercial; see LICENSE"
 ./skill.sh build model.json --output work/model.mdl
 ./skill.sh audit work/model.mdl
 ./skill.sh check work/model.mdl
+./skill.sh feedback work/model.mdl --spec model.json --strict
 ./skill.sh layout work/model.mdl --output work/model_layout.mdl --mode refine --style monochrome
 ./skill.sh visual work/model_layout.mdl --strict --max-crossings 0
 ./skill.sh simulate work/model_layout.mdl --var 目标变量 --output results/base.csv

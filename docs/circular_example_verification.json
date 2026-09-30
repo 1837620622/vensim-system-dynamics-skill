@@ -1,0 +1,35 @@
+{
+  "model": "skills/vensim-skill/assets/examples/circular_feedback_zh.mdl",
+  "model_sha256": "f5041362942f4ed48498a13b12b46ef652dc4d21441479bf2b6c4024fcd9cd25",
+  "figure": "docs/assets/circular_feedback_native.svg",
+  "figure_sha256": "273a942e7d577b866691995e7228d629c8e4159a011c70a23bf40e314d27c9a9",
+  "application": "Vensim PLE 10.5.0",
+  "platform": "macOS",
+  "layout": "circular",
+  "native_check_model": true,
+  "native_units_check": true,
+  "native_visual_review": true,
+  "native_svg_export": true,
+  "observed_check_messages": [
+    "模型没问题.",
+    "单位都没问题."
+  ],
+  "geometry": {
+    "node_overlaps": [],
+    "arrow_node_collisions": [],
+    "physical_node_collisions": [],
+    "arrow_crossings": [],
+    "flow_crossings": [],
+    "unsupported_arrows": [],
+    "broken_arrows": [],
+    "shadow_inputs": [],
+    "shadow_overlaps": [],
+    "duplicate_defined": [],
+    "shadow_objects": [],
+    "total_information_length": 670.98,
+    "approximation_tolerance_px": 0.5
+  },
+  "geometry_pass": true,
+  "pointwise_native_numeric_comparison": false,
+  "scope": "补水反馈演示；示例参数不作为新任务默认值；原生显示无可见重叠、穿字或交叉。"
+}

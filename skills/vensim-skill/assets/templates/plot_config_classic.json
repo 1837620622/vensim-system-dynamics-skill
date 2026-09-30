@@ -11,7 +11,11 @@
   "legend_repeats": 5,
   "max_classic_curves": 12,
   "number_lines": true,
-  "colors": ["#0000ff", "#ff0000", "#008000", "#808080", "#000000", "#800080", "#008080", "#a0522d"],
+  "show_grid": true,
+  "line_styles": ["-"],
+  "colors": ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#332288", "#882255"],
+  "band_outer_alpha": 0.18,
+  "band_inner_alpha": 0.38,
   "grid_color": "#d5d5d5",
   "border_color": "#888888"
 }

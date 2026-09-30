@@ -1,0 +1,49 @@
+{
+  "time": {
+    "initial": 0,
+    "final": 4,
+    "step": 0.25,
+    "saveper": 1,
+    "unit": "Hour"
+  },
+  "variables": [
+    {
+      "name": "水量",
+      "kind": "stock",
+      "initial": 10,
+      "unit": "Litre"
+    },
+    {
+      "name": "补水",
+      "kind": "flow",
+      "from": null,
+      "to": "水量",
+      "equation": "补水需求",
+      "unit": "Litre/Hour"
+    },
+    {
+      "name": "补水需求",
+      "kind": "aux",
+      "equation": "缺水量/调节周期",
+      "unit": "Litre/Hour"
+    },
+    {
+      "name": "缺水量",
+      "kind": "aux",
+      "equation": "MAX(0, 目标水量 - 水量)",
+      "unit": "Litre"
+    },
+    {
+      "name": "目标水量",
+      "kind": "constant",
+      "equation": 30,
+      "unit": "Litre"
+    },
+    {
+      "name": "调节周期",
+      "kind": "constant",
+      "equation": 2,
+      "unit": "Hour"
+    }
+  ]
+}

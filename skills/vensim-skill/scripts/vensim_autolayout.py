@@ -666,17 +666,22 @@ def command_audit(path: Path) -> int:
 def validate_config(config):
     if not isinstance(config, dict):
         raise ValueError("布局配置必须是 JSON 对象")
-    if config.get("layout_mode", "refine") not in {"auto", "preserve", "refine", "graphviz"}:
-        raise ValueError("layout_mode 必须是 auto/preserve/refine/graphviz")
+    if config.get("layout_mode", "refine") not in {"auto", "preserve", "refine", "graphviz", "circular"}:
+        raise ValueError("layout_mode 必须是 auto/preserve/refine/graphviz/circular")
     if config.get("style", "preserve") not in {"academic", "monochrome", "native-blue", "preserve"}:
         raise ValueError("style 必须是 monochrome/native-blue/preserve")
-    for key in ("clearance", "node_spacing", "minimum_curve_pixels", "maximum_curve_pixels", "curve_strength", "graphviz_scale", "nodesep", "ranksep"):
-        if key in config and (not isinstance(config[key], (int, float)) or not math.isfinite(config[key]) or config[key] <= 0):
+    for key in ("clearance", "node_spacing", "minimum_curve_pixels", "maximum_curve_pixels", "curve_strength", "graphviz_scale", "nodesep", "ranksep", "circular_gap", "circular_aspect"):
+        if key in config and (isinstance(config[key], bool) or not isinstance(config[key], (int, float)) or not math.isfinite(config[key]) or config[key] <= 0):
             raise ValueError(f"{key} 必须是有限正数")
-    if config.get("routing_passes", 2) not in range(1, 6):
+    if type(config.get("routing_passes", 2)) is not int or config.get("routing_passes", 2) not in range(1, 6):
         raise ValueError("routing_passes 必须为 1 到 5")
+    for key in ("move_stocks", "move_shadows"):
+        if key in config and not isinstance(config[key], bool):
+            raise ValueError(f"{key} 必须是布尔值")
+    if type(config.get("max_allowed_crossings", 0)) is not int or config.get("max_allowed_crossings", 0) < 0:
+        raise ValueError("max_allowed_crossings 必须是非负整数")
     anchors = config.get("node_positions", {})
-    if not isinstance(anchors, dict) or any(not isinstance(p, list) or len(p) != 2 or any(not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 for v in p) for p in anchors.values()):
+    if not isinstance(anchors, dict) or any(not isinstance(p, list) or len(p) != 2 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 for v in p) for p in anchors.values()):
         raise ValueError("node_positions 必须为变量名到 [x, y] 非负有限坐标的映射")
     if "information_arrow_color" in config:
         expected = {"monochrome": "0-0-0", "academic": "0-0-0", "native-blue": "0-0-255"}.get(config.get("style"))
@@ -777,7 +782,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true", default=True,
         help="为可重布线的信息箭头设置单个圆弧控制点。",
     )
-    p_layout.add_argument("--mode", choices=["auto", "preserve", "refine", "graphviz"])
+    p_layout.add_argument("--mode", choices=["auto", "preserve", "refine", "graphviz", "circular"])
     p_layout.add_argument("--style", choices=["academic", "monochrome", "native-blue", "preserve"])
     p_layout.add_argument("--preview", type=Path)
     p_visual = sub.add_parser("visual", help="圆弧碰撞报告，可作为严格质量检查")

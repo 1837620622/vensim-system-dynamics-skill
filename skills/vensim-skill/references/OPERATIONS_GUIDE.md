@@ -9,6 +9,7 @@
 ./skill.sh inspect model.mdl
 ./skill.sh audit model.mdl
 ./skill.sh check model.mdl
+./skill.sh feedback model.mdl --strict --output work/feedback.json
 ./skill.sh layout model.mdl --output work/model_layout.mdl --mode refine --style monochrome
 ./skill.sh visual work/model_layout.mdl --strict --max-crossings 0 --output work/geometry.json
 ```
@@ -16,6 +17,14 @@
 `audit` 检查对象引用与模型依赖的明显不一致；`check` 检查内置解析器支持的方程、初值与时间设置。两者不能代替 Vensim 的完整语法/单位检查。CLD 没有方程时只做草图检查，不能把它当作可仿真的 SFD。
 
 默认 `refine` 就近移动可移动辅助量和影子，保留管道、阀门、附着文字、隐藏对象、未知路由端点与用户锁定对象。`preserve` 只路由圆弧；`auto` 和 `graphviz` 才需要系统 Graphviz。`style` 取 `preserve`、`monochrome` 或 `native-blue`。
+
+需要将已有图重排为环形时：
+
+```bash
+./skill.sh layout model.mdl --output work/model_circular.mdl --mode circular --style monochrome
+```
+
+`circular` 不依赖 Graphviz，按真实连接和文字尺寸组织各模块，外围参数靠近作用对象；保留 SFD 骨架、影子身份和所有箭头端点。`circular_gap` 与 `circular_aspect` 可调留白和高宽比。自动排版后仍须逐项看碰撞报告，不能仅凭环形外观接受结果。
 
 配置支持 `view`、`skip_views`、`lock_node_names`、`lock_object_ids`、`move_shadows`、`node_positions`、`clearance`、`node_spacing`、`curve_strength`、`minimum_curve_pixels`、`maximum_curve_pixels`、`routing_passes` 和 `max_allowed_crossings`。通常先使用默认值；按 [图面规则](APPEARANCE.md) 处理具体冲突。锁定位置与无法自动消除的冲突会保留在报告中。
 
@@ -37,9 +46,13 @@
 
 `variables` 每项有 `name`、`kind`、`unit`。`stock` 给 `initial`；`flow` 给 `equation`、`from`、`to`，一端可为 `null` 代表边界；`aux` 和 `constant` 给 `equation`。工具按流向生成 INTEG 方程。存量和辅助变量可用 `position: [x, y]` 指定位置；流量阀门和文字由管道结构生成。
 
+新建 `build` 默认环形布局，无需额外参数；`sketch.layout_mode` 可显式改为 `refine` 或 `preserve`。CLI、Python `build_model(spec)` 与 MCP `build_model` 共用该默认值。显式 `position` 固定不动；冲突会写入 `.mdl.build_report.json`，其中 `pass` 是几何检查，`native_verified` 仍为 `false`，必须在 Vensim 单独验收。
+
 `time` 必须明确设置 `initial`、`final`、`step`、`saveper`、`unit`。`links` 只补充真实依赖的 `polarity` 和 `delay`，不是凭空增加因果关系的通道。业务默认中文，英文规范应显式写 `language: "en"`。不对已有名字进行自动翻译。
 
 建模器面向自包含标量模型，复杂共享管道、多个同向流率、多 View 和高级 Vensim 结构仍需原生编辑。新模型必须执行原生 Check Model、Units Check 并审查每个真实依赖，不能仅凭预检判定可交付。
+
+`feedback` 核对箭头极性，`--spec model.json` 还会核对其中明确指定的 `feedback_loops`；不会自动添加符号或改写方程。新建拒绝可确定的极性冲突，未覆盖语义保留待核对状态。符号放置与完整边界见 [反馈核对](FEEDBACK.md)。
 
 ## 仿真与结果图
 

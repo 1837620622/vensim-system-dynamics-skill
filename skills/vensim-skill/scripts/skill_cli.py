@@ -175,7 +175,9 @@ def _help() -> int:
   inspect model.mdl                列出对象与箭头
   audit model.mdl                  结构与语义预检
   check model.mdl                  方程、初值和时间设置预检
-  layout model.mdl --output out.mdl [--mode auto|preserve|refine|graphviz]
+  feedback model.mdl [--spec model.json] [--strict] [--output feedback.json]
+         核对箭头正负与指定回路的 R/B，复杂关系报告待核对
+  layout model.mdl --output out.mdl [--mode circular|auto|preserve|refine|graphviz]
          [--engine dot|neato] [--style monochrome|native-blue|preserve]
          [--config layout.json] [--preview review.html]
   preview model.mdl --output sketch.html [--compare-with before.mdl]
@@ -220,6 +222,9 @@ def main(argv: List[str] | None = None) -> int:
         return _invoke_layout(args)
     if cmd == "build":
         return _invoke(model_builder.main, rest)
+    if cmd == "feedback":
+        from feedback_audit import main as feedback_main
+        return _invoke(feedback_main, rest)
     if cmd in {"experiment", "convergence"}:
         return _invoke(experiments.main, args)
     if cmd in {"calibrate", "optimize"}:

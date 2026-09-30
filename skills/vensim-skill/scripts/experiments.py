@@ -118,6 +118,7 @@ def execute_experiment(model, spec, output, backend="builtin", plot=None, dpi=60
     series, summary, manifest, results = [], [], [], []
     for run in runs:
         result = run_model(model, variables, backend=backend, params=run["params"], **time)
+        result.metadata["experiment_mode"] = spec.get("mode", "scenarios")
         manifest.append({"name": run["name"], **result.metadata})
         results.append((run["name"], result))
         for name in variables:

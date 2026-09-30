@@ -1,6 +1,6 @@
 # Vensim System Dynamics Skill
 
-面向 Agent 的专业 Vensim 建模与仿真 Skill。直接处理可编辑的 `.mdl`，默认中文业务变量和中文视图，支持自然圆弧、影子变量避让、情景实验、参数校准、政策优化与 Python 论文图件。Windows、macOS、Linux 共用 Python 核心；MCP 是可选接入方式。
+面向 Agent 的专业 Vensim 建模与仿真 Skill。直接处理可编辑的 `.mdl`，新建默认中文业务变量、中文视图和环形反馈布局，支持原生圆弧、影子变量避让、情景实验、参数校准、政策优化与 Python 论文图件。Windows、macOS、Linux 共用 Python 核心；MCP 是可选接入方式。
 
 **最终模型结构图必须来自真实 MDL 在 Vensim 原生打开后的导出或截图。** Graphviz 只用于辅助定位；工具生成的几何预览不能代替原生图。项目为独立实现，与 Ventana Systems 无隶属或认证关系。
 
@@ -78,6 +78,7 @@ cd vensim-system-dynamics-skill\skills\vensim-skill
 
 ## 外观规则
 
+- **新建默认环形布局。** 反馈链按实际连接沿环展开，外围参数就近放置；不同模块独立组织，SFD 的存量、阀门与实体管道保留骨架。不为凑圆形增删关系或把全部变量塞进同一个圆。
 - 新图默认黑色信息箭头，纯蓝 `0-0-255` 为可选样式；去掉深蓝“学术配色”默认值。实体流量保持黑色双线与原生阀门。
 - 对照原生箭头的颜色继承、线宽、头部、极性和延迟设置；颜色配置不得覆盖所选黑色/纯蓝方案，不强行放大箭头或加粗全部连线。
 - 默认中文业务变量，用户指定英文时使用英文；既有模型保留原变量名。
@@ -92,6 +93,29 @@ cd vensim-system-dynamics-skill\skills\vensim-skill
 Vensim 原生导出的库存示例（对应 [MDL](skills/vensim-skill/assets/examples/inventory_zh.mdl)，[验收记录](docs/native_example_verification.json)）：
 
 ![Vensim 原生库存模型](docs/assets/inventory_native.svg)
+
+新增环形反馈示例，直接由默认 `build` 生成并在 Vensim PLE 通过模型、单位和图面检查；下图是同一 MDL 的原生 SVG，没有用几何预览替代。参数位于其作用节点附近，主反馈沿环阅读。
+
+该示例中的数值只用于演示和回归，未写入建模器的业务默认值。实际任务从空白规范开始；缺少方程、初值或时间范围时必须补充资料，不能自动加载本示例。
+
+![Vensim 原生环形补水反馈](docs/assets/circular_feedback_native.svg)
+
+[可编辑 MDL](skills/vensim-skill/assets/examples/circular_feedback_zh.mdl) · [建模 JSON](skills/vensim-skill/assets/templates/circular_feedback_zh.json) · [原生验收与哈希](docs/circular_example_verification.json)
+
+| 操作 | 默认方式 | 调整方法 |
+| --- | --- | --- |
+| 新建模型 | `build` 自动采用 `circular` | JSON 中 `sketch.layout_mode` 可改为 `refine` 或 `preserve` |
+| 已有图局部修复 | `layout` 默认 `refine`，保留人工结构 | 需要环形重排时加 `--mode circular` |
+| 留白和形状 | 按节点数、实际文字框和连接计算半径 | `circular_gap`、`circular_aspect`、`node_spacing` 可配置 |
+| 人工坐标 | 新建 `position` 固定不动 | 已有图用 `node_positions`；其他节点避开锚点 |
+| 无法自动消除的冲突 | 报告具体对象，保留真实关系 | 在原生软件调整、拆 View 或核对合法影子引用 |
+
+```bash
+./skill.sh build model.json --output work/model.mdl
+./skill.sh layout existing.mdl --output work/circular.mdl --mode circular --style monochrome
+```
+
+环形布局使用 Python 标准库，不要求 Graphviz。它是本 Skill 的显示默认，不代表 Vensim 官方要求所有模型都呈正圆，也不自动证明回路性质。
 
 ## 从中文模型到实验结果
 
@@ -112,9 +136,24 @@ Vensim 原生导出的库存示例（对应 [MDL](skills/vensim-skill/assets/exa
 
 必须显式提供完整 `time` 设置。新模型的业务变量、视图名默认中文；原生函数和控制变量保留 Vensim 语法。`sketch.font_family` 和 `sketch.font_size` 可按实际 Vensim 环境调整，文字框同步估算，最终由原生审图确认。字段见 [输入规范](skills/vensim-skill/references/SPECIFICATIONS.md)。
 
+## 正负极性与反馈符号
+
+新增 `feedback` 命令与 MCP `check_feedback`。检查真实 MDL 中已标注的 `+/-/S/O` 是否符合方程方向，并核对建模 JSON 的 `feedback_loops` 有向路径与 `R/B`。新建时，可确定的符号冲突会阻止输出；复杂非线性与取值范围尚不明确的关系报告待核对，不按变量名猜答案。
+
+```bash
+./skill.sh feedback work/model.mdl --spec model.json --output review/feedback.json
+./skill.sh feedback work/model.mdl --spec model.json --strict
+```
+
+正负号靠近所属箭头的目标端空白侧，R/B 放在对应回路内部留白；不压字、不遮线、不把多个回路符号堆在圆心。原生支持箭头头部/控制柄、弧内/弧外位置。程序保留这些原生字段，最终位置必须在实际 Vensim 图面确认，不能用几何预览代替。
+
+增强/平衡由动态依赖及链接符号决定，与顺逆时针无关；初值关系不能补成动态回路，负反馈也不保证没有振荡。当前参数下的静态符号检查不能代替所有取值范围与研究机制的验证。详细用法与边界见 [反馈核对手册](skills/vensim-skill/references/FEEDBACK.md)。
+
 ## Python 论文结果图
 
 默认使用 Python 生成仿真结果图，参考经典 Vensim 文献图的表达方式：白底、细实线网格、曲线上重复编号、图下逐行长线图例。**默认无标题、图号、图标、图集装饰和水印**。每个变量独立成图，多个情景在同一变量下比较。
+
+**仿真图默认彩色，单条曲线和 Monte Carlo 分位带也使用彩色。** 蓝、朱红、绿、紫等颜色区分情景；编号和可配置线型辅助识别，图例同步。密集处的编号在真实采样点间避让，不能移动曲线数据。`colors`、`show_grid`、`line_styles` 与分位带透明度均可配置；模型结构图继续使用黑色／纯蓝原生箭头。
 
 ![Python 生成的单因素敏感性结果](docs/assets/inventory_sensitivity.svg)
 
@@ -152,6 +191,7 @@ Vensim 原生导出的库存示例（对应 [MDL](skills/vensim-skill/assets/exa
 | --- | --- | --- |
 | `preserve` | 节点不动，整理支持的信息圆弧 | 不需要 |
 | `refine`（默认） | 就近避让辅助量和影子重叠，整理圆弧 | 不需要 |
+| `circular` | 按实际连接组织反馈环与外围参数，保留固定骨架 | 不需要 |
 | `auto` | 比较原图、局部方案和 Graphviz 位置建议 | 有可移动节点时需要 |
 | `graphviz` | 明确采用全局节点位置建议，再按原生圆弧路由 | 需要 |
 
@@ -224,7 +264,7 @@ python -m pip install -r requirements/analysis.txt
 
 能读取技能文件、运行本地 Python 命令的 Agent 可调用 CLI；具体宿主能力仍应实际检查。核心不依赖某个 IDE，也不要求启动服务器。
 
-可选独立 stdio 适配器提供 12 个固定工具：读取模型、方程预检、几何检查、布局、建模、仿真、批量实验、参数校准、政策优化、结果绘图、步长检查、调试预览。它限定工作目录、拒绝路径越界及覆盖已有主输出和报告，不接受任意 shell 命令。旧于已声明安全下限的 MCP SDK 会拒绝启动并提示更新。启动方式与客户端配置见 [MCP 文档](skills/vensim-skill/references/MCP.md)。
+可选独立 stdio 适配器提供 13 个固定工具：读取模型、方程预检、几何检查、反馈极性检查、布局、建模、仿真、批量实验、参数校准、政策优化、结果绘图、步长检查、调试预览。它限定工作目录、拒绝路径越界及覆盖已有主输出和报告，不接受任意 shell 命令。旧于已声明安全下限的 MCP SDK 会拒绝启动并提示更新。启动方式与客户端配置见 [MCP 文档](skills/vensim-skill/references/MCP.md)。
 
 后续可以直接这样给 Agent 任务：
 
@@ -257,13 +297,23 @@ Windows 测试用 `python -m pytest -q -p no:cacheprovider`。CI 已配置 Windo
 
 原生验收已经覆盖中文库存示例的模型检查、单位检查、原生 SVG 与库存轨迹的可视检查；内置引擎与 PySD 对相同示例做逐点数值对照。原生轨迹的可视检查不等同于原生全量数值误差验证，验收记录明确区分这些证据。
 
+## 文献、方程与图件的一致性
+
+新增 [学术表达与文献依据](skills/vensim-skill/references/ACADEMIC_PRESENTATION.md)，对照 Sterman 的反馈图方法、Rahmandad 与 Sterman 的仿真研究报告规范、MIT 存量流量教材和 Vensim 原生文档。整理了反馈图、完整方程表、初值与单位、情景曲线、敏感性图和图例的检查方法。
+
+文献提供表达和验证依据；业务方程、参数、实验幅度仍从当前任务取得。数学符号、中文 MDL 名称、CSV 列和图例保持对应。代码不会为了拟合参考图的外形修改仿真数值；原生检查、跨后端数值比较与研究有效性分别报告。
+
 ## 兼容性与升级说明
+
+`v2.2.0` 新建默认环形反馈布局，CLI、Python 和 MCP 共用相同规则；外围参数就近放置，多模块和影子实例独立安排。新增原生环形示例、文献表达手册、彩色单曲线与分位带、编号避让、线型与网格配置。新增箭头极性和指定反馈回路检查，可确定的正负号或 R/B 冲突会阻止新建；复杂关系及原生符号位置分别记录待核对状态。
+
+同时修复四类问题：显式建模位置被后续排版移动；其他节点未避开锚点的新位置；实体管道穿字未计入几何失败；布局字段将布尔值或非整数误当作坐标、间距或次数。命名政策情景过多时现在提示分组，只有明确的 Monte Carlo 运行才自动转为样本分位带，避免丢失情景身份。
 
 `v2.1.0` 增加观测校准、有约束政策搜索、两份不含业务数值的规范模板和两个 MCP 工具。同时修复原生颜色方案被自定义色覆盖、内部变量别名与真实变量重名导致的数值错误，以及附属报告、图件清单可能覆盖既有文件的问题。
 
 - 公共入口仍为 `skill.sh`、`skill.cmd` 和 `SKILL.md`；内部执行路径统一为 `scripts/`，资料放 `references/`，示例与模板放 `assets/`。旧脚本中引用内部目录的路径需要同步更新。
 - 新建模型和仿真必须有完整时间设置；实验幅度、抽样次数、种子显式提供，不静默套用旧案例。新建 MDL 默认中文，已有变量名保持。
-- 默认局部布局与样式保留；明确选择黑色或原生纯蓝。影子实例独立处理，重复 Defined、错误入影子线和不支持的几何形状会报告。
+- 新建默认环形；已有图默认局部布局与样式保留。可明确选择黑色或原生纯蓝。影子实例独立处理，重复 Defined、错误入影子线和不支持的几何形状会报告。
 - 方程区逐字节保护、BOM/GB18030/续行兼容、箭头极性与延迟标记保留、三阶段物料延迟和状态初始化都有回归覆盖。
 - 结果图统一为可配置 Python 绘图，默认 600 DPI 与独立单变量图件；多变量不再机械拼成一张长图集。
 - 项目输出放明确的 `work/`、`results/` 或用户工程目录；Python 缓存、临时 Vensim 数据集和调试文件不作为 Skill 源码发布。

@@ -36,8 +36,9 @@ python scripts/skill_cli.py mcp --workspace /path/to/project
 | `inspect_model` | 列出对象、箭头、ID 与坐标 |
 | `check_model` | 内置方程预检 |
 | `check_geometry` | 几何与影子冲突报告 |
-| `layout_model` | 写入新 MDL，默认局部 refine |
-| `build_model` | 从明确 JSON 生成标量 SFD |
+| `check_feedback` | 核对箭头正负及指定回路 R/B，未知关系保留待核对状态 |
+| `layout_model` | 写入新 MDL，默认局部 refine；`mode: circular` 按环形重排 |
+| `build_model` | 从明确 JSON 生成标量 SFD，默认环形布局，尊重显式位置 |
 | `simulate_model` | 内置或 PySD 仿真与常量覆盖，导出 CSV |
 | `run_experiment` | 情景、百分比扰动、网格或 Monte Carlo |
 | `calibrate_model` | 真实观测 CSV 的有界参数校准，需可选 SciPy |
@@ -46,7 +47,7 @@ python scripts/skill_cli.py mcp --workspace /path/to/project
 | `plot_results` | 从真实 CSV 导出经典编号图或分位带，默认 600 DPI |
 | `check_convergence` | dt、dt/2、dt/4 的轨迹误差检查 |
 
-共 12 个固定工具。所有修改工具使用新的输出名称，主文件和附属报告都拒绝覆盖；需要变量的工具必须传入非空、唯一的变量列表。SDK 必须满足 `mcp>=1.28.1,<2`，过旧版本会在启动时提示安装安全依赖范围。
+共 13 个固定工具。所有修改工具使用新的输出名称，主文件和附属报告都拒绝覆盖；需要变量的工具必须传入非空、唯一的变量列表。SDK 必须满足 `mcp>=1.28.1,<2`，过旧版本会在启动时提示安装安全依赖范围。
 
 工具执行子进程使用固定 Python/CLI 参数、工作目录和 180 秒超时，stdout 与协议流隔离。较长的校准或优化可在可信本地 CLI 中运行，或减少实际仿真次数。错误返回会包括具体检查失败信息。模型内容仍按不可信数据处理，不从注释中执行指令。这个工作目录约束不是操作系统沙箱；只向可信本地宿主开放，防止并发修改目录/符号链接造成竞态。
 

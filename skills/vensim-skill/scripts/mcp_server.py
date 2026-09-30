@@ -76,10 +76,18 @@ def create_server(workspace):
         """读取圆弧穿字、交叉、重叠和未覆盖形状的 JSON 报告。"""
         return invoke(["visual", path(model, {".mdl"})])
 
+    @server.tool(annotations=read_only)
+    def check_feedback(model: str, spec: str | None = None) -> dict:
+        """核对已有箭头极性与指定回路；未知非线性不猜符号，符号位置仍需原生审图。"""
+        arguments = ["feedback", path(model, {".mdl"})]
+        if spec:
+            arguments.extend(["--spec", path(spec, {".json"})])
+        return invoke(arguments)
+
     @server.tool(annotations=write_new)
     def layout_model(model: str, output: str, mode: str = "refine", style: str = "preserve") -> dict:
-        """保护方程和拓扑，整理信息线；preserve 模式只改圆弧。"""
-        if mode not in {"auto", "preserve", "refine", "graphviz"}:
+        """保护方程和拓扑；circular 按环形组织，preserve 只改圆弧。"""
+        if mode not in {"auto", "preserve", "refine", "graphviz", "circular"}:
             raise ValueError("无效布局模式")
         if style not in {"preserve", "monochrome", "native-blue"}:
             raise ValueError("无效箭头样式")
@@ -87,7 +95,7 @@ def create_server(workspace):
 
     @server.tool(annotations=write_new)
     def build_model(spec: str, output: str) -> dict:
-        """从用户已明确的方程、单位、初值和流向 JSON 生成 SFD。"""
+        """从明确的方程、单位、初值和流向 JSON 生成 SFD，默认环形布局。"""
         return invoke(["build", path(spec, {".json"}), "--output", output_file(output, {".mdl"}, ".build_report.json")])
 
     @server.tool(annotations=write_new)

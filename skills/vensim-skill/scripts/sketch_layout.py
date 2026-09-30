@@ -152,15 +152,22 @@ def optimize_view(lines, view, config, engine, route=True):
         if len(matches) != 1 or matches[0] not in movable:
             raise ValueError(f"{name}: 锚点必须唯一且可移动；不能改动存量管道、阀门或影子变量")
         anchors[matches[0]] = tuple(point)
+    # 锚点先进入障碍物集合，其他节点才能真正绕开其最终位置。
+    working = positioned_view(view, anchors)
+    free = {oid: obj for oid, obj in movable.items() if oid not in anchors}
     proposals = [("preserve", {})]
     if mode != "preserve":
-        proposals.append(("refine", clear_positions(view, {}, movable, config)))
-        if mode in ("auto", "graphviz") and movable:
-            graph = graphviz_proposal(view, movable, config, engine)
-            proposals.append(("graphviz", clear_positions(view, graph, movable, config)))
+        proposals.append(("refine", clear_positions(working, {}, free, config)))
+        if mode == "circular":
+            from circular_layout import circular_proposals
+            proposals = [("circular", clear_positions(working, proposed, free, config))
+                         for proposed in circular_proposals(working, free, config)]
+        if mode in ("auto", "graphviz") and free:
+            graph = graphviz_proposal(working, free, config, engine)
+            proposals.append(("graphviz", clear_positions(working, graph, free, config)))
     if anchors:
         proposals = [(label, {**positions, **anchors}) for label, positions in proposals]
-    if mode == "graphviz" and movable:
+    if mode == "graphviz" and free:
         proposals = proposals[-1:]
     evaluated = []
     stock_names = next(iter(view.objects.values())).stock_names if view.objects else set()

@@ -10,6 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "skills/vensim-skill/scripts"))
 
+import experiments  # noqa: E402
 from experiments import execute_experiment  # noqa: E402
 from model_builder import build_model  # noqa: E402
 from result_plotting import read_result_csv, validate_results  # noqa: E402
@@ -35,12 +36,53 @@ def model_file(tmp_path, equations):
         ("PULSE(1,0)", [0, 1, 0, 0, 0]),
         ("PULSE(0.25,1)", [1, 0, 0, 0, 0]),
         ("PULSE(0.5,1)", [0, 0, 0, 0, 0]),
+        ("STEP(2,0.25)", [2] * 5),
+        ("STEP(2,0.5)", [0, 2, 2, 2, 2]),
+        ("STEP(-2,1)", [0, -2, -2, -2, -2]),
+        ("STEP(2,-1)", [2] * 5),
+        ("MODULO(-5,3)", [-2] * 5),
+        ("MODULO(-7.5,2)", [-1.5] * 5),
+        ("MODULO(7.5,2)", [1.5] * 5),
+        ("RAMP(2,1,3)", [0, 0, 2, 4, 4]),
+        ("RAMP(2,1,0)", [0, 0, -2, -2, -2]),
         ("IF THEN ELSE(Time=1 :OR: Time<>2 :AND: :NOT: Time>3,2,0)", [2, 2, 0, 2, 0]),
     ],
 )
 def test_official_scalar_function_boundaries(tmp_path, expression, expected):
     model = model_file(tmp_path, f"Output={expression}~Dmnl~|\n")
     assert run_model(model, ["Output"]).series["Output"] == expected
+
+
+@pytest.mark.parametrize("divisor", [0, -3])
+def test_nonpositive_modulo_divisor_does_not_guess_native_semantics(tmp_path, divisor):
+    model = model_file(tmp_path, f"Output=MODULO(-5,{divisor})~Dmnl~|\n")
+    with pytest.raises(ValueError, match="非正除数"):
+        run_model(model, ["Output"])
+
+
+@pytest.mark.parametrize("expression", ["STEP(2,0.25)", "STEP(2,0.5)", "MODULO(-7.5,2)"])
+def test_step_and_signed_modulo_match_actual_pysd(tmp_path, expression):
+    pytest.importorskip("pysd")
+    model = model_file(tmp_path, f"Output={expression}~Dmnl~|\n")
+    expected = run_model(model, ["Output"])
+    actual = run_model(model, ["Output"], backend="pysd")
+    assert actual.times == expected.times
+    assert actual.series["Output"] == expected.series["Output"]
+
+
+def test_step_uses_effective_overridden_time_step(tmp_path):
+    model = model_file(tmp_path, "Output=STEP(2,0.25)~Dmnl~|\n")
+    assert run_model(model, ["Output"], time_step=0.5, saveper=0.5).series["Output"] == [
+        0,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+    ]
 
 
 @pytest.mark.parametrize("duration", [0, 1, 1.5, 2.5])
@@ -136,6 +178,7 @@ def test_experiment_csv_keeps_sampling_metadata_and_hash(tmp_path):
     execute_experiment(model, spec, folder)
     csv = folder / "series.csv"
     metadata = json.loads((folder / "experiment.json").read_text())
+    assert metadata["model_sha256"] == hashlib.sha256(model.read_bytes()).hexdigest()
     assert metadata["result_files"]["series.csv"] == hashlib.sha256(csv.read_bytes()).hexdigest()
     results, _ = read_result_csv(csv)
     assert all(
@@ -143,6 +186,90 @@ def test_experiment_csv_keeps_sampling_metadata_and_hash(tmp_path):
         and result.metadata["provenance_verified"]
         for _, result in results
     )
+
+
+@pytest.mark.parametrize("workflow", ["experiment", "convergence"])
+@pytest.mark.parametrize("changed_run", [1, 2])
+def test_batch_source_changes_fail_before_publishing(tmp_path, monkeypatch, workflow, changed_run):
+    model = model_file(tmp_path, "Parameter=2~Item~|\nOutput=Parameter~Item~|\n")
+    original = experiments.run_model
+    calls = 0
+
+    def change_between_runs(*args, **kwargs):
+        nonlocal calls
+        result = original(*args, **kwargs)
+        calls += 1
+        if calls == changed_run:
+            model.write_bytes(model.read_bytes().replace(b"Parameter=2", b"Parameter=3"))
+        return result
+
+    monkeypatch.setattr(experiments, "run_model", change_between_runs)
+    output = tmp_path / "results"
+    with pytest.raises(ValueError, match="源模型发生变化"):
+        if workflow == "experiment":
+            execute_experiment(
+                model,
+                {"variables": ["Output"], "scenarios": [{"name": "first"}, {"name": "second"}]},
+                output,
+            )
+        else:
+            experiments.convergence(model, ["Output"], output / "convergence.json")
+    assert not output.exists()
+    assert calls == changed_run
+
+
+def test_experiment_checks_result_model_hash_even_when_source_is_unchanged(tmp_path, monkeypatch):
+    model = model_file(tmp_path, "Output=2~Item~|\n")
+    original = experiments.run_model
+
+    def mismatched_hash(*args, **kwargs):
+        result = original(*args, **kwargs)
+        result.metadata["model_sha256"] = "different-model"
+        return result
+
+    monkeypatch.setattr(experiments, "run_model", mismatched_hash)
+    with pytest.raises(ValueError, match="源模型发生变化"):
+        execute_experiment(
+            model, {"variables": ["Output"], "scenarios": [{"name": "first"}]}, tmp_path / "out"
+        )
+    assert not (tmp_path / "out").exists()
+
+
+def test_experiment_rechecks_source_after_rendering_before_publishing(tmp_path, monkeypatch):
+    model = model_file(tmp_path, "Output=2~Item~|\n")
+
+    def change_during_rendering(*args, **kwargs):
+        model.write_bytes(model.read_bytes().replace(b"Output=2", b"Output=3"))
+        return {"status": "completed"}
+
+    monkeypatch.setattr(experiments, "plot_experiment", change_during_rendering)
+    with pytest.raises(ValueError, match="源模型发生变化"):
+        execute_experiment(
+            model,
+            {"variables": ["Output"], "scenarios": [{"name": "first"}]},
+            tmp_path / "out",
+            plot=tmp_path / "figure.png",
+        )
+    assert not (tmp_path / "out").exists()
+
+
+def test_convergence_checks_identical_saved_times(tmp_path, monkeypatch):
+    model = model_file(tmp_path, "Output=2~Item~|\n")
+    original = experiments.run_model
+    calls = 0
+
+    def mismatched_time_grid(*args, **kwargs):
+        nonlocal calls
+        result = original(*args, **kwargs)
+        calls += 1
+        if calls == 2:
+            result.times[1] += 0.1
+        return result
+
+    monkeypatch.setattr(experiments, "run_model", mismatched_time_grid)
+    with pytest.raises(ValueError, match="保存时刻不一致"):
+        experiments.convergence(model, ["Output"], tmp_path / "convergence.json")
+    assert not (tmp_path / "convergence.json").exists()
 
 
 def test_variable_units_and_nonfinite_constants_are_rejected(tmp_path):

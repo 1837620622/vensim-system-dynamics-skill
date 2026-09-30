@@ -18,6 +18,9 @@
 | `XIDZ(A,B,X)` | `ABS(B) < 1e-6` 时返回 X，否则 A/B | 原生小分母阈值；不只检测精确零 |
 | `ZIDZ(A,B)` | 与 XIDZ(A,B,0) 相同 | 两个参数；旧实现接受的三个参数现在拒绝 |
 | `PULSE(start,width)` | 用 `Time + TIME STEP/2` 比较；零宽度按一个步长处理 | 按官方严格不等号实现；非网格时刻与边界相等时须核对实际后端 |
+| `STEP(height,start)` | `Time + TIME STEP/2 > start` 时返回 height，否则零 | 使用有效步长，半步相等仍为零；非网格时刻有实际 PySD 对照 |
+| `MODULO(A,B)` | 正除数使用 C 浮点余数，负被除数保持负余数 | 不使用 Python `%`；非正除数拒绝猜值，要求原生核对 |
+| `RAMP(slope,start,end)` | `Time <= start` 为零，之后上升到结束时刻并保持 | 开始时刻按官方严格不等号；反向区间与 PySD 的边界不同，须核对具体任务 |
 | `DELAY FIXED(input,duration,initial)` | 独立离散状态，初始化冻结时长和初值；同时捕获所有当前输入，再更新状态 | 至少一时步；非整数时长/步长向最近整数取整，半步向上；反馈、冻结与取整有 PySD 对照 |
 | `SMOOTH/SMOOTH3` 及 I 变体 | 一阶段或三阶段信息状态 | 只覆盖独立完整 RHS 形式，不承诺任意嵌套 |
 | `DELAY1/DELAY3` 及 I 变体 | 按各阶段管道存量与流出传递 | 物料延迟不等同于信息平滑；高级时变边界须跨后端核对 |
@@ -28,6 +31,8 @@
 Lookup 接受坐标对和原生 x 序列/y 序列形式，可识别科学计数法。错误点、重复 x 和乱序会报错，不能为使其运行而自动排序或丢点。表是函数，不能导出一条虚构的零值标量轨迹；应导出调用表的业务量。
 
 官方 PULSE 说明与 PySD 当前实现对非网格起点的处理有差别。切换后端时，重点测试跳变附近、半步边界和零宽度；不能因整数网格示范相同而承诺任意脉冲都一致。选择实际任务需要的后端，并保存其版本与积分方法。
+
+MODULO 官方说明使用 C 余数，同时写为 `A-QUANTUM(A,B)`；QUANTUM 对非正除数又规定返回 A。这些表述在非正除数上不能直接统一，PySD 的 QUANTUM 还对小于 `1e-6` 的除数返回 A。内置仅承诺正除数的 C 余数实现，不把负数取余直接翻译成 Python `%`，非正除数会报错。极小正除数、非正除数和反向 RAMP 区间应按实际原生版本逐点核对，不能把普通边界的对照推广到全部输入。
 
 ## 时间网格与资源
 
@@ -42,6 +47,8 @@ PySD 使用临时副本翻译自包含标量模型，显式传入本封装解析
 ## CSV 与运行清单
 
 单次仿真保存 `result.csv` 和 `result.csv.run.json`。实验保存 `series.csv`、`summary.csv` 与 `experiment.json`。搜索保存数据和 `optimization.json`。新输出清单记录数据文件 SHA-256，运行记录包含模型哈希、后端/版本、Python 版本、Euler 方法、参数、时间网格、单位及诊断状态。
+
+批量实验与步长检查从同一份 MDL 字节快照解析基准参数和时间设置，每次运行前后及发布清单前核对源模型哈希，运行记录也须对应这一哈希。中途改动会停止整组发布；不能把两个版本的模型混成同一组情景或收敛结果。步长检查还核对实际保存时刻完全一致，不能只按数组下标拼接。文件哈希检测不锁定整个文件系统，不构成对可信本地进程并发修改的完全隔离。
 
 `plot-data` 自动读取相邻的对应清单：
 
@@ -58,6 +65,7 @@ PySD 使用临时副本翻译自包含标量模型，显式传入本封装解析
 - [Vensim 名称规则](https://www.vensim.com/documentation/ref_variable_names.html)
 - [XIDZ](https://www.vensim.com/documentation/fn_xidz.html) 与 [ZIDZ](https://www.vensim.com/documentation/fn_zidz.html)
 - [PULSE](https://www.vensim.com/documentation/fn_pulse.html)
+- [STEP](https://www.vensim.com/documentation/fn_step.html)、[MODULO](https://www.vensim.com/documentation/fn_modulo.html)、[QUANTUM](https://www.vensim.com/documentation/fn_quantum.html) 与 [RAMP](https://www.vensim.com/documentation/fn_ramp.html)
 - [DELAY FIXED](https://www.vensim.com/documentation/fn_delay_fixed.html)
 - [Lookups](https://www.vensim.com/documentation/lookups.html) 与 [范围外行为](https://www.vensim.com/documentation/22820.html)
 - [PySD 固定延迟实现](https://pysd.readthedocs.io/en/master/_modules/pysd/py_backend/statefuls.html) 与 [函数实现](https://pysd.readthedocs.io/en/master/_modules/pysd/py_backend/functions.html)

@@ -1,8 +1,32 @@
-# v2.2.1 审查记录
+# 工程审查记录
+
+## v2.2.2 独立复核
+
+在已发布版本上重新检查函数边界、整组实验身份、可选依赖缺失、文档一致性与分发路径。Context7 核对 PySD 函数、SciPy `differential_evolution` 的 `rng`/约束接口和 Matplotlib 输出/字体接口；Exa 搜索官方函数文档与 PySD 问题记录，再直接阅读官方页面及本地实际依赖源码。检索结果没有直接作为代码结论，行为以官方定义、实际后端和回归复现交叉判断。
+
+| 确认的问题 | 修复与证据 |
+| --- | --- |
+| STEP 只比较当前时刻，非网格起点可晚一时步触发 | 按有效步长使用严格 `Time + TIME STEP/2 > start`；普通、非网格、半步相等和步长覆盖回归，实际 PySD 对照 |
+| MODULO 直接使用 Python `%`，负被除数的符号错误 | 正除数用 C 浮点余数；覆盖整数与小数负值；非正除数明确拒绝猜测，官方/后端冲突写入语义手册 |
+| RAMP 的开始时刻不使用官方严格边界 | `Time <= start` 返回零；普通和反向区间按官方定义回归，不声称反向区间已原生逐点核验 |
+| 批量实验只核对单次运行，模型可在两次运行之间变化 | 用同一源快照解析基准与时间，运行前后、绘图前后和发布前核对模型/运行哈希；变更时停止整组发布 |
+| 步长检查按下标比较，未显式验证保存时刻 | 比较同一模型哈希及相同保存时刻后再计算误差；模型变化、运行哈希不符及网格错配回归 |
+
+完整本地集成 **204 项测试通过**，包括 PySD、SciPy、Matplotlib 与 MCP。两条固定延迟取整提示对应有意测试的半步时长。显式屏蔽可选库的独立检查为 176 项通过、28 项按预期跳过；缺失库的测试不冒充已验证集成。Ruff lint/format、Bandit、ShellCheck、Skill 格式、发布预检与文档本地链接通过。
+
+Betterleaks 针对发布范围未报告泄漏；OSV 对补足修复版本后的实际测试依赖清单 **65 个包**未报告已知漏洞。测试仍使用临时 MCP/lxml/Pillow 目录，不修改全局 Python；全局旧依赖由 `doctor` 单独报告。扫描不覆盖全部逻辑和全局软件，不能写为“零漏洞”。
+
+原生 PLE 10.5.0 已运行独立函数模型。原始临时 Lookup 的输入含 Hour 单位，与无量纲表点不符；修正测试副本为有依据的时间单位归一化后，原生单位检查显示“单位都没问题”，运行生成原生 VDFX。独立输出带有 USE FLAG 提示，未通过删变量或虚构边掩盖。数据表工具的坐标控件未能可靠访问，没有获得全量原生数值导出，因此新增边界不记为原生逐点数值验收通过；该临时模型不作为 Skill 示例或业务模板分发。
+
+中英文 README、SKILL 及仿真语义手册同步描述修复与限制。图源、中文变量、环形布局、原生黑/纯蓝箭头、作者与非商业约束保留。仓库标签、发布资产、下载副本和本机安装按同一 Git 提交逐文件核对，测试缓存不进入分发包。三平台 Actions 的实际启动状态须另行读取；本地通过不替代远程 Windows/Linux 结果。
+
+依据：[STEP](https://www.vensim.com/documentation/fn_step.html)、[MODULO](https://www.vensim.com/documentation/fn_modulo.html)、[QUANTUM](https://www.vensim.com/documentation/fn_quantum.html)、[RAMP](https://www.vensim.com/documentation/fn_ramp.html)、[PySD 函数源码](https://pysd.readthedocs.io/en/master/_modules/pysd/py_backend/functions.html)、[SciPy 接口](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.differential_evolution.html)。
+
+## v2.2.1 复核
 
 审查对象为本仓库 Skill、Python 核心、CLI/MCP、示范模型、文档及分发流程。网络交叉核对使用 Vensim 官方函数与格式文档、PySD 文档/源码、MCP 官方安全资料及系统动力学原始研究规范；Exa 与内置搜索互相核对，库 API 另查 Context7。
 
-## 已修复的问题
+### 已修复的问题
 
 | 问题 | 影响 | 修复与证据 |
 | --- | --- | --- |
@@ -20,7 +44,7 @@
 | 英文仓库说明缺失 | 安装、调用和限制不便英文读者核对 | 完整 `README.en.md`，双向导航与本地链接检查 |
 | 重新解析版本合规，但本机旧依赖不符合约束 | 只查解析报告可漏掉实际旧包 | `doctor` 检查已安装版本；隔离测试目录补足修复版本后重跑，不修改全局环境 |
 
-## 验证口径
+### 验证口径
 
 本地 182 项测试通过，包括核心与可选 PySD、SciPy、Matplotlib、MCP 集成。两条 PySD 固定延迟取整提示对应有意测试的半步时长，没有测试失败。测试加载临时目录的 MCP 1.30.0、lxml 6.1.3 与 Pillow 12.3.0；本机全局旧包没有被擅自替换。Ruff lint/format、Bandit、ShellCheck、Skill 格式与文档链接检查通过。
 
@@ -32,7 +56,7 @@ Betterleaks 密钥扫描只针对发布范围，未报告泄漏，保留未发�
 
 GitHub Actions 已配置三平台矩阵。此前任务受到账号账单锁定影响，在测试前未启动；发布时需检查实际 run/check-run 状态，不能以本机通过或矩阵配置存在代替 Windows/Linux 远程测试通过。
 
-## 保留的边界
+### 保留的边界
 
 - 内置引擎为可测试的标量 Euler 子集，不能替代完整 Vensim 函数、量纲与研究有效性验证。
 - PULSE 的非网格边界在不同后端可能不同；需按任务实际跳变时刻比较。

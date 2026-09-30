@@ -12,12 +12,20 @@ import math
 import random
 from pathlib import Path
 
-from mdl_document import atomic_write, preflight_outputs, separate_output
+from mdl_document import MdlDocument, atomic_write, preflight_outputs, separate_output
 from simulation_runner import run_model
-from vensim_engine import get_time_bounds, load_mdl_text, parse_equations
+from vensim_engine import get_time_bounds, parse_equations
 
 MAX_RUNS = 200
 MAX_EXPERIMENT_VALUES = 2_000_000
+
+
+def _check_model_identity(model, fingerprint, result=None):
+    """批量运行与发布前均核对同一源模型，不能把不同模型混为一组实验。"""
+    if hashlib.sha256(model.read_bytes()).hexdigest() != fingerprint or (
+        result is not None and result.metadata.get("model_sha256") != fingerprint
+    ):
+        raise ValueError("实验期间源模型发生变化，整组结果已拒绝发布")
 
 
 def csv_bytes(header, rows):
@@ -148,7 +156,9 @@ def execute_experiment(
     from result_plotting import output_paths
 
     protected = [*protected, *([plot_config] if plot_config else [])]
-    equations = parse_equations(load_mdl_text(model), expand=False)
+    document = MdlDocument.read(model)
+    fingerprint = hashlib.sha256(document.raw).hexdigest()
+    equations = parse_equations(document.semantic_text, expand=False)
     baseline = {}
     for name, equation in equations.items():
         try:
@@ -179,7 +189,7 @@ def execute_experiment(
             or (name != "final_time" and value <= 0)
         ):
             raise ValueError(f"无效的时间设置: {name}")
-    settings = get_time_bounds(parse_equations(load_mdl_text(model)))
+    settings = get_time_bounds(equations)
     points = (time.get("final_time", settings[1]) - settings[0]) / time.get(
         "saveper", settings[3]
     ) + 1
@@ -187,7 +197,9 @@ def execute_experiment(
         raise ValueError("实验输出过大，请缩短仿真区间、增大保存间隔或减少参数组合")
     series, summary, manifest, results = [], [], [], []
     for run in runs:
+        _check_model_identity(model, fingerprint)
         result = run_model(model, variables, backend=backend, params=run["params"], **time)
+        _check_model_identity(model, fingerprint, result)
         result.metadata["experiment_mode"] = spec.get("mode", "scenarios")
         manifest.append({"name": run["name"], **result.metadata})
         results.append((run["name"], result))
@@ -209,7 +221,13 @@ def execute_experiment(
                 [run["name"], timestamp, name, value]
                 for timestamp, value in zip(result.times, values, strict=False)
             )
-    report = {"spec": spec, "runs": manifest, "run_count": len(runs), "native_verified": False}
+    report = {
+        "spec": spec,
+        "runs": manifest,
+        "run_count": len(runs),
+        "model_sha256": fingerprint,
+        "native_verified": False,
+    }
     contents = {
         outputs[0]: csv_bytes(["Scenario", "Time", "Variable", "Value"], series),
         outputs[1]: csv_bytes(
@@ -220,6 +238,7 @@ def execute_experiment(
         path.name: hashlib.sha256(content).hexdigest() for path, content in contents.items()
     }
     # 所有求解及图形渲染成功后才保存实验清单，不伪报完整实验。
+    _check_model_identity(model, fingerprint)
     figure_report = (
         plot_experiment(
             results,
@@ -235,8 +254,11 @@ def execute_experiment(
         if plot
         else None
     )
+    _check_model_identity(model, fingerprint)
     for path, content in contents.items():
+        _check_model_identity(model, fingerprint)
         atomic_write(path, content)
+    _check_model_identity(model, fingerprint)
     atomic_write(outputs[2], json.dumps(report, ensure_ascii=False, indent=2).encode())
     return {"run_count": len(runs), "output": str(output), "plot": figure_report}
 
@@ -251,8 +273,17 @@ def convergence(model, variables, output, tolerance=0.01):
     preflight_outputs([output], [model])
     if isinstance(tolerance, bool) or not math.isfinite(tolerance) or tolerance <= 0:
         raise ValueError("tolerance 必须为有限正数")
-    _, _, dt, sp = get_time_bounds(parse_equations(load_mdl_text(model)))
-    runs = [run_model(model, variables, time_step=dt / factor, saveper=sp) for factor in (1, 2, 4)]
+    document = MdlDocument.read(model)
+    fingerprint = hashlib.sha256(document.raw).hexdigest()
+    _, _, dt, sp = get_time_bounds(parse_equations(document.semantic_text))
+    runs = []
+    for factor in (1, 2, 4):
+        _check_model_identity(model, fingerprint)
+        result = run_model(model, variables, time_step=dt / factor, saveper=sp)
+        _check_model_identity(model, fingerprint, result)
+        if runs and result.times != runs[0].times:
+            raise ValueError("步长检查的保存时刻不一致，结果已拒绝发布")
+        runs.append(result)
     records = []
     for variable in variables:
         refined = runs[-1].series[variable]
@@ -279,9 +310,10 @@ def convergence(model, variables, output, tolerance=0.01):
         "normalization": "maximum absolute value of the finest trajectory",
         "variables": records,
         "pass": all(item["pass"] for item in records),
-        "model_sha256": runs[0].metadata["model_sha256"],
+        "model_sha256": fingerprint,
         "native_verified": False,
     }
+    _check_model_identity(model, fingerprint)
     atomic_write(output, json.dumps(report, ensure_ascii=False, indent=2).encode())
     return report
 

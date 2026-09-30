@@ -294,6 +294,8 @@ The [academic presentation guide](skills/vensim-skill/references/ACADEMIC_PRESEN
 
 ## Upgrade notes
 
+**v2.2.2** corrects off-grid and half-step `STEP` boundaries using the effective time step and the official strict comparison. `MODULO` now uses C floating-point remainder for positive divisors, retaining the dividend's sign; non-positive divisors fail with a native-verification requirement. `RAMP` returns zero at its start time. Very small modulo divisors and reversed ramp intervals have documented backend differences. Scenario, sensitivity, and convergence batches check one source MDL hash across all runs and before publication; convergence also checks identical saved times. New regressions include actual PySD comparisons, source changes between runs, and mismatched time grids.
+
 **v2.2.1** adds this full English README, enforceable code conventions, and installed-dependency constraint reporting. It fixes ZIDZ/XIDZ boundaries, zero-width and half-step pulses, fixed-delay state/initialization/feedback, native name aliases and implicit-state collisions, standalone and inline Lookup parsing, nested internal aliases, finite-result checks, CSV provenance restoration, unit comparisons, and dangling MCP outputs. The historical Lookup demonstration's parentheses were corrected while its numeric points were retained.
 
 The previous three-argument `ZIDZ` was invalid native syntax and is now rejected. Old CSV manifests without hashes remain usable but unverified. Removing metadata cannot turn a diagnostic run into valid research output.

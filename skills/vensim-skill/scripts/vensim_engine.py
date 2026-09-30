@@ -56,6 +56,7 @@ HELPER_TOKENS = {
     "_ramp": "@13@",
     "_step": "@14@",
     "_delay_fixed": "@15@",
+    "_sd_modulo": "@16@",
 }
 
 # 方程块以 "变量名 = ..." 开头，后续 ~ 单位 ~ 注释 | 结束。
@@ -560,13 +561,10 @@ def _to_python_expr(rhs: str, name_map: dict[str, str], _nested=False) -> str:
             raise ValueError(f"IF THEN ELSE 参数数量错误: {raw}")
         return f"(({_expr_arg(args[1])}) if ({_expr_arg(args[0])}) else ({_expr_arg(args[2])}))"
 
-    def _binary_handler(op: str):
-        def handler(args: list[str], raw: str) -> str:
-            if len(args) != 2:
-                raise ValueError(f"{raw} 参数数量错误")
-            return f"({_expr_arg(args[0])} {op} {_expr_arg(args[1])})"
-
-        return handler
+    def _modulo_handler(args: list[str], raw: str) -> str:
+        if len(args) != 2:
+            raise ValueError(f"MODULO 参数数量错误: {raw}")
+        return f"{_helper('_sd_modulo')}({_expr_arg(args[0])}, {_expr_arg(args[1])})"
 
     def _division_guard_handler(kind: str):
         def handler(args: list[str], raw: str) -> str:
@@ -602,7 +600,7 @@ def _to_python_expr(rhs: str, name_map: dict[str, str], _nested=False) -> str:
     s = _replace_calls(s, "IF THEN ELSE", _if_handler)
     s = _replace_with_lookup_calls(s)
     s = _replace_calls(s, "DELAY FIXED", _delay_fixed_handler)
-    s = _replace_calls(s, "MODULO", _binary_handler("%"))
+    s = _replace_calls(s, "MODULO", _modulo_handler)
     s = _replace_calls(s, "XIDZ", _division_guard_handler("XIDZ"))
     s = _replace_calls(s, "ZIDZ", _division_guard_handler("ZIDZ"))
     s = _replace_calls(s, "PULSE", _time_func_handler("pulse"))
@@ -816,7 +814,7 @@ def evaluate(rhs: str, ctx: dict, lookups: dict, name_map: dict[str, str]) -> fl
 
     def _ramp(slope, start, end=None):
         t = ctx.get("Time", 0.0)
-        if t < start:
+        if t <= start:
             return 0.0
         if end is not None and t > end:
             return slope * (end - start)
@@ -824,7 +822,17 @@ def evaluate(rhs: str, ctx: dict, lookups: dict, name_map: dict[str, str]) -> fl
 
     def _step(value, time):
         t = ctx.get("Time", 0.0)
-        return 0.0 if t < time else value
+        dt = ctx.get("__time_step__")
+        if dt is None:
+            raise ValueError("STEP 需要有效 TIME STEP 上下文")
+        return value if t + dt / 2 > time else 0.0
+
+    def _modulo(dividend, divisor):
+        # 官方 MODULO/QUANTUM 与 PySD 对非正除数的说明不同，未原生核对前不猜值。
+        if divisor <= 0:
+            raise ValueError("MODULO 的非正除数须在原生 Vensim 核对，内置后端仅支持正除数")
+        # Python 的 % 随除数定号；C 余数随被除数定号，浮点输入也必须保留。
+        return math.fmod(dividend, divisor)
 
     def _delay_fixed(key, value, delay_time, initial_value):
         raise ValueError("DELAY FIXED 必须由仿真器作为独立状态运行")
@@ -843,6 +851,7 @@ def evaluate(rhs: str, ctx: dict, lookups: dict, name_map: dict[str, str]) -> fl
         "_sd_tan": math.tan,
         "_sd_int": int,
         "_sd_float": float,
+        "_sd_modulo": _modulo,
         "_pulse": _pulse,
         "_ramp": _ramp,
         "_step": _step,

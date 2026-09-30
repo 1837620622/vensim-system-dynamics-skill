@@ -1,10 +1,10 @@
-from pathlib import Path
 import asyncio
 import hashlib
 import json
 import math
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -16,8 +16,8 @@ sys.path.insert(0, str(TOOLS))
 from experiments import convergence, execute_experiment, experiment_runs  # noqa: E402
 from model_builder import build_model, command_build  # noqa: E402
 from simulation_runner import run_model  # noqa: E402
-from vensim_engine import get_time_bounds, parse_equations, simulate  # noqa: E402
 from vensim_autolayout import load_mdl  # noqa: E402
+from vensim_engine import get_time_bounds, parse_equations, simulate  # noqa: E402
 
 TEMPLATE = SKILL / "assets/templates/inventory_zh.json"
 
@@ -30,7 +30,9 @@ def inventory(tmp_path):
 
 
 def controls(final=10, dt=0.1, save=0.1):
-    return f"INITIAL TIME=0~Month~|FINAL TIME={final}~Month~|TIME STEP={dt}~Month~|SAVEPER={save}~Month~|".replace("|", "|\n")
+    return f"INITIAL TIME=0~Month~|FINAL TIME={final}~Month~|TIME STEP={dt}~Month~|SAVEPER={save}~Month~|".replace(
+        "|", "|\n"
+    )
 
 
 @pytest.mark.parametrize("function", ["SMOOTH", "SMOOTH3", "DELAY1", "DELAY3"])
@@ -54,7 +56,9 @@ def test_material_delay_conserves_mass():
 
 
 def test_stock_dependency_initialization_does_not_cache_zero():
-    eq = parse_equations("B=INTEG(0, Twice A)~Unit~|\nTwice A=2*A~Unit~|\nA=INTEG(0, 8)~Unit~|\n" + controls())
+    eq = parse_equations(
+        "B=INTEG(0, Twice A)~Unit~|\nTwice A=2*A~Unit~|\nA=INTEG(0, 8)~Unit~|\n" + controls()
+    )
     result = simulate(eq, *get_time_bounds(eq))
     assert result.series["B"][0] == 16
 
@@ -118,11 +122,22 @@ def test_time_settings_are_not_inherited_from_old_example():
 
 
 def test_builder_simulates_different_domain_without_example_values(tmp_path):
-    spec = {"time": {"initial": 5, "final": 8, "step": 0.125, "saveper": 0.5, "unit": "Hour"},
-            "variables": [{"name": "水体体积", "kind": "stock", "unit": "Litre", "initial": "初始体积"},
-                          {"name": "注入流率", "kind": "flow", "unit": "Litre/Hour", "equation": "泵速", "from": None, "to": "水体体积"},
-                          {"name": "泵速", "kind": "constant", "unit": "Litre/Hour", "equation": 3.5},
-                          {"name": "初始体积", "kind": "constant", "unit": "Litre", "equation": 7}]}
+    spec = {
+        "time": {"initial": 5, "final": 8, "step": 0.125, "saveper": 0.5, "unit": "Hour"},
+        "variables": [
+            {"name": "水体体积", "kind": "stock", "unit": "Litre", "initial": "初始体积"},
+            {
+                "name": "注入流率",
+                "kind": "flow",
+                "unit": "Litre/Hour",
+                "equation": "泵速",
+                "from": None,
+                "to": "水体体积",
+            },
+            {"name": "泵速", "kind": "constant", "unit": "Litre/Hour", "equation": 3.5},
+            {"name": "初始体积", "kind": "constant", "unit": "Litre", "equation": 7},
+        ],
+    }
     model = tmp_path / "reservoir.mdl"
     model.write_text(build_model(spec), encoding="utf-8")
     result = run_model(model, ["水体体积"])
@@ -133,12 +148,17 @@ def test_builder_simulates_different_domain_without_example_values(tmp_path):
 
 
 def test_experiment_outputs_and_validation(inventory, tmp_path):
-    spec = {"variables": ["库存"], "scenarios": [{"name": "基准"}, {"name": "政策", "params": {"需求": 30}}]}
+    spec = {
+        "variables": ["库存"],
+        "scenarios": [{"name": "基准"}, {"name": "政策", "params": {"需求": 30}}],
+    }
     output = tmp_path / "results"
     result = execute_experiment(inventory, spec, output)
     assert result["run_count"] == 2
     assert (output / "series.csv").read_bytes().startswith(b"\xef\xbb\xbf")
-    assert json.loads((output / "experiment.json").read_text())["runs"][1]["parameters"] == {"需求": 30}
+    assert json.loads((output / "experiment.json").read_text())["runs"][1]["parameters"] == {
+        "需求": 30
+    }
     with pytest.raises(ValueError, match="已存在"):
         execute_experiment(inventory, spec, output)
     with pytest.raises(ValueError, match="时间"):
@@ -175,7 +195,9 @@ def test_invalid_model_spec_fails_before_writing(tmp_path):
 def test_builtin_matches_pysd_inventory(inventory):
     pytest.importorskip("pysd")
     variables = ["库存", "补货", "销售"]
-    left, right = (run_model(inventory, variables, backend=backend) for backend in ("builtin", "pysd"))
+    left, right = (
+        run_model(inventory, variables, backend=backend) for backend in ("builtin", "pysd")
+    )
     assert left.times == pytest.approx(right.times)
     for name in variables:
         assert left.series[name] == pytest.approx(right.series[name], rel=1e-10, abs=1e-10)
@@ -188,32 +210,63 @@ def test_mcp_protocol_and_workspace_boundary(inventory, tmp_path):
     from mcp.client.stdio import stdio_client
 
     async def exercise():
-        params = StdioServerParameters(command=sys.executable,
+        params = StdioServerParameters(
+            command=sys.executable,
             args=[str(TOOLS / "skill_cli.py"), "mcp", "--workspace", str(tmp_path)],
-            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+        )
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 listed = await session.list_tools()
                 assert len(listed.tools) == 13
-                result = await session.call_tool("inspect_model", {"model": str(inventory.relative_to(tmp_path))})
+                result = await session.call_tool(
+                    "inspect_model", {"model": str(inventory.relative_to(tmp_path))}
+                )
                 assert not result.isError
-                arranged = await session.call_tool("layout_model", {"model": str(inventory), "output": "circular.mdl", "mode": "circular"})
+                arranged = await session.call_tool(
+                    "layout_model",
+                    {"model": str(inventory), "output": "circular.mdl", "mode": "circular"},
+                )
                 assert not arranged.isError
                 feedback = await session.call_tool("check_feedback", {"model": str(inventory)})
                 assert not feedback.isError
                 escaped = await session.call_tool("inspect_model", {"model": "../outside.mdl"})
                 assert escaped.isError
-                overwrite = await session.call_tool("layout_model", {"model": str(inventory), "output": str(inventory)})
+                overwrite = await session.call_tool(
+                    "layout_model", {"model": str(inventory), "output": str(inventory)}
+                )
                 assert overwrite.isError
-                simulated = await session.call_tool("simulate_model", {"model": str(inventory), "output": "mcp.csv", "variables": ["库存"]})
+                simulated = await session.call_tool(
+                    "simulate_model",
+                    {"model": str(inventory), "output": "mcp.csv", "variables": ["库存"]},
+                )
                 assert not simulated.isError
-                empty = await session.call_tool("simulate_model", {"model": str(inventory), "output": "empty.csv", "variables": []})
+                empty = await session.call_tool(
+                    "simulate_model",
+                    {"model": str(inventory), "output": "empty.csv", "variables": []},
+                )
                 assert empty.isError and not (tmp_path / "empty.csv").exists()
                 protected = tmp_path / "protected.csv.run.json"
                 protected.write_bytes(b"keep")
-                blocked = await session.call_tool("simulate_model", {"model": str(inventory), "output": "protected.csv", "variables": ["库存"]})
+                blocked = await session.call_tool(
+                    "simulate_model",
+                    {"model": str(inventory), "output": "protected.csv", "variables": ["库存"]},
+                )
                 assert blocked.isError and protected.read_bytes() == b"keep"
                 assert not (tmp_path / "protected.csv").exists()
+                link = tmp_path / "dangling.csv"
+                target = tmp_path / "missing.csv"
+                try:
+                    link.symlink_to(target)
+                except OSError:
+                    pass  # Windows 未授予符号链接权限时，其他边界检查仍然运行。
+                else:
+                    blocked_link = await session.call_tool(
+                        "simulate_model",
+                        {"model": str(inventory), "output": "dangling.csv", "variables": ["库存"]},
+                    )
+                    assert blocked_link.isError and link.is_symlink() and not target.exists()
         assert (tmp_path / "mcp.csv").is_file()
+
     asyncio.run(exercise())

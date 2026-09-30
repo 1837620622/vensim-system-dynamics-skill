@@ -1,11 +1,12 @@
 """保留编码、换行、续行和未解释记录的 MDL 文档读写。"""
+
 from __future__ import annotations
 
 import dataclasses
 import os
-from pathlib import Path
 import re
 import tempfile
+from pathlib import Path
 
 SKETCH_MARKER = b"\\\\\\---///"
 
@@ -32,7 +33,9 @@ def atomic_write(path: Path, data: bytes, *, overwrite=False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".vensim-", delete=False) as stream:
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent, prefix=".vensim-", delete=False
+        ) as stream:
             temporary = Path(stream.name)
             stream.write(data)
             stream.flush()

@@ -1,14 +1,20 @@
 """仿真后端与可复现参数覆盖；所有运行都从模型原始初值重新开始。"""
+
 from __future__ import annotations
 
 import hashlib
 import math
-from pathlib import Path
+import platform
 import re
 import tempfile
+from pathlib import Path
 
+from mdl_document import MdlDocument
 from vensim_engine import (
-    SimResult, get_time_bounds, load_mdl_text, parse_equations, simulate,
+    SimResult,
+    get_time_bounds,
+    parse_equations,
+    simulate,
 )
 
 CONTROL_NAMES = {"INITIAL TIME", "FINAL TIME", "TIME STEP", "SAVEPER"}
@@ -29,9 +35,19 @@ def parse_overrides(items):
     return params
 
 
-def run_model(path: Path, variables=None, backend="builtin", params=None,
-              time_step=None, final_time=None, saveper=None, strict=True):
-    text = load_mdl_text(path)
+def run_model(
+    path: Path,
+    variables=None,
+    backend="builtin",
+    params=None,
+    time_step=None,
+    final_time=None,
+    saveper=None,
+    strict=True,
+):
+    document = MdlDocument.read(path)
+    text = document.semantic_text
+    fingerprint = hashlib.sha256(document.raw).hexdigest()
     originals = parse_equations(text, expand=False)
     missing_controls = CONTROL_NAMES - set(originals)
     if missing_controls:
@@ -46,22 +62,50 @@ def run_model(path: Path, variables=None, backend="builtin", params=None,
             float(originals[name].rhs)
         except ValueError as exc:
             raise ValueError(f"{name}: 只能覆盖数值常量参数，不能替换反馈方程或延迟状态") from exc
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
             raise ValueError(f"参数 {name} 必须是有限数")
-    selected = variables or [name for name in originals if name not in CONTROL_NAMES]
-    if isinstance(selected, str) or any(not isinstance(name, str) for name in selected) or len(set(selected)) != len(selected):
+    selected = (
+        variables
+        if variables is not None
+        else [
+            name for name, eq in originals.items() if name not in CONTROL_NAMES and not eq.is_lookup
+        ]
+    )
+    if (
+        isinstance(selected, str)
+        or any(not isinstance(name, str) for name in selected)
+        or len(set(selected)) != len(selected)
+    ):
         raise ValueError("变量必须为不重复的名称列表")
     if not selected:
         raise ValueError("模型没有可导出的变量")
     if any(name not in originals for name in selected):
-        raise ValueError("请求的变量不存在: " + ", ".join(name for name in selected if name not in originals))
+        raise ValueError(
+            "请求的变量不存在: " + ", ".join(name for name in selected if name not in originals)
+        )
+    if any(originals[name].is_lookup for name in selected):
+        raise ValueError("Lookup 是函数，不能作为标量轨迹导出；请选择调用该表的变量")
     for name, value in params.items():
         originals[name].rhs = str(value)
     t0, tf, dt, sp = get_time_bounds(originals)
     tf = tf if final_time is None else final_time
     dt = dt if time_step is None else time_step
     sp = sp if saveper is None else saveper
-    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in (t0, tf, dt, sp)) or tf < t0 or dt <= 0 or sp <= 0:
+    if (
+        any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in (t0, tf, dt, sp)
+        )
+        or tf < t0
+        or dt <= 0
+        or sp <= 0
+    ):
         raise ValueError("仿真时间必须有限，终点不能早于起点，时间步长与保存间隔必须为正数")
     if (tf - t0) / dt > 1_000_000 or ((tf - t0) / sp + 1) * len(originals) > 5_000_000:
         raise ValueError("仿真规模超限，请缩短区间或增大保存间隔")
@@ -82,24 +126,54 @@ def run_model(path: Path, variables=None, backend="builtin", params=None,
         except ImportError as exc:
             raise RuntimeError("需要可选依赖 pysd；或改用 --backend builtin") from exc
         # 只翻译自包含模型，避免悄悄改变外部数据文件的相对路径。
-        if re.search(r"\b(GET (?:XLS|DIRECT|VDF|123)|GET DATA|FILE|TABBED ARRAY)\b", text.split(r"\\\---///", 1)[0], re.I):
-            raise ValueError("PySD 临时翻译仅支持自包含模型；外部数据模型请在原项目中使用 PySD 或原生 Vensim")
+        if re.search(
+            r"\b(GET (?:XLS|DIRECT|VDF|123)|GET DATA|FILE|TABBED ARRAY)\b",
+            text.split(r"\\\---///", 1)[0],
+            re.I,
+        ):
+            raise ValueError(
+                "PySD 临时翻译仅支持自包含模型；外部数据模型请在原项目中使用 PySD 或原生 Vensim"
+            )
         with tempfile.TemporaryDirectory(prefix="vensim-pysd-") as folder:
             copied = Path(folder) / "model.mdl"
             copied.write_text(text, encoding="utf-8")
             model = pysd.read_vensim(str(copied))
-            options = {key: value for key, value in {"time_step": time_step, "final_time": final_time, "saveper": saveper}.items() if value is not None}
-            frame = model.run(params=params, return_columns=selected, initial_condition="original", **options)
-            result = SimResult(frame.index.astype(float).tolist(), {name: frame[name].astype(float).tolist() for name in selected})
-        if not result.times or any(not math.isfinite(value) for values in result.series.values() for value in values):
+            frame = model.run(
+                params=params,
+                return_columns=selected,
+                initial_condition="original",
+                time_step=dt,
+                final_time=tf,
+                saveper=sp,
+            )
+            result = SimResult(
+                frame.index.astype(float).tolist(),
+                {name: frame[name].astype(float).tolist() for name in selected},
+            )
+        if not result.times or any(
+            not math.isfinite(value) for values in result.series.values() for value in values
+        ):
             raise ValueError("PySD 返回空数据或非有限数值")
     else:
         raise ValueError(f"不支持的仿真后端: {backend}")
-    result.metadata = {"backend": backend, "model_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                       "parameters": params, "initial_time": t0, "time_step": dt, "final_time": tf,
-                       "time_unit": originals["INITIAL TIME"].unit if "INITIAL TIME" in originals else "",
-                       "saveper": sp, "native_verified": False, "variables": selected,
-                       "numerical_method": "Euler" if backend == "builtin" else "PySD",
-                       "status": "diagnostic_only" if result.eval_warnings else "completed",
-                       "warnings": result.eval_warnings}
+    if hashlib.sha256(path.read_bytes()).hexdigest() != fingerprint:
+        raise ValueError("仿真期间源模型发生变化，结果已拒绝发布")
+    result.metadata = {
+        "backend": backend,
+        "model_sha256": fingerprint,
+        "parameters": params,
+        "initial_time": t0,
+        "time_step": dt,
+        "final_time": tf,
+        "time_unit": originals["INITIAL TIME"].unit if "INITIAL TIME" in originals else "",
+        "saveper": sp,
+        "native_verified": False,
+        "variables": selected,
+        "variable_units": {name: originals[name].unit for name in selected},
+        "numerical_method": "Euler",
+        "python_version": platform.python_version(),
+        "backend_version": pysd.__version__ if backend == "pysd" else None,
+        "status": "diagnostic_only" if result.eval_warnings else "completed",
+        "warnings": result.eval_warnings,
+    }
     return result

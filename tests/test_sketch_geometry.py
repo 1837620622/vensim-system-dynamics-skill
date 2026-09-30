@@ -1,6 +1,6 @@
-from pathlib import Path
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -9,11 +9,27 @@ sys.path.insert(0, str(TOOLS))
 
 from mdl_document import MdlDocument  # noqa: E402
 from sketch_geometry import circle_path, measure_view, path_hits_box  # noqa: E402
-from vensim_autolayout import command_layout, load_mdl, parse_stock_names, parse_views, update_arrow_line  # noqa: E402
+from vensim_autolayout import (  # noqa: E402
+    command_layout,
+    load_mdl,
+    parse_stock_names,
+    parse_views,
+    update_arrow_line,
+)
 
 
 def sketch(nodes, arrows):
-    return "\n".join([r"\\\---/// Sketch information", "V300", "*View", "$192-192-192,0,Arial|12||0-0-0|0-0-0|0-0-150|-1--1--1|-1--1--1|96,96,100,0", *nodes, *arrows, ""])
+    return "\n".join(
+        [
+            r"\\\---/// Sketch information",
+            "V300",
+            "*View",
+            "$192-192-192,0,Arial|12||0-0-0|0-0-0|0-0-150|-1--1--1|-1--1--1|96,96,100,0",
+            *nodes,
+            *arrows,
+            "",
+        ]
+    )
 
 
 def node(oid, name, x, y, bits=3):
@@ -32,13 +48,24 @@ def test_circle_uses_arc_instead_of_control_polygon():
 
 
 def test_straight_arrow_ignores_dummy_handle():
-    text = sketch([node(1, "A", 100, 100), node(2, "B", 400, 100), node(3, "C", 250, 100)], [arrow(4, 1, 2)])
+    text = sketch(
+        [node(1, "A", 100, 100), node(2, "B", 400, 100), node(3, "C", 250, 100)], [arrow(4, 1, 2)]
+    )
     report = measure_view(parse_views(text.splitlines(keepends=True))[0])
     assert report["arrow_node_collisions"] == [{"arrow": 4, "object": 3}]
 
 
+def test_native_name_aliases_cannot_hide_duplicate_defined_or_stock_identity():
+    text = sketch([node(1, "Total Stock", 100, 100), node(2, "TOTAL_STOCK", 400, 100)], [])
+    view = parse_views(text.splitlines(keepends=True), {"total_stock"})[0]
+    assert all(obj.stock_like for obj in view.objects.values())
+    assert measure_view(view)["duplicate_defined"] == [{"variable": "Total Stock", "ids": [1, 2]}]
+
+
 def test_router_avoids_label_and_preserves_semantics(tmp_path):
-    text = sketch([node(1, "A", 100, 100), node(2, "B", 400, 100), node(3, "C", 250, 100)], [arrow(4, 1, 2)])
+    text = sketch(
+        [node(1, "A", 100, 100), node(2, "B", 400, 100), node(3, "C", 250, 100)], [arrow(4, 1, 2)]
+    )
     source, target = tmp_path / "source.mdl", tmp_path / "target.mdl"
     source.write_text(text)
     command_layout(source, target, mode="preserve")
@@ -52,16 +79,23 @@ def test_router_avoids_label_and_preserves_semantics(tmp_path):
 
 def test_opposite_directions_do_not_share_same_arc(tmp_path):
     source, target = tmp_path / "source.mdl", tmp_path / "target.mdl"
-    source.write_text(sketch([node(1, "A", 100, 100), node(2, "B", 400, 100)], [arrow(3, 1, 2), arrow(4, 2, 1)]))
+    source.write_text(
+        sketch([node(1, "A", 100, 100), node(2, "B", 400, 100)], [arrow(3, 1, 2), arrow(4, 2, 1)])
+    )
     command_layout(source, target, mode="preserve")
     arrows = load_mdl(target)[1][0].arrows
     assert arrows[0].points != arrows[1].points
     assert not measure_view(load_mdl(target)[1][0])["arrow_crossings"]
 
 
-@pytest.mark.parametrize("encoding,bom,newline", [("utf-8", b"", "\n"), ("utf-8", b"\xef\xbb\xbf", "\r\n"), ("gb18030", b"", "\r\n")])
+@pytest.mark.parametrize(
+    "encoding,bom,newline",
+    [("utf-8", b"", "\n"), ("utf-8", b"\xef\xbb\xbf", "\r\n"), ("gb18030", b"", "\r\n")],
+)
 def test_layout_preserves_equation_bytes_and_encoding(tmp_path, encoding, bom, newline):
-    text = '库存 = INTEG(\n  流量, 10)\n~ 件\n~ 注释\n|\n' + sketch([node(1, "库存", 100, 100), node(2, "流量", 400, 100)], [arrow(3, 1, 2)])
+    text = "库存 = INTEG(\n  流量, 10)\n~ 件\n~ 注释\n|\n" + sketch(
+        [node(1, "库存", 100, 100), node(2, "流量", 400, 100)], [arrow(3, 1, 2)]
+    )
     raw = bom + text.replace("\n", newline).encode(encoding)
     source, target = tmp_path / "source.mdl", tmp_path / "target.mdl"
     source.write_bytes(raw)
@@ -72,7 +106,7 @@ def test_layout_preserves_equation_bytes_and_encoding(tmp_path, encoding, bom, n
 
 
 def test_continuation_inside_utf8_character_round_trips(tmp_path):
-    raw = '库存 = INTEG(0, 10)\n~ 件\n|\n'.encode()
+    raw = "库存 = INTEG(0, 10)\n~ 件\n|\n".encode()
     raw = raw[:1] + b"\\\r\n\t" + raw[1:]
     raw += sketch([node(1, "库存", 100, 100)], []).encode()
     source, target = tmp_path / "source.mdl", tmp_path / "target.mdl"
@@ -108,21 +142,37 @@ def test_unsupported_arrows_and_endpoints_are_unchanged(tmp_path):
 
 def test_overlapping_shadow_instances_are_separated_without_merging(tmp_path):
     source, target = tmp_path / "shadow.mdl", tmp_path / "fixed.mdl"
-    source.write_text(sketch([node(1, "Same", 120, 100, bits=2), node(2, "Same", 120, 100, bits=2),
-                             node(3, "Same", 120, 100), node(4, "Target A", 400, 60), node(5, "Target B", 400, 260)],
-                            [arrow(6, 1, 4), arrow(7, 2, 5)]))
+    source.write_text(
+        sketch(
+            [
+                node(1, "Same", 120, 100, bits=2),
+                node(2, "Same", 120, 100, bits=2),
+                node(3, "Same", 120, 100),
+                node(4, "Target A", 400, 60),
+                node(5, "Target B", 400, 260),
+            ],
+            [arrow(6, 1, 4), arrow(7, 2, 5)],
+        )
+    )
     before = load_mdl(source)[1][0]
     assert measure_view(before)["shadow_overlaps"]
     command_layout(source, target, mode="refine")
     after = load_mdl(target)[1][0]
     assert not measure_view(after)["shadow_overlaps"]
-    assert [(obj.obj_id, obj.name, obj.bits) for obj in before.objects.values()] == [(obj.obj_id, obj.name, obj.bits) for obj in after.objects.values()]
-    assert [(a.from_id, a.to_id) for a in before.arrows] == [(a.from_id, a.to_id) for a in after.arrows]
+    assert [(obj.obj_id, obj.name, obj.bits) for obj in before.objects.values()] == [
+        (obj.obj_id, obj.name, obj.bits) for obj in after.objects.values()
+    ]
+    assert [(a.from_id, a.to_id) for a in before.arrows] == [
+        (a.from_id, a.to_id) for a in after.arrows
+    ]
 
 
 def test_shadow_of_stock_can_move_but_stock_stays_locked(tmp_path):
     source, target = tmp_path / "shadow.mdl", tmp_path / "fixed.mdl"
-    source.write_text("Stock=INTEG(0,1)~Unit~|\n" + sketch([node(1, "Stock", 150, 150), node(2, "Stock", 150, 150, bits=2)], []))
+    source.write_text(
+        "Stock=INTEG(0,1)~Unit~|\n"
+        + sketch([node(1, "Stock", 150, 150), node(2, "Stock", 150, 150, bits=2)], [])
+    )
     command_layout(source, target, mode="refine")
     objects = load_mdl(target)[1][0].objects
     assert (objects[1].x, objects[1].y) == (150, 150)
@@ -132,6 +182,7 @@ def test_shadow_of_stock_can_move_but_stock_stays_locked(tmp_path):
 
 def test_style_defaults_and_pure_blue():
     from vensim_autolayout import split_arrow_record
+
     line = arrow(3, 1, 2)
     assert split_arrow_record(update_arrow_line(line, (100, 30)))[0][11] == "-1--1--1"
     black = split_arrow_record(update_arrow_line(line, (100, 30), {"style": "monochrome"}))[0]
@@ -142,9 +193,12 @@ def test_style_defaults_and_pure_blue():
 
 def test_explicit_style_cannot_be_overridden_by_decorative_color():
     from vensim_autolayout import validate_config
-    for config in ({"style": "monochrome", "information_arrow_color": "0-0-150"},
-                   {"style": "native-blue", "information_arrow_color": "0-0-0"},
-                   {"style": "preserve", "information_arrow_color": "0-0-255"}):
+
+    for config in (
+        {"style": "monochrome", "information_arrow_color": "0-0-150"},
+        {"style": "native-blue", "information_arrow_color": "0-0-0"},
+        {"style": "preserve", "information_arrow_color": "0-0-255"},
+    ):
         with pytest.raises(ValueError, match="颜色"):
             validate_config(config)
     assert validate_config({"style": "native-blue", "information_arrow_color": "0-0-255"})
@@ -154,13 +208,20 @@ def test_explicit_style_cannot_be_overridden_by_decorative_color():
 def test_native_double_line_thickness_boundary(thickness, physical):
     record = arrow(3, 1, 2).split(",")
     record[7] = str(thickness)
-    view = parse_views(sketch([node(1, "A", 100, 100), node(2, "B", 400, 100)], [",".join(record)]).splitlines(True))[0]
+    view = parse_views(
+        sketch([node(1, "A", 100, 100), node(2, "B", 400, 100)], [",".join(record)]).splitlines(
+            True
+        )
+    )[0]
     assert view.arrows[0].is_physical_flow is physical
 
 
 def test_duplicate_defined_is_reported_without_merging():
     from sketch_geometry import quality_pass
-    view = parse_views(sketch([node(1, "Same", 100, 100), node(2, "Same", 300, 100)], []).splitlines(True))[0]
+
+    view = parse_views(
+        sketch([node(1, "Same", 100, 100), node(2, "Same", 300, 100)], []).splitlines(True)
+    )[0]
     metrics = measure_view(view)
     assert metrics["duplicate_defined"] == [{"variable": "Same", "ids": [1, 2]}]
     assert not quality_pass(metrics)
@@ -169,7 +230,9 @@ def test_duplicate_defined_is_reported_without_merging():
 
 def test_color_only_change_preserves_unknown_arrow_geometry(tmp_path):
     source, output = tmp_path / "source.mdl", tmp_path / "styled.mdl"
-    source.write_text(sketch([node(1, "A", 100, 100), node(2, "B", 400, 100)], [arrow(3, 1, 2, shape=4)]))
+    source.write_text(
+        sketch([node(1, "A", 100, 100), node(2, "B", 400, 100)], [arrow(3, 1, 2, shape=4)])
+    )
     before = load_mdl(source)[1][0].arrows[0]
     command_layout(source, output, style="native-blue")
     after = load_mdl(output)[1][0].arrows[0]
@@ -190,7 +253,11 @@ def test_output_cannot_alias_input_by_symlink(tmp_path):
 
 
 def test_explicit_anchor_is_used_and_unknown_anchor_rejected(tmp_path):
-    source, target, config = tmp_path / "source.mdl", tmp_path / "target.mdl", tmp_path / "layout.json"
+    source, target, config = (
+        tmp_path / "source.mdl",
+        tmp_path / "target.mdl",
+        tmp_path / "layout.json",
+    )
     source.write_text(sketch([node(1, "A", 100, 100), node(2, "B", 400, 100)], [arrow(3, 1, 2)]))
     config.write_text(json.dumps({"node_positions": {"A": [150, 200]}}))
     command_layout(source, target, config)

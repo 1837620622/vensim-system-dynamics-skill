@@ -1,6 +1,6 @@
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -10,10 +10,10 @@ sys.path.insert(0, str(TOOLS))
 
 from mdl_document import atomic_write, preflight_outputs  # noqa: E402
 from model_builder import command_build  # noqa: E402
-from simulation_runner import run_model  # noqa: E402
-from vensim_engine import command_simulate  # noqa: E402
-from vensim_autolayout import command_layout  # noqa: E402
 from result_plotting import export_figures  # noqa: E402
+from simulation_runner import run_model  # noqa: E402
+from vensim_autolayout import command_layout  # noqa: E402
+from vensim_engine import command_simulate  # noqa: E402
 
 
 def test_atomic_write_preserves_existing_and_dangling_symlink(tmp_path):
@@ -53,12 +53,17 @@ def test_builder_preflights_sidecar_before_writing_model(tmp_path):
     assert json.loads(report.read_text())["user_data"]
 
 
-@pytest.mark.parametrize("action,suffix", [("simulate", ".csv.run.json"), ("layout", ".mdl.layout_report.json"), ("plot", ".plot.json")])
+@pytest.mark.parametrize(
+    "action,suffix",
+    [("simulate", ".csv.run.json"), ("layout", ".mdl.layout_report.json"), ("plot", ".plot.json")],
+)
 def test_other_commands_preserve_sidecars_without_partial_primary(tmp_path, action, suffix):
     source = ROOT / "skills/vensim-skill/assets/examples/inventory_zh.mdl"
     report = tmp_path / ("protected" + suffix)
     report.write_bytes(b"user supplied sidecar")
-    output = tmp_path / ("protected" + {"simulate": ".csv", "layout": ".mdl", "plot": ".png"}[action])
+    output = tmp_path / (
+        "protected" + {"simulate": ".csv", "layout": ".mdl", "plot": ".png"}[action]
+    )
     with pytest.raises(ValueError, match="已存在"):
         if action == "simulate":
             command_simulate(source, output, ["库存"])
@@ -72,9 +77,12 @@ def test_other_commands_preserve_sidecars_without_partial_primary(tmp_path, acti
 
 def test_internal_aliases_cannot_corrupt_real_variable_names(tmp_path):
     model = tmp_path / "aliases.mdl"
-    model.write_text("中文=2~Dmnl~|\n_v0=3~Dmnl~|\nmath=4~Dmnl~|\n_sd_exp=5~Dmnl~|\n"
-                     "结果=中文+_v0+math+_sd_exp+EXP(0)~Dmnl~|\n"
-                     "INITIAL TIME=0~Hour~|\nFINAL TIME=1~Hour~|\nTIME STEP=1~Hour~|\nSAVEPER=1~Hour~|\n", encoding="utf-8")
+    model.write_text(
+        "中文=2~Dmnl~|\n_v0=3~Dmnl~|\nmath=4~Dmnl~|\n_sd_exp=5~Dmnl~|\n"
+        "结果=中文+_v0+math+_sd_exp+EXP(0)~Dmnl~|\n"
+        "INITIAL TIME=0~Hour~|\nFINAL TIME=1~Hour~|\nTIME STEP=1~Hour~|\nSAVEPER=1~Hour~|\n",
+        encoding="utf-8",
+    )
     result = run_model(model, ["结果"])
     assert result.series["结果"] == [15, 15]
     with pytest.raises(ValueError, match="不重复"):

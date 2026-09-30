@@ -48,7 +48,10 @@
 
 ## PySD 与 MCP
 
+函数参数、名称等价、Lookup 数据点、离散延迟与数据清单的具体实现依据见 [仿真语义边界](SIMULATION_SEMANTICS.md)。
+
 - [PySD 源码](https://github.com/SDXorg/pysd) 和 [运行 API](https://pysd.readthedocs.io/en/master/python_api/model.html)：模型参数覆盖、原始初值与时间设置。对照实现必须使用相同方程、参数、初值与保存时间点。
 - [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)：本项目使用 1.x FastMCP 的 stdio 传输、工具注解和客户端集成测试。SDK 主分支文档可能先于稳定版变化，因此依赖显式限制 `<2`。
+- [MCP 安全实践](https://modelcontextprotocol.io/docs/draft/tutorials/security/security_best_practices)：本地服务器与 stdio 进程的信任边界；应用路径检查不能代替操作系统沙箱。
 
 PySD 翻译成功不证明与所有 Vensim 函数语义一致。本封装只承诺已测试的自包含标量路径。独立 MCP 适配器不能冒充官方 DSS MCP，且本地目录限制不能替代操作系统沙箱。

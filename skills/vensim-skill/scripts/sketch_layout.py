@@ -1,21 +1,35 @@
 """在既有 SFD 骨架上优化节点位置和原生单控制点圆弧。"""
+
 from __future__ import annotations
 
 import dataclasses
 import math
 
 from sketch_geometry import (
-    arrow_path, box, boxes_intersect, measure_view, path_hits_box,
-    path_length, paths_cross, quality_key, visible,
+    arrow_path,
+    box,
+    boxes_intersect,
+    measure_view,
+    path_hits_box,
+    path_length,
+    paths_cross,
+    quality_key,
+    visible,
 )
 
 
 def positioned_view(view, positions):
-    return dataclasses.replace(view, objects={
-        oid: dataclasses.replace(obj, x=positions.get(oid, (obj.x, obj.y))[0],
-                                 y=positions.get(oid, (obj.x, obj.y))[1])
-        for oid, obj in view.objects.items()
-    })
+    return dataclasses.replace(
+        view,
+        objects={
+            oid: dataclasses.replace(
+                obj,
+                x=positions.get(oid, (obj.x, obj.y))[0],
+                y=positions.get(oid, (obj.x, obj.y))[1],
+            )
+            for oid, obj in view.objects.items()
+        },
+    )
 
 
 def control_candidates(view, arrow, config):
@@ -29,14 +43,23 @@ def control_candidates(view, arrow, config):
     nx, ny = -dy / distance, dx / distance
     minimum = min(float(config.get("minimum_curve_pixels", 14)), distance * 0.15)
     maximum = min(float(config.get("maximum_curve_pixels", 180)), distance * 0.48)
-    amplitudes = {minimum, max(minimum, min(maximum, distance * float(config.get("curve_strength", 0.12))))}
-    amplitudes.update(max(minimum, min(maximum, distance * ratio)) for ratio in (0.07, 0.14, 0.24, 0.36, 0.48))
+    amplitudes = {
+        minimum,
+        max(minimum, min(maximum, distance * float(config.get("curve_strength", 0.12)))),
+    }
+    amplitudes.update(
+        max(minimum, min(maximum, distance * ratio)) for ratio in (0.07, 0.14, 0.24, 0.36, 0.48)
+    )
     candidates = []
     for amplitude in sorted(amplitudes):
         for direction in (1, -1):
             for fraction in (0.5, 0.35, 0.65):
-                candidates.append((round(left.x + dx * fraction + nx * amplitude * direction),
-                                   round(left.y + dy * fraction + ny * amplitude * direction)))
+                candidates.append(
+                    (
+                        round(left.x + dx * fraction + nx * amplitude * direction),
+                        round(left.y + dy * fraction + ny * amplitude * direction),
+                    )
+                )
     # 现有的正常圆弧也参加比较，避免对已排好的模型反复扰动。
     if arrow.shape == 1 and len(arrow.points) == 1:
         point = arrow.points[0]
@@ -47,7 +70,11 @@ def control_candidates(view, arrow, config):
 
 
 def route_view(lines, view, positions, config):
-    from vensim_autolayout import _is_information_arrow, restyle_arrow_line, update_arrow_line
+    from vensim_autolayout import (
+        _is_information_arrow,
+        restyle_arrow_line,
+        update_arrow_line,
+    )
 
     current = positioned_view(view, positions)
     routeable = [arrow for arrow in current.arrows if _is_information_arrow(arrow, current.objects)]
@@ -62,16 +89,22 @@ def route_view(lines, view, positions, config):
             path = arrow_path(current, arrow, control)
             if len(path) < 2:
                 continue
-            hits = sum(path_hits_box(path, box(obj, clearance)) for obj in obstacles
-                       if obj.obj_id not in (arrow.from_id, arrow.to_id))
+            hits = sum(
+                path_hits_box(path, box(obj, clearance))
+                for obj in obstacles
+                if obj.obj_id not in (arrow.from_id, arrow.to_id)
+            )
             rows.append((control, path, hits, path_length(path)))
         candidates[arrow.obj_id] = rows
     chosen = {}
     for _ in range(int(config.get("routing_passes", 2))):
         for arrow in routeable:
-            def cost(row):
+
+            def cost(row, arrow=arrow):
                 control, path, hits, length = row
-                crossings = sum(paths_cross(path, other) for oid, other in paths.items() if oid != arrow.obj_id)
+                crossings = sum(
+                    paths_cross(path, other) for oid, other in paths.items() if oid != arrow.obj_id
+                )
                 return hits, crossings, round(length, 1)
 
             if candidates[arrow.obj_id]:
@@ -105,15 +138,17 @@ def clear_positions(view, proposed, movable, config):
         for radius in (24, 48, 80, 120, 180, 260, 360):
             for angle in range(0, 360, 30):
                 theta = math.radians(angle)
-                candidates.append((round(x + radius * math.cos(theta)), round(y + radius * math.sin(theta))))
+                candidates.append(
+                    (round(x + radius * math.cos(theta)), round(y + radius * math.sin(theta)))
+                )
 
-        def cost(position):
+        def cost(position, obj=obj, origin=(x, y)):
             test = dataclasses.replace(obj, x=position[0], y=position[1])
             rect = box(test, clearance / 2)
             collisions = sum(boxes_intersect(rect, box(other, clearance / 2)) for other in placed)
             collisions += sum(path_hits_box(path, rect) for path in physical)
             outside = max(0, obj.w + 24 - position[0]) + max(0, obj.h + 24 - position[1])
-            return collisions, outside, math.dist(position, (x, y))
+            return collisions, outside, math.dist(position, origin)
 
         target = min(candidates, key=cost)
         result[oid] = (round(target[0]), round(target[1]))
@@ -136,7 +171,11 @@ def graphviz_proposal(view, movable, config, engine):
     else:
         tx = 100 - min(x for x, _ in positions.values()) * scale
         ty = 80 + max(y for _, y in positions.values()) * scale
-    return {oid: (round(x * scale + tx), round(-y * scale + ty)) for oid, (x, y) in positions.items() if oid in movable}
+    return {
+        oid: (round(x * scale + tx), round(-y * scale + ty))
+        for oid, (x, y) in positions.items()
+        if oid in movable
+    }
 
 
 def optimize_view(lines, view, config, engine, route=True):
@@ -160,8 +199,11 @@ def optimize_view(lines, view, config, engine, route=True):
         proposals.append(("refine", clear_positions(working, {}, free, config)))
         if mode == "circular":
             from circular_layout import circular_proposals
-            proposals = [("circular", clear_positions(working, proposed, free, config))
-                         for proposed in circular_proposals(working, free, config)]
+
+            proposals = [
+                ("circular", clear_positions(working, proposed, free, config))
+                for proposed in circular_proposals(working, free, config)
+            ]
         if mode in ("auto", "graphviz") and free:
             graph = graphviz_proposal(working, free, config, engine)
             proposals.append(("graphviz", clear_positions(working, graph, free, config)))
@@ -173,11 +215,15 @@ def optimize_view(lines, view, config, engine, route=True):
     stock_names = next(iter(view.objects.values())).stock_names if view.objects else set()
     # 原图也作为候选：在自动模式下不因美化而恶化碰撞指标。
     if mode in {"auto", "refine", "preserve"} and not anchors:
-        evaluated.append((quality_key(measure_view(view)), "original", lines[:], {}, 0, measure_view(view)))
+        evaluated.append(
+            (quality_key(measure_view(view)), "original", lines[:], {}, 0, measure_view(view))
+        )
     for label, positions in proposals:
         candidate = lines[:]
         for oid, (x, y) in positions.items():
-            candidate[movable[oid].line_index] = update_obj_line(candidate[movable[oid].line_index], x, y)
+            candidate[movable[oid].line_index] = update_obj_line(
+                candidate[movable[oid].line_index], x, y
+            )
         changed = route_view(candidate, view, positions, config) if route else 0
         updated = parse_views(candidate, stock_names)[view.index]
         metrics = measure_view(updated, float(config.get("clearance", 6)))
@@ -188,12 +234,15 @@ def optimize_view(lines, view, config, engine, route=True):
     lines[:] = best[2]
     if best[1] == "original":
         from vensim_autolayout import restyle_arrow_line
+
         for arrow in view.arrows:
             if not arrow.is_physical_flow:
                 lines[arrow.line_index] = restyle_arrow_line(lines[arrow.line_index], config)
     return {
         "strategy": best[1],
-        "moved_auxiliary_nodes": sum((view.objects[oid].x, view.objects[oid].y) != pos for oid, pos in best[3].items()),
+        "moved_auxiliary_nodes": sum(
+            (view.objects[oid].x, view.objects[oid].y) != pos for oid, pos in best[3].items()
+        ),
         "rerouted_information_arrows": best[4],
         "before": measure_view(view, float(config.get("clearance", 6))),
         "after": best[5],

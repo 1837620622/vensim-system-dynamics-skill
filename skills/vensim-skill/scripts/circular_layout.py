@@ -1,4 +1,5 @@
 """按真实连接组织环形位置；只提议坐标，不生成或改变因果关系。"""
+
 from __future__ import annotations
 
 import math
@@ -22,7 +23,7 @@ def connection_graph(view):
             connect(arrow.from_id, arrow.to_id)
     # 原生附着文字位于被附着对象之后；这里只联通布局模块，不回写这条辅助关系。
     ordered = sorted(view.objects.values(), key=lambda obj: obj.line_index)
-    for previous, obj in zip(ordered, ordered[1:]):
+    for previous, obj in zip(ordered, ordered[1:], strict=False):
         if obj.kind == 10 and obj.attached_to_valve and previous.kind == 11:
             connect(obj.obj_id, previous.obj_id)
     return nodes, outgoing, neighbors
@@ -40,8 +41,10 @@ def component_order(component, outgoing, neighbors):
                 continue
             remaining.remove(oid)
             order.append(oid)
-            linked = sorted(neighbors[oid] & remaining,
-                            key=lambda other: (other not in outgoing[oid], -len(neighbors[other]), other))
+            linked = sorted(
+                neighbors[oid] & remaining,
+                key=lambda other: (other not in outgoing[oid], -len(neighbors[other]), other),
+            )
             stack.extend(reversed(linked))
     return order
 
@@ -72,8 +75,10 @@ def place_branches(component, core, nodes, neighbors, positions, center, gap):
             obj, anchor = nodes[oid], nodes[parent]
             distance = math.hypot(anchor.w, anchor.h) + math.hypot(obj.w, obj.h) + gap
             spread = (index - (len(children) - 1) / 2) * math.pi / max(3, len(children))
-            positions[oid] = (round(px + distance * math.cos(angle + spread)),
-                              round(py + distance * math.sin(angle + spread)))
+            positions[oid] = (
+                round(px + distance * math.cos(angle + spread)),
+                round(py + distance * math.sin(angle + spread)),
+            )
 
 
 def circular_proposals(view, movable, config):
@@ -108,8 +113,10 @@ def circular_proposals(view, movable, config):
         core = feedback_core(component, neighbors)
         order = [oid for oid in component_order(core, outgoing, neighbors) if oid in movable]
         fixed = [nodes[oid] for oid in sorted(core) if oid not in movable]
-        sizes = {oid: math.hypot(box(nodes[oid])[2] - box(nodes[oid])[0], 2 * abs(nodes[oid].h))
-                 for oid in order}
+        sizes = {
+            oid: math.hypot(box(nodes[oid])[2] - box(nodes[oid])[0], 2 * abs(nodes[oid].h))
+            for oid in order
+        }
         largest = max(sizes.values(), default=gap)
         if fixed:
             # 管道的阀门/附着标签不分离；反馈链与参数在骨架下方展开成环。
@@ -127,18 +134,32 @@ def circular_proposals(view, movable, config):
             cx, cy = cursor_x + rx, margin + ry + largest / 2
             angles = [-math.pi / 2 + math.tau * i / len(order) for i in range(len(order))]
             cursor_x += 2 * rx + largest + margin
-        for proposal, traversal in zip(proposals, (order, list(reversed(order)))):
-            positions = {oid: (nodes[oid].x, nodes[oid].y) for oid in component if oid not in movable}
-            for oid, angle in zip(traversal, angles):
+        for proposal, traversal in zip(proposals, (order, list(reversed(order))), strict=False):
+            positions = {
+                oid: (nodes[oid].x, nodes[oid].y) for oid in component if oid not in movable
+            }
+            for oid, angle in zip(traversal, angles, strict=False):
                 if len(order) == 1 and not fixed:
                     positions[oid] = (round(cx), round(cy))
                 else:
-                    positions[oid] = (round(cx + rx * math.cos(angle)), round(cy + ry * math.sin(angle)))
+                    positions[oid] = (
+                        round(cx + rx * math.cos(angle)),
+                        round(cy + ry * math.sin(angle)),
+                    )
             place_branches(component, core, nodes, neighbors, positions, (cx, cy), gap)
             if not any(oid not in movable for oid in component):
-                shift = max(0, margin - min(x - abs(nodes[oid].w) for oid, (x, y) in positions.items()))
-                down = max(0, margin - min(y - abs(nodes[oid].h) for oid, (x, y) in positions.items()))
+                shift = max(
+                    0, margin - min(x - abs(nodes[oid].w) for oid, (x, y) in positions.items())
+                )
+                down = max(
+                    0, margin - min(y - abs(nodes[oid].h) for oid, (x, y) in positions.items())
+                )
                 positions = {oid: (x + shift, y + down) for oid, (x, y) in positions.items()}
-                cursor_x = max(cursor_x, max(x + abs(nodes[oid].w) for oid, (x, y) in positions.items()) + margin)
-            proposal.update({oid: position for oid, position in positions.items() if oid in movable})
+                cursor_x = max(
+                    cursor_x,
+                    max(x + abs(nodes[oid].w) for oid, (x, y) in positions.items()) + margin,
+                )
+            proposal.update(
+                {oid: position for oid, position in positions.items() if oid in movable}
+            )
     return proposals

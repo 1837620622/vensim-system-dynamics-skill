@@ -1,5 +1,7 @@
 # Vensim System Dynamics Skill
 
+[简体中文](README.md) · [English](README.en.md)
+
 面向 Agent 的专业 Vensim 建模与仿真 Skill。直接处理可编辑的 `.mdl`，新建默认中文业务变量、中文视图和环形反馈布局，支持原生圆弧、影子变量避让、情景实验、参数校准、政策优化与 Python 论文图件。Windows、macOS、Linux 共用 Python 核心；MCP 是可选接入方式。
 
 **最终模型结构图必须来自真实 MDL 在 Vensim 原生打开后的导出或截图。** Graphviz 只用于辅助定位；工具生成的几何预览不能代替原生图。项目为独立实现，与 Ventana Systems 无隶属或认证关系。
@@ -289,6 +291,7 @@ Ventana 的 [官方会议资源页](https://vensim.com/conference/) 已提供 **
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider
 python3 -m ruff check .
+python3 -m ruff format --check .
 python3 -m bandit -r skills/vensim-skill/scripts -q
 shellcheck skills/vensim-skill/skill.sh
 ```
@@ -304,6 +307,16 @@ Windows 测试用 `python -m pytest -q -p no:cacheprovider`。CI 已配置 Windo
 文献提供表达和验证依据；业务方程、参数、实验幅度仍从当前任务取得。数学符号、中文 MDL 名称、CSV 列和图例保持对应。代码不会为了拟合参考图的外形修改仿真数值；原生检查、跨后端数值比较与研究有效性分别报告。
 
 ## 兼容性与升级说明
+
+`v2.2.1` 补齐完整英文 README，并由 `pyproject.toml` 统一 Python 3.10 的类型语法、导入顺序、异常链、闭包与格式检查。CI 同时检查 Ruff lint 和 format；代码规范由工具验证。
+
+`doctor` 新增当前解释器的依赖约束检查，报告缺少包、低于修复下限和待核对版本。它读取随 Skill 分发的 `requirements/constraints.txt`，不以重新解析的新版本代替本机实际版本检查，也不宣称是实时漏洞库扫描。原有全局 Python 环境不自动改动。
+
+本轮审查修复官方函数与数据身份边界：`ZIDZ(A,B)` 使用正确的两个参数，XIDZ/ZIDZ 按绝对分母小于 `1e-6` 的原生规则保护除法；`PULSE` 处理零宽度与官方半步比较；`DELAY FIXED` 保存独立状态，延迟时间和初值只在初始化读取，支持延迟反馈与离散步长取整，拒绝嵌入其他表达式。固定延迟已对照 PySD 验证；各后端的非网格脉冲时刻等边界仍须按模型核对，不能据此宣称全部函数逐位等价。
+
+名称解析遵守大小写不敏感、空格与下划线等价的原生规则，并拒绝等价重复定义。Lookup 支持原生独立表和 `WITH LOOKUP`，显示范围与参考点不参加插值，科学计数法可识别，乱序、重复和非有限点会报错。历史查表示例的括号也已修正，数值点保持不变。嵌套条件中的内部别名与真实变量重名问题有单独回归。
+
+CSV 与相邻运行清单现在通过 SHA-256 对应；`plot-data` 恢复诊断状态、时间单位和实验类型，拒绝哈希不符及只改时间单位标签。旧 CSV 或无清单的第三方 CSV 仍可绘图，但标为来源未验证；缺少清单不代表原生验证。MCP 会在解析输出路径前拒绝断裂符号链接。完整范围、修复与未验证项见 [审查记录](docs/AUDIT.md) 和 [仿真语义边界](skills/vensim-skill/references/SIMULATION_SEMANTICS.md)。
 
 `v2.2.0` 新建默认环形反馈布局，CLI、Python 和 MCP 共用相同规则；外围参数就近放置，多模块和影子实例独立安排。新增原生环形示例、文献表达手册、彩色单曲线与分位带、编号避让、线型与网格配置。新增箭头极性和指定反馈回路检查，可确定的正负号或 R/B 冲突会阻止新建；复杂关系及原生符号位置分别记录待核对状态。
 

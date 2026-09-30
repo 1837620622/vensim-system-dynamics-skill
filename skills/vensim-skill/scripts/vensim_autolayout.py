@@ -11,6 +11,7 @@
 
 输出必须在 Vensim 中重新打开并运行 Check Model 与 Units Check 后方可使用。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -21,18 +22,18 @@ import math
 import re
 import shlex
 import shutil
+
 # 仅调用 argparse choices 限定的 Graphviz 可执行文件。
 import subprocess  # nosec B404
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
 
 from mdl_document import MdlDocument, atomic_write, preflight_outputs, separate_output
 from sketch_geometry import arrow_path, measure_view, quality_pass
 
 # 草图起始标记（.mdl 中写作 \\\---///）
 SKETCH_MARKER = r"\\\---///"
-
 
 
 def parse_stock_names(mdl_text: str) -> set:
@@ -48,6 +49,7 @@ def parse_stock_names(mdl_text: str) -> set:
     for match in re.finditer(r"(?m)^\s*([^=~|\\\n]+?)\s*=\s*INTEG\s*\(", body, re.I):
         stocks.add(match.group(1).strip().strip('"'))
     return stocks
+
 
 # 对象类型码
 T_ARROW = 1
@@ -84,6 +86,7 @@ SHAPE_MASK = 31
 @dataclasses.dataclass
 class Obj:
     """草图对象（变量/阀门/源汇等）。"""
+
     view_index: int
     line_index: int
     kind: int
@@ -91,11 +94,11 @@ class Obj:
     name: str
     x: float
     y: float
-    w: float          # 半宽
-    h: float          # 半高
+    w: float  # 半宽
+    h: float  # 半高
     shape: int
     bits: int
-    raw_fields: List[str]
+    raw_fields: list[str]
     stock_names: set = dataclasses.field(default_factory=set)
 
     @property
@@ -110,11 +113,15 @@ class Obj:
 
     @property
     def stock_like(self) -> bool:
+        from vensim_engine import canonical_name
+
         # 优先用方程语义：变量名出现在 INTEG 方程左侧则为库存。
         # 退化为图形形状启发式：boxed 形状码 3 作为保守兜底。
         if self.kind != T_VARIABLE:
             return False
-        if self.name and self.name in self.stock_names:
+        if self.name and canonical_name(self.name) in {
+            canonical_name(name) for name in self.stock_names
+        }:
             return True
         return (self.shape & SHAPE_MASK) == 3
 
@@ -122,15 +129,16 @@ class Obj:
 @dataclasses.dataclass
 class Arrow:
     """箭头（信息箭头或物理流管道段）。"""
+
     view_index: int
     line_index: int
     obj_id: int
     from_id: int
     to_id: int
     shape: int
-    thick: int          # field[7] thick：物理管道(>20) vs 信息箭头(<=20)
-    fields: List[str]
-    points: List[Tuple[float, float]]
+    thick: int  # field[7] thick：物理管道(>20) vs 信息箭头(<=20)
+    fields: list[str]
+    points: list[tuple[float, float]]
 
     @property
     def is_physical_flow(self) -> bool:
@@ -143,13 +151,14 @@ class View:
     name: str
     start: int
     end: int
-    objects: Dict[int, Obj]
-    arrows: List[Arrow]
+    objects: dict[int, Obj]
+    arrows: list[Arrow]
 
 
 # ---------------------------------------------------------------------------
 # 文本读写
 # ---------------------------------------------------------------------------
+
 
 def _safe_int(value: str, default: int = 0) -> int:
     try:
@@ -193,14 +202,14 @@ def split_arrow_record(body: str):
     match = re.search(r",(\d+)\|(?=\(|$)", body)
     if match is None:
         raise ValueError("箭头记录缺少有效 np|pointlist")
-    return body[:match.end() - 1].split(","), body[match.end():]
+    return body[: match.end() - 1].split(","), body[match.end() :]
 
 
-def parse_points(text: str) -> List[Tuple[float, float]]:
+def parse_points(text: str) -> list[tuple[float, float]]:
     return [(float(x), float(y)) for x, y in _POINT_RE.findall(text)]
 
 
-def format_points(points: Iterable[Tuple[float, float]]) -> str:
+def format_points(points: Iterable[tuple[float, float]]) -> str:
     # Vensim 控制点格式：(x,y)|  每个点一对括号加一个竖线
     return "".join(f"({int(round(x))},{int(round(y))})|" for x, y in points)
 
@@ -209,17 +218,17 @@ def format_points(points: Iterable[Tuple[float, float]]) -> str:
 # 草图解析
 # ---------------------------------------------------------------------------
 
-def parse_views(lines: List[str], stock_names: Optional[set] = None) -> List[View]:
+
+def parse_views(lines: list[str], stock_names: set | None = None) -> list[View]:
     marker_positions = [
-        i for i, line in enumerate(lines)
-        if _line_body(line).startswith(SKETCH_MARKER)
+        i for i, line in enumerate(lines) if _line_body(line).startswith(SKETCH_MARKER)
     ]
     if not marker_positions:
         raise ValueError(r"No Vensim Sketch Information marker found. Expected \\---///.")
     if stock_names is None:
         stock_names = set()
 
-    views: List[View] = []
+    views: list[View] = []
     for view_index, marker in enumerate(marker_positions):
         end = (
             marker_positions[view_index + 1]
@@ -233,8 +242,8 @@ def parse_views(lines: List[str], stock_names: Optional[set] = None) -> List[Vie
                 name = body[1:].strip() or name
                 break
 
-        objects: Dict[int, Obj] = {}
-        arrows: List[Arrow] = []
+        objects: dict[int, Obj] = {}
+        arrows: list[Arrow] = []
         seen_ids = set()
         continuation = False
         for line_index in range(marker + 1, end):
@@ -273,12 +282,12 @@ def parse_views(lines: List[str], stock_names: Optional[set] = None) -> List[Vie
                         shape=_safe_int(fields[4]),
                         thick=_safe_int(fields[7]) if len(fields) > 7 else 0,
                         fields=fields,
-                        points=parse_points(point_tail)[:_safe_int(fields[-1])],
+                        points=parse_points(point_tail)[: _safe_int(fields[-1])],
                     )
                 )
             elif kind in OBJECT_TYPES:
                 # 10/11/12,id,name,x,y,w,h,shape,bits,...
-                fields = re.split(r',(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)', body)
+                fields = re.split(r",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", body)
                 if len(fields) < 9:
                     continue
                 objects[_safe_int(fields[1])] = Obj(
@@ -313,6 +322,7 @@ def _looks_like_business_variable(name: str) -> bool:
 
 def _segments_intersect(a, b, c, d) -> bool:
     """判断两条线段是否相交；共享端点的相邻箭头不计为交叉。"""
+
     def orient(p, q, r):
         return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
 
@@ -333,11 +343,11 @@ def _boxes_overlap(left: Obj, right: Obj, padding: float = 8.0) -> bool:
     )
 
 
-def _arrow_polyline(view: View, arrow: Arrow) -> List[Tuple[float, float]]:
+def _arrow_polyline(view: View, arrow: Arrow) -> list[tuple[float, float]]:
     return arrow_path(view, arrow)
 
 
-def load_mdl(path: Path) -> Tuple[List[str], List[View]]:
+def load_mdl(path: Path) -> tuple[list[str], list[View]]:
     document = MdlDocument.read(path)
     lines = document.text.splitlines(keepends=True)
     stock_names = parse_stock_names(document.semantic_text)
@@ -348,7 +358,8 @@ def load_mdl(path: Path) -> Tuple[List[str], List[View]]:
 # 节点选择与 Graphviz 布局
 # ---------------------------------------------------------------------------
 
-def eligible_movable_nodes(view: View, config: dict) -> Dict[int, Obj]:
+
+def eligible_movable_nodes(view: View, config: dict) -> dict[int, Obj]:
     """选出可被自动布局移动的普通辅助变量。"""
     lock_names = {str(n) for n in config.get("lock_node_names", [])}
     lock_ids = {int(x) for x in config.get("lock_object_ids", [])}
@@ -357,14 +368,16 @@ def eligible_movable_nodes(view: View, config: dict) -> Dict[int, Obj]:
     for arrow in view.arrows:
         if not _is_information_arrow(arrow, view.objects):
             lock_ids.update((arrow.from_id, arrow.to_id))
-    selected: Dict[int, Obj] = {}
+    selected: dict[int, Obj] = {}
     for obj in view.objects.values():
         if obj.kind != T_VARIABLE:
             # 阀门(11)、源汇云(12)、其他(30/31)一律不动
             continue
         if obj.obj_id in lock_ids or obj.name in lock_names:
             continue
-        if (obj.is_shadow and not config.get("move_shadows", True)) or (len(obj.raw_fields) > 9 and _safe_int(obj.raw_fields[9]) != 0):
+        if (obj.is_shadow and not config.get("move_shadows", True)) or (
+            len(obj.raw_fields) > 9 and _safe_int(obj.raw_fields[9]) != 0
+        ):
             continue
         if obj.attached_to_valve:
             # 流率标签附着在阀门上，移动会脱离管道
@@ -376,13 +389,13 @@ def eligible_movable_nodes(view: View, config: dict) -> Dict[int, Obj]:
     return selected
 
 
-def graph_nodes_for_layout(view: View, movable: Dict[int, Obj]) -> Dict[int, Obj]:
+def graph_nodes_for_layout(view: View, movable: dict[int, Obj]) -> dict[int, Obj]:
     """参与 Graphviz 布局计算的节点：所有变量+阀门，边只用信息箭头。
 
     物理流率管道会主导图结构并压扁辅助变量层级，因此布局只用信息箭头作为约束，
     但阀门节点仍参与计算以便辅助变量相对阀门定位。
     """
-    nodes: Dict[int, Obj] = {}
+    nodes: dict[int, Obj] = {}
     for obj_id, obj in view.objects.items():
         if obj.kind in (T_VARIABLE, T_VALVE):
             nodes[obj_id] = obj
@@ -391,8 +404,7 @@ def graph_nodes_for_layout(view: View, movable: Dict[int, Obj]) -> Dict[int, Obj
 
 def _quote_dot(identifier: str) -> str:
     escaped = (
-        identifier
-        .replace("\\", "\\\\")
+        identifier.replace("\\", "\\\\")
         .replace('"', '\\"')
         .replace("\r", " ")
         .replace("\n", "\\n")
@@ -410,10 +422,10 @@ def _dot_label(label: str) -> str:
 
 def graphviz_positions(
     view: View,
-    movable: Dict[int, Obj],
+    movable: dict[int, Obj],
     config: dict,
     engine: str,
-) -> Dict[int, Tuple[float, float]]:
+) -> dict[int, tuple[float, float]]:
     if engine not in {"dot", "neato", "fdp", "sfdp"}:
         raise ValueError("不支持的 Graphviz 引擎")
     if shutil.which(engine) is None:
@@ -433,7 +445,8 @@ def graphviz_positions(
     if len(nodes) > MAX_GRAPHVIZ_NODES:
         raise RuntimeError(f"Graphviz 节点过多: {len(nodes)} > {MAX_GRAPHVIZ_NODES}")
     edge_count = sum(
-        1 for arrow in view.arrows
+        1
+        for arrow in view.arrows
         if not arrow.is_physical_flow and arrow.from_id in nodes and arrow.to_id in nodes
     )
     if edge_count > MAX_GRAPHVIZ_EDGES:
@@ -450,8 +463,10 @@ def graphviz_positions(
             label = _dot_label(obj.name) or f"var{obj_id}"
         else:
             label = f"valve_{obj_id}"
-        dot_lines.append(f"{_quote_dot(f'n{obj_id}')} [label={_quote_dot(label)}, "
-                         f"width={max(0.4, 2 * obj.w / 72):.3f}, height={max(0.3, 2 * obj.h / 72):.3f}];")
+        dot_lines.append(
+            f"{_quote_dot(f'n{obj_id}')} [label={_quote_dot(label)}, "
+            f"width={max(0.4, 2 * obj.w / 72):.3f}, height={max(0.3, 2 * obj.h / 72):.3f}];"
+        )
 
     # 只用信息箭头作为布局约束，避免物理管道压扁层级
     for arrow in view.arrows:
@@ -459,8 +474,7 @@ def graphviz_positions(
             continue
         if arrow.from_id in nodes and arrow.to_id in nodes:
             dot_lines.append(
-                f"{_quote_dot(f'n{arrow.from_id}')} -> "
-                f"{_quote_dot(f'n{arrow.to_id}')} [weight=4];"
+                f"{_quote_dot(f'n{arrow.from_id}')} -> {_quote_dot(f'n{arrow.to_id}')} [weight=4];"
             )
     dot_lines.append("}")
 
@@ -479,7 +493,7 @@ def graphviz_positions(
     if result.returncode != 0:
         raise RuntimeError(f"Graphviz 运行失败: {result.stderr.strip()}")
 
-    positions: Dict[int, Tuple[float, float]] = {}
+    positions: dict[int, tuple[float, float]] = {}
     for line in result.stdout.splitlines():
         if not line.startswith("node "):
             continue
@@ -495,9 +509,10 @@ def graphviz_positions(
 # 回写
 # ---------------------------------------------------------------------------
 
+
 def update_obj_line(line: str, x: float, y: float) -> str:
     ending = _line_ending(line)
-    fields = re.split(r',(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)', _line_body(line))
+    fields = re.split(r",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", _line_body(line))
     fields[3] = str(int(round(x)))
     fields[4] = str(int(round(y)))
     return ",".join(fields) + ending
@@ -511,14 +526,16 @@ def restyle_arrow_line(line: str, config: dict) -> str:
     if len(fields) < 14:
         return line
     fields[8] = str(_safe_int(fields[8]) | 1)
-    fields[11] = config.get("information_arrow_color", "0-0-255" if config.get("style") == "native-blue" else "0-0-0")
+    fields[11] = config.get(
+        "information_arrow_color", "0-0-255" if config.get("style") == "native-blue" else "0-0-0"
+    )
     return ",".join(fields) + "|" + tail + _line_ending(line)
 
 
 def update_arrow_line(
     line: str,
-    point: Tuple[float, float],
-    config: Optional[dict] = None,
+    point: tuple[float, float],
+    config: dict | None = None,
 ) -> str:
     """只改圆弧几何与明确选择的颜色；极性、延迟、字体和隐藏级别原样保留。"""
     ending = _line_ending(line)
@@ -534,7 +551,9 @@ def update_arrow_line(
     fields[4] = "1"  # 普通 Arrow + 控制点 = 原生圆弧
     preset = (config or {}).get("style", "preserve")
     # academic 保留为旧配置的兼容别名，新方案统一使用黑色。
-    arrow_color = (config or {}).get("information_arrow_color", "0-0-255" if preset == "native-blue" else "0-0-0")
+    arrow_color = (config or {}).get(
+        "information_arrow_color", "0-0-255" if preset == "native-blue" else "0-0-0"
+    )
     if preset != "preserve":
         fields[8] = str(_safe_int(fields[8]) | 1)  # 官方 hasf 第一位启用箭头自定义颜色。
         fields[11] = str(arrow_color)
@@ -543,7 +562,7 @@ def update_arrow_line(
     suffix_offset = 0
     for match in list(_POINT_RE.finditer(tail))[:old_count]:
         suffix_offset = match.end()
-        if tail[suffix_offset:suffix_offset + 1] == "|":
+        if tail[suffix_offset : suffix_offset + 1] == "|":
             suffix_offset += 1
     fields[-1] = "1"
     return ",".join(fields) + "|" + format_points([point]) + tail[suffix_offset:] + ending
@@ -553,7 +572,8 @@ def update_arrow_line(
 # 视图选择与箭头布线
 # ---------------------------------------------------------------------------
 
-def choose_views(views: List[View], config: dict) -> List[View]:
+
+def choose_views(views: list[View], config: dict) -> list[View]:
     requested = str(config.get("view", "*")).strip()
     skip = {str(v) for v in config.get("skip_views", [])}
     chosen = []
@@ -565,7 +585,7 @@ def choose_views(views: List[View], config: dict) -> List[View]:
     return chosen
 
 
-def _is_information_arrow(arrow: Arrow, objects: Dict[int, Obj]) -> bool:
+def _is_information_arrow(arrow: Arrow, objects: dict[int, Obj]) -> bool:
     """判定是否为可重布线的信息箭头：细线、两端均为变量节点、且原本为普通 Arrow。
 
     保守判据：仅当原箭头控制点个数 <= 1 时才视为普通 Arrow，可写入单控制点圆弧。
@@ -591,18 +611,20 @@ def _is_information_arrow(arrow: Arrow, objects: Dict[int, Obj]) -> bool:
 
 
 def route_arrows(
-    lines: List[str],
+    lines: list[str],
     view: View,
-    new_positions: Dict[int, Tuple[float, float]],
+    new_positions: dict[int, tuple[float, float]],
     config: dict,
 ) -> int:
     from sketch_layout import route_view
+
     return route_view(lines, view, new_positions, config)
 
 
 # ---------------------------------------------------------------------------
 # 命令实现
 # ---------------------------------------------------------------------------
+
 
 def command_inspect(path: Path) -> int:
     _, views = load_mdl(path)
@@ -630,17 +652,24 @@ def command_inspect(path: Path) -> int:
 
 
 def command_audit(path: Path) -> int:
-    from vensim_engine import parse_equations, extract_deps
+    from vensim_engine import extract_deps, parse_equations
+
     _, views = load_mdl(path)
     equations = parse_equations(_read_text(path), expand=False)
     errors = 0
     print(f"AUDIT: {path}")
     for view in views:
         metrics = measure_view(view)
-        errors += len(metrics["broken_arrows"]) + len(metrics["shadow_inputs"]) + len(metrics["duplicate_defined"])
-        print(f"VIEW {view.name}: 断链 {len(metrics['broken_arrows'])}，入影子变量 {len(metrics['shadow_inputs'])}，"
-              f"文字重叠 {len(metrics['node_overlaps'])}，穿字 {len(metrics['arrow_node_collisions'])}，"
-              f"交叉 {len(metrics['arrow_crossings']) + len(metrics['flow_crossings'])}")
+        errors += (
+            len(metrics["broken_arrows"])
+            + len(metrics["shadow_inputs"])
+            + len(metrics["duplicate_defined"])
+        )
+        print(
+            f"VIEW {view.name}: 断链 {len(metrics['broken_arrows'])}，入影子变量 {len(metrics['shadow_inputs'])}，"
+            f"文字重叠 {len(metrics['node_overlaps'])}，穿字 {len(metrics['arrow_node_collisions'])}，"
+            f"交叉 {len(metrics['arrow_crossings']) + len(metrics['flow_crossings'])}"
+        )
         for arrow in view.arrows:
             if arrow.is_physical_flow:
                 continue
@@ -649,16 +678,28 @@ def command_audit(path: Path) -> int:
                 continue
             if source.name in equations and target.name in equations:
                 equation = equations[target.name]
-                expression = (equation.integ_flow or equation.rhs) + " " + (equation.integ_init_expr or "")
+                expression = (
+                    (equation.integ_flow or equation.rhs) + " " + (equation.integ_init_expr or "")
+                )
                 if source.name not in extract_deps(expression, set(equations)):
-                    print(f"  WARNING arrow {arrow.obj_id}: {source.name} -> {target.name} 未在目标方程中找到直接依赖，请核对因果含义")
+                    print(
+                        f"  WARNING arrow {arrow.obj_id}: {source.name} -> {target.name} 未在目标方程中找到直接依赖，请核对因果含义"
+                    )
         for collision in metrics["arrow_node_collisions"]:
-            print(f"  WARNING arrow {collision['arrow']}: 穿过 object {collision['object']} 的文字/形状范围")
+            print(
+                f"  WARNING arrow {collision['arrow']}: 穿过 object {collision['object']} 的文字/形状范围"
+            )
         if metrics["unsupported_arrows"]:
-            print(f"  WARNING 未完整覆盖的箭头类型: {metrics['unsupported_arrows']}，保留原记录并在 Vensim 核对")
+            print(
+                f"  WARNING 未完整覆盖的箭头类型: {metrics['unsupported_arrows']}，保留原记录并在 Vensim 核对"
+            )
         for item in metrics["duplicate_defined"]:
             print(f"  ERROR 同一 View 重复 Defined: {item['variable']}，对象 {item['ids']}")
-    print("FAIL: 草图结构错误" if errors else "PASS: 已解析草图引用；几何警告请用 visual --strict 复核")
+    print(
+        "FAIL: 草图结构错误"
+        if errors
+        else "PASS: 已解析草图引用；几何警告请用 visual --strict 复核"
+    )
     print("布局只整理图形，因果边的增删与正负极性需要方程或领域依据。")
     return 1 if errors else 0
 
@@ -666,34 +707,81 @@ def command_audit(path: Path) -> int:
 def validate_config(config):
     if not isinstance(config, dict):
         raise ValueError("布局配置必须是 JSON 对象")
-    if config.get("layout_mode", "refine") not in {"auto", "preserve", "refine", "graphviz", "circular"}:
+    if config.get("layout_mode", "refine") not in {
+        "auto",
+        "preserve",
+        "refine",
+        "graphviz",
+        "circular",
+    }:
         raise ValueError("layout_mode 必须是 auto/preserve/refine/graphviz/circular")
     if config.get("style", "preserve") not in {"academic", "monochrome", "native-blue", "preserve"}:
         raise ValueError("style 必须是 monochrome/native-blue/preserve")
-    for key in ("clearance", "node_spacing", "minimum_curve_pixels", "maximum_curve_pixels", "curve_strength", "graphviz_scale", "nodesep", "ranksep", "circular_gap", "circular_aspect"):
-        if key in config and (isinstance(config[key], bool) or not isinstance(config[key], (int, float)) or not math.isfinite(config[key]) or config[key] <= 0):
+    for key in (
+        "clearance",
+        "node_spacing",
+        "minimum_curve_pixels",
+        "maximum_curve_pixels",
+        "curve_strength",
+        "graphviz_scale",
+        "nodesep",
+        "ranksep",
+        "circular_gap",
+        "circular_aspect",
+    ):
+        if key in config and (
+            isinstance(config[key], bool)
+            or not isinstance(config[key], (int, float))
+            or not math.isfinite(config[key])
+            or config[key] <= 0
+        ):
             raise ValueError(f"{key} 必须是有限正数")
-    if type(config.get("routing_passes", 2)) is not int or config.get("routing_passes", 2) not in range(1, 6):
+    if type(config.get("routing_passes", 2)) is not int or config.get(
+        "routing_passes", 2
+    ) not in range(1, 6):
         raise ValueError("routing_passes 必须为 1 到 5")
     for key in ("move_stocks", "move_shadows"):
         if key in config and not isinstance(config[key], bool):
             raise ValueError(f"{key} 必须是布尔值")
-    if type(config.get("max_allowed_crossings", 0)) is not int or config.get("max_allowed_crossings", 0) < 0:
+    if (
+        type(config.get("max_allowed_crossings", 0)) is not int
+        or config.get("max_allowed_crossings", 0) < 0
+    ):
         raise ValueError("max_allowed_crossings 必须是非负整数")
     anchors = config.get("node_positions", {})
-    if not isinstance(anchors, dict) or any(not isinstance(p, list) or len(p) != 2 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 for v in p) for p in anchors.values()):
+    if not isinstance(anchors, dict) or any(
+        not isinstance(p, list)
+        or len(p) != 2
+        or any(
+            isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0
+            for v in p
+        )
+        for p in anchors.values()
+    ):
         raise ValueError("node_positions 必须为变量名到 [x, y] 非负有限坐标的映射")
     if "information_arrow_color" in config:
-        expected = {"monochrome": "0-0-0", "academic": "0-0-0", "native-blue": "0-0-255"}.get(config.get("style"))
+        expected = {"monochrome": "0-0-0", "academic": "0-0-0", "native-blue": "0-0-255"}.get(
+            config.get("style")
+        )
         if expected is None or config["information_arrow_color"] != expected:
-            raise ValueError("信息箭头颜色必须与明确的黑色/纯蓝 style 一致；preserve 保留原生设置，不接收颜色覆盖")
+            raise ValueError(
+                "信息箭头颜色必须与明确的黑色/纯蓝 style 一致；preserve 保留原生设置，不接收颜色覆盖"
+            )
     return config
 
 
-def command_layout(path: Path, output: Path, config_path: Optional[Path] = None,
-                   engine: str = "dot", route_information_arrows: bool = True,
-                   mode=None, style=None, preview=None) -> int:
+def command_layout(
+    path: Path,
+    output: Path,
+    config_path: Path | None = None,
+    engine: str = "dot",
+    route_information_arrows: bool = True,
+    mode=None,
+    style=None,
+    preview=None,
+) -> int:
     from sketch_layout import optimize_view
+
     separate_output(output, [path, *([config_path] if config_path else [])])
     if output.suffix.lower() != ".mdl":
         raise ValueError("布局输出必须是 .mdl")
@@ -708,20 +796,34 @@ def command_layout(path: Path, output: Path, config_path: Optional[Path] = None,
     selected = choose_views(views, config)
     if not selected:
         raise ValueError("未匹配到视图，请检查 view/skip_views")
-    missing = set(config.get("node_positions", {})) - {obj.name for view in selected for obj in view.objects.values()}
+    missing = set(config.get("node_positions", {})) - {
+        obj.name for view in selected for obj in view.objects.values()
+    }
     if missing:
         raise ValueError("锚点变量未出现在所选视图: " + ", ".join(sorted(missing)))
-    if any(len(v.objects) > MAX_GRAPHVIZ_NODES or len(v.arrows) > MAX_GRAPHVIZ_EDGES for v in selected):
+    if any(
+        len(v.objects) > MAX_GRAPHVIZ_NODES or len(v.arrows) > MAX_GRAPHVIZ_EDGES for v in selected
+    ):
         raise ValueError("草图超过布局规模上限，请先按子系统拆分视图")
     report_path = output.with_suffix(output.suffix + ".layout_report.json")
-    preflight_outputs([output, report_path, *([preview] if preview else [])], [path, *([config_path] if config_path else [])])
+    preflight_outputs(
+        [output, report_path, *([preview] if preview else [])],
+        [path, *([config_path] if config_path else [])],
+    )
     if preview:
-        separate_output(preview, [path, output, report_path, *([config_path] if config_path else [])])
+        separate_output(
+            preview, [path, output, report_path, *([config_path] if config_path else [])]
+        )
         if preview.suffix.lower() not in {".svg", ".html"}:
             raise ValueError("预览输出必须是 .html 或 .svg")
-    report = {"input": str(path), "output": str(output), "encoding": document.encoding,
-              "equation_sha256": hashlib.sha256(document.equation_bytes).hexdigest(),
-              "native_verified": False, "views": []}
+    report = {
+        "input": str(path),
+        "output": str(output),
+        "encoding": document.encoding,
+        "equation_sha256": hashlib.sha256(document.equation_bytes).hexdigest(),
+        "native_verified": False,
+        "views": [],
+    }
     for view in selected:
         item = optimize_view(lines, view, config, engine, route_information_arrows)
         item["view"] = view.name
@@ -729,10 +831,12 @@ def command_layout(path: Path, output: Path, config_path: Optional[Path] = None,
         report["views"].append(item)
     data = document.encode(lines)
     updated = parse_views(lines, parse_stock_names(document.semantic_text))
-    for old, new in zip(views, updated):
-        if set(old.objects) != set(new.objects) or [(a.obj_id, a.from_id, a.to_id) for a in old.arrows] != [(a.obj_id, a.from_id, a.to_id) for a in new.arrows]:
+    for old, new in zip(views, updated, strict=False):
+        if set(old.objects) != set(new.objects) or [
+            (a.obj_id, a.from_id, a.to_id) for a in old.arrows
+        ] != [(a.obj_id, a.from_id, a.to_id) for a in new.arrows]:
             raise ValueError("草图结构不变量校验失败，已拒绝写入")
-        for left, right in zip(old.arrows, new.arrows):
+        for left, right in zip(old.arrows, new.arrows, strict=False):
             if any(left.fields[i] != right.fields[i] for i in (5, 6, 9, 12)):
                 raise ValueError("箭头极性、延迟、隐藏或字体改变，已拒绝写入")
     report["equations_preserved"] = True
@@ -742,6 +846,7 @@ def command_layout(path: Path, output: Path, config_path: Optional[Path] = None,
     atomic_write(report_path, json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8"))
     if preview:
         from sketch_preview import render_preview
+
         render_preview(output, preview, path if preview.suffix.lower() == ".html" else None)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     print("NEXT: 在 Vensim 中检查草图、Check Model 和 Units Check。")
@@ -751,9 +856,12 @@ def command_layout(path: Path, output: Path, config_path: Optional[Path] = None,
 def command_visual(path, output=None, strict=False, max_crossings=0):
     _, views = load_mdl(path)
     records = [{"view": view.name, **measure_view(view)} for view in views]
-    report = {"model": str(path), "views": records,
-              "pass": all(quality_pass(record, max_crossings) for record in records),
-              "native_verified": False}
+    report = {
+        "model": str(path),
+        "views": records,
+        "pass": all(quality_pass(record, max_crossings) for record in records),
+        "native_verified": False,
+    }
     data = json.dumps(report, ensure_ascii=False, indent=2)
     if output:
         separate_output(output, [path])
@@ -778,8 +886,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_layout.add_argument("--config", type=Path)
     p_layout.add_argument("--engine", default="dot", choices=["dot", "neato", "fdp", "sfdp"])
     p_layout.add_argument(
-        "--route-information-arrows", "--route",
-        action="store_true", default=True,
+        "--route-information-arrows",
+        "--route",
+        action="store_true",
+        default=True,
         help="为可重布线的信息箭头设置单个圆弧控制点。",
     )
     p_layout.add_argument("--mode", choices=["auto", "preserve", "refine", "graphviz", "circular"])
@@ -805,6 +915,7 @@ def main() -> int:
         parser.error(f"模型文件未找到: {args.model}")
     if args.command == "preview":
         from sketch_preview import render_preview
+
         print(json.dumps(render_preview(args.model, args.output, args.compare_with, args.show_ids)))
         return 0
     if args.command == "visual":
@@ -817,8 +928,14 @@ def main() -> int:
         if args.config and not args.config.exists():
             parser.error(f"配置文件未找到: {args.config}")
         return command_layout(
-            args.model, args.output, args.config, args.engine, args.route_information_arrows,
-            args.mode, args.style, args.preview,
+            args.model,
+            args.output,
+            args.config,
+            args.engine,
+            args.route_information_arrows,
+            args.mode,
+            args.style,
+            args.preview,
         )
     parser.error("Unknown command")
     return 2
@@ -829,4 +946,4 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except (ValueError, RuntimeError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        raise SystemExit(2)
+        raise SystemExit(2) from None

@@ -1,5 +1,5 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "skills" / "vensim-skill" / "scripts"
@@ -63,7 +63,10 @@ def test_academic_gate_accepts_endogenous_coupling_model(tmp_path):
 
 def test_academic_gate_rejects_observed_replay_in_stock_flow(tmp_path):
     path = tmp_path / "replay.mdl"
-    path.write_text(_model("Observed Stock - 存量") + "Observed Stock = 10\n    ~ Unit\n    |\n", encoding="utf-8")
+    path.write_text(
+        _model("Observed Stock - 存量") + "Observed Stock = 10\n    ~ Unit\n    |\n",
+        encoding="utf-8",
+    )
     report = check_model(path, None, None, False, [], strict_endogenous=True)
     assert report["pass"] is False
     assert any("历史路径注入" in item for item in report["errors"])
@@ -71,7 +74,10 @@ def test_academic_gate_rejects_observed_replay_in_stock_flow(tmp_path):
 
 def test_academic_gate_does_not_bind_general_model_to_one_case(tmp_path):
     path = tmp_path / "general.mdl"
-    path.write_text(_model("Observed Demand - 存量") + "Observed Demand = 10\n    ~ Unit/Year\n    |\n", encoding="utf-8")
+    path.write_text(
+        _model("Observed Demand - 存量") + "Observed Demand = 10\n    ~ Unit/Year\n    |\n",
+        encoding="utf-8",
+    )
     report = check_model(path, None, None, False, [])
     assert report["pass"]
     assert any("边界驱动" in warning for warning in report["warnings"])
@@ -116,9 +122,7 @@ def test_academic_gate_rejects_bare_numeric_unit_anchor(tmp_path):
 def test_academic_gate_treats_policy_time_switch_as_boundary_input(tmp_path):
     path = tmp_path / "scenario.mdl"
     text = _model("流量") + (
-        "基础设施投入情景 = IF THEN ELSE( Time < 1, 1, 1.15 )\n"
-        "    ~ Dmnl\n"
-        "    |\n"
+        "基础设施投入情景 = IF THEN ELSE( Time < 1, 1, 1.15 )\n    ~ Dmnl\n    |\n"
     )
     path.write_text(text, encoding="utf-8")
     report = check_model(path, None, None, True, ["U1", "C", "T", "D"])
@@ -129,7 +133,9 @@ def test_academic_gate_treats_policy_time_switch_as_boundary_input(tmp_path):
 
 def test_derived_output_check_uses_project_names_and_dependencies(tmp_path):
     path = tmp_path / "different_domain.mdl"
-    path.write_text("病房需求=病人数/床位数~Dmnl~|\n病人数=70~Person~|\n床位数=100~Person~|\n", encoding="utf-8")
+    path.write_text(
+        "病房需求=病人数/床位数~Dmnl~|\n病人数=70~Person~|\n床位数=100~Person~|\n", encoding="utf-8"
+    )
     assert check_model(path, None, None, True, ["病房需求"])["pass"]
     report = check_model(path, None, None, True, ["病房需求", "床位数"])
     assert not report["pass"]

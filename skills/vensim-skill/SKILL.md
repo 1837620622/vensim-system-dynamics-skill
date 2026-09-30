@@ -36,6 +36,7 @@ license: "Non-commercial; see LICENSE"
 - PLE 外的参数校准、有约束政策搜索：[Python 高级分析](references/ADVANCED_ANALYSIS.md)。只有明确观测数据、目标或约束时使用；搜索结果不能称为已证明的全局最优。
 - 准备建模或实验 JSON：[输入规范](references/SPECIFICATIONS.md)。
 - 官方格式、版本、Graphviz 和 PySD 边界：[实现依据](references/REFERENCES.md)。
+- 仿真函数、名称、Lookup、时间网格与结果清单：[仿真语义边界](references/SIMULATION_SEMANTICS.md)，改变求解器或涉及延迟、脉冲、查表时阅读。
 - Agent 接入：[MCP 使用边界](references/MCP.md)。MCP 可选，CLI 本身不依赖 MCP。
 
 ## 工作顺序
@@ -81,6 +82,8 @@ license: "Non-commercial; see LICENSE"
 建模 JSON 必须明确单位、流向、方程与存量初值。未知参数不能编造为研究事实。内置引擎支持常见标量子集及 Euler 积分；复杂数组、宏、外部数据、高级函数交给支持它们的 PySD 或原生 Vensim。`units` 只查缺失单位，不是量纲推导。`--keep-going` 产生诊断结果，不能用于论文结论。
 
 建模入口必须显式提供全部时间设置。结果图用 `--plot-config` 读取可调整的字体、尺寸、线宽和编号密度；不能把某篇论文的版式当作所有任务的标准。用户指定期刊或版面时，先核对其当前要求。
+
+重新读取 CSV 时保留相邻运行清单；哈希不符、诊断状态或时间单位冲突须处理。无清单或旧清单缺少哈希时明确记录来源未验证。删除清单不能作为把诊断数据变成正式数据的方式。离散脉冲与延迟的非网格边界应按实际后端复核，不以另一后端运行成功证明原生等价。
 
 `fix` 必须明确选择修复项：`--units-map units.json` 使用有依据的单位，`--drop-broken-arrows` 仅在确认断裂记录不应保留后使用；禁止把所有缺失单位补成 `Dmnl`。
 

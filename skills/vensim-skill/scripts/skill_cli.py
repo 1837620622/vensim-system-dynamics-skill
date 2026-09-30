@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """跨平台 skill 包装入口，主要供 Windows skill.cmd 使用。"""
+
 from __future__ import annotations
 
-import json
 import importlib.metadata
 import importlib.util
+import json
 import os
 import plistlib
+import re
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, List
 
-if sys.version_info < (3, 10):
+if sys.version_info < (3, 10):  # noqa: UP036 - 保留入口的明确版本诊断。
     raise SystemExit("ERROR: Vensim skill 需要 Python 3.10 或更新版本")
 sys.dont_write_bytecode = True
 
@@ -24,11 +26,11 @@ TEMPLATES_DIR = ROOT_DIR / "assets" / "templates"
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
+import academic_gate  # noqa: E402
+import experiments  # noqa: E402
+import model_builder  # noqa: E402
 import vensim_autolayout  # noqa: E402
 import vensim_engine  # noqa: E402
-import academic_gate  # noqa: E402
-import model_builder  # noqa: E402
-import experiments  # noqa: E402
 
 
 def _default_output(model: str, suffix: str) -> str:
@@ -36,11 +38,11 @@ def _default_output(model: str, suffix: str) -> str:
     return str(path.with_name(f"{path.stem}{suffix}"))
 
 
-def _has_option(args: List[str], option: str) -> bool:
+def _has_option(args: list[str], option: str) -> bool:
     return any(arg.lower().split("=", 1)[0] == option for arg in args)
 
 
-def _invoke(module_main: Callable[[], int], argv: List[str]) -> int:
+def _invoke(module_main: Callable[[], int], argv: list[str]) -> int:
     old_argv = sys.argv[:]
     sys.argv = [old_argv[0], *argv]
     try:
@@ -54,12 +56,51 @@ def _invoke(module_main: Callable[[], int], argv: List[str]) -> int:
         sys.argv = old_argv
 
 
-def _invoke_layout(argv: List[str]) -> int:
+def _invoke_layout(argv: list[str]) -> int:
     return _invoke(vensim_autolayout.main, argv)
 
 
-def _invoke_engine(argv: List[str]) -> int:
+def _invoke_engine(argv: list[str]) -> int:
     return _invoke(vensim_engine.main, argv)
+
+
+def dependency_constraints():
+    """逐项检查当前解释器；约束匹配不代表实时漏洞扫描或完整安全证明。"""
+    rows = []
+    for line in (
+        (ROOT_DIR / "requirements/constraints.txt").read_text(encoding="utf-8").splitlines()
+    ):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = re.fullmatch(r"([\w.-]+)>=(\d+(?:\.\d+)*)(?:,<(\d+(?:\.\d+)*))?", line.strip())
+        if not match:
+            raise ValueError(f"依赖约束格式未覆盖: {line}")
+        name, minimum, maximum = match.groups()
+        try:
+            installed = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            installed = None
+        row = {"package": name, "required": line.strip(), "installed": installed}
+        if installed is None:
+            row["status"] = "not_installed"
+        else:
+            # 只判定稳定 release/post/local 版本；预发布等形式保留待核对。
+            release = re.fullmatch(r"(\d+(?:\.\d+)*)(?:\.post\d+)?(?:\+[\w.-]+)?", installed)
+            if release is None:
+                row["status"] = "version_needs_review"
+            else:
+                value = tuple(map(int, release[1].split(".")))
+                lower = tuple(map(int, minimum.split(".")))
+                upper = tuple(map(int, maximum.split("."))) if maximum else None
+                width = max(len(value), len(lower), len(upper or ()))
+                value += (0,) * (width - len(value))
+                lower += (0,) * (width - len(lower))
+                if upper is not None:
+                    upper += (0,) * (width - len(upper))
+                valid = value >= lower and (upper is None or value < upper)
+                row["status"] = "satisfies_constraints" if valid else "upgrade_required"
+        rows.append(row)
+    return rows
 
 
 def doctor_report():
@@ -76,25 +117,42 @@ def doctor_report():
                 info = app / "Contents/Info.plist"
                 if info.is_file():
                     metadata = plistlib.loads(info.read_bytes())
-                    native.append({"path": str(app), "bundle_version_raw": metadata.get("CFBundleShortVersionString"),
-                                   "version_note": "原始 bundle 字段；显示版本请在原生 About 界面确认"})
+                    native.append(
+                        {
+                            "path": str(app),
+                            "bundle_version_raw": metadata.get("CFBundleShortVersionString"),
+                            "version_note": "原始 bundle 字段；显示版本请在原生 About 界面确认",
+                        }
+                    )
     elif os.name == "nt":
         for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
             if root:
-                native.extend({"path": str(path)} for path in Path(root).glob("Vensim*/vensim*.exe"))
+                native.extend(
+                    {"path": str(path)} for path in Path(root).glob("Vensim*/vensim*.exe")
+                )
     fonts = {"status": "需要可选 matplotlib 才能检查 Python 绘图字体"}
     if packages["matplotlib"]:
         from result_plotting import font_settings
+
         try:
-            fonts = {"status": "基础中文与符号字形可用，实际图件导出时继续逐字检查",
-                     "families": font_settings("中文变量存量流率影子引用时间结果−–±%0123456789")["font.family"]}
+            fonts = {
+                "status": "基础中文与符号字形可用，实际图件导出时继续逐字检查",
+                "families": font_settings("中文变量存量流率影子引用时间结果−–±%0123456789")[
+                    "font.family"
+                ],
+            }
         except (RuntimeError, ValueError) as exc:
             fonts = {"status": "字体需配置", "detail": str(exc)}
-    return {"python": sys.version.split()[0], "executable": sys.executable,
-            "graphviz": {engine: shutil.which(engine) for engine in ("dot", "neato", "fdp", "sfdp")},
-            "optional_packages": packages, "native_vensim": native,
-            "plot_fonts": fonts,
-            "official_dss_mcp": "需核对官方组件、许可与实际工具列表，未自动连接"}
+    return {
+        "python": sys.version.split()[0],
+        "executable": sys.executable,
+        "graphviz": {engine: shutil.which(engine) for engine in ("dot", "neato", "fdp", "sfdp")},
+        "optional_packages": packages,
+        "dependency_constraints": dependency_constraints(),
+        "native_vensim": native,
+        "plot_fonts": fonts,
+        "official_dss_mcp": "需核对官方组件、许可与实际工具列表，未自动连接",
+    }
 
 
 def _doctor() -> int:
@@ -102,7 +160,7 @@ def _doctor() -> int:
     return 0
 
 
-def _quick(args: List[str]) -> int:
+def _quick(args: list[str]) -> int:
     if not args:
         print("ERROR: 用法: skill.cmd quick <model.mdl>", file=sys.stderr)
         return 2
@@ -120,13 +178,19 @@ def _quick(args: List[str]) -> int:
     if rc:
         return rc
     print("=== layout ===")
-    rc = _invoke_layout([
-        "layout", model,
-        "--output", out,
-        "--engine", engine,
-        "--route-information-arrows",
-        "--preview", _default_output(model, "_layout.html"),
-    ])
+    rc = _invoke_layout(
+        [
+            "layout",
+            model,
+            "--output",
+            out,
+            "--engine",
+            engine,
+            "--route-information-arrows",
+            "--preview",
+            _default_output(model, "_layout.html"),
+        ]
+    )
     if rc:
         return rc
     print(f"完成: {out}  (请在 Vensim 打开并运行 Check Model 与 Units Check)")
@@ -141,7 +205,7 @@ def _examples() -> int:
     return rc
 
 
-def _auto(args: List[str]) -> int:
+def _auto(args: list[str]) -> int:
     if not args:
         print("ERROR: 用法: skill.cmd auto <model.mdl> [--var V] [--keep-going]", file=sys.stderr)
         return 2
@@ -208,7 +272,7 @@ def _help() -> int:
     return 0
 
 
-def main(argv: List[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0].lower() in {"help", "-h", "--help"}:
         return _help()
@@ -224,17 +288,21 @@ def main(argv: List[str] | None = None) -> int:
         return _invoke(model_builder.main, rest)
     if cmd == "feedback":
         from feedback_audit import main as feedback_main
+
         return _invoke(feedback_main, rest)
     if cmd in {"experiment", "convergence"}:
         return _invoke(experiments.main, args)
     if cmd in {"calibrate", "optimize"}:
         from optimization import main as optimization_main
+
         return _invoke(optimization_main, args)
     if cmd == "plot-data":
         from result_plotting import main as plot_main
+
         return _invoke(plot_main, rest)
     if cmd == "mcp":
         from mcp_server import main as mcp_main
+
         return _invoke(mcp_main, rest)
     if cmd == "layout":
         if not rest:

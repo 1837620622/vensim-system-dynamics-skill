@@ -5,28 +5,29 @@
 掩盖的研究设计问题提前拦截：边界和参考资料是否明确、存量是否有真实初值、
 历史期是否把观测序列回填进内生方程、指定的派生指标是否依赖模型变量。
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import re
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
-
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from mdl_document import atomic_write, separate_output  # noqa: E402
 from vensim_autolayout import _read_text  # noqa: E402
 from vensim_engine import extract_deps, parse_equations  # noqa: E402
-from mdl_document import atomic_write, separate_output  # noqa: E402
-
 
 CONTROL_NAMES = {"INITIAL TIME", "FINAL TIME", "TIME STEP", "SAVEPER"}
 HISTORY_FUNCTIONS = re.compile(r"\b(GET\s+(?:XLS|DIRECT|DATA)|GET\s+DIRECT|DATA\s+ONLY)\b", re.I)
-HISTORY_TERMS = re.compile(r"历史|观测|实际值|实际输出|回放|重构|预测输出|history|observed|replay", re.I)
+HISTORY_TERMS = re.compile(
+    r"历史|观测|实际值|实际输出|回放|重构|预测输出|history|observed|replay", re.I
+)
 TIME_SWITCH = re.compile(r"IF\s+THEN\s+ELSE\s*\([^)]*\bTIME\b", re.I)
 STANDARDIZATION_HINT = re.compile(r"标准化|归一化|normaliz", re.I)
 BARE_UNIT_SUBTRACTION = re.compile(r"-\s*\d+(?:\.\d+)?")
@@ -39,7 +40,15 @@ def _iter_reference_files(path: Path) -> Iterable[Path]:
         return
     if path.is_dir():
         for child in sorted(path.rglob("*")):
-            if child.is_file() and child.suffix.lower() in {".pdf", ".doc", ".docx", ".md", ".txt", ".bib", ".ris"}:
+            if child.is_file() and child.suffix.lower() in {
+                ".pdf",
+                ".doc",
+                ".docx",
+                ".md",
+                ".txt",
+                ".bib",
+                ".ris",
+            }:
                 yield child
 
 
@@ -55,6 +64,7 @@ def _load_spec(path: Path) -> list[str]:
         if not value or str(value).strip().startswith("填写"):
             errors.append(f"spec.project.{key} 尚未填写研究问题或系统边界")
     pending = []
+
     def walk(value, prefix=""):
         if isinstance(value, dict):
             for k, v in value.items():
@@ -66,6 +76,7 @@ def _load_spec(path: Path) -> list[str]:
             pending.append(prefix)
         elif isinstance(value, str) and value.strip().startswith("填写"):
             pending.append(prefix)
+
     walk(data)
     if pending:
         errors.append(f"spec 仍有待验证字段（示例：{pending[0]}）")
@@ -132,7 +143,9 @@ def check_model(
     if require_coupling:
         outputs = coupling_outputs
         if not outputs:
-            errors.append("派生指标检查必须通过 --derived-output 明确本项目的输出变量，不能套用其他案例名称")
+            errors.append(
+                "派生指标检查必须通过 --derived-output 明确本项目的输出变量，不能套用其他案例名称"
+            )
         missing = [name for name in outputs if name not in names]
         if missing:
             errors.append("派生指标检查缺少所选输出：" + "、".join(missing))
@@ -155,7 +168,8 @@ def check_model(
                     continue
                 deps = extract_deps(rhs, names)
                 dimensional = [
-                    dep for dep in deps
+                    dep
+                    for dep in deps
                     if equations.get(dep) is not None
                     and equations[dep].unit
                     and equations[dep].unit.lower() not in {"dmnl", "dimensionless"}
@@ -167,7 +181,9 @@ def check_model(
                     )
 
     if references is None:
-        warnings.append("未提供 references 目录；论文模型应先核对领域文献和方法文献，再确定边界、方程与参数")
+        warnings.append(
+            "未提供 references 目录；论文模型应先核对领域文献和方法文献，再确定边界、方程与参数"
+        )
     else:
         refs = list(_iter_reference_files(references))
         if not refs:
@@ -197,20 +213,50 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("model", type=Path)
     parser.add_argument("--references", type=Path, help="参考文献目录或文件")
     parser.add_argument("--spec", type=Path, help="已填写的 model_spec JSON")
-    parser.add_argument("--require-derived", "--require-coupling", dest="require_coupling", action="store_true", help="检查明确指定的派生指标；旧耦合检查参数保留为别名")
-    parser.add_argument("--derived-output", "--coupling-output", dest="coupling_output", action="append", default=[], help="本项目要求检查的派生输出变量名，可重复")
-    parser.add_argument("--strict-endogenous", action="store_true", help="明确要求严格检查存量流率中的历史路径回填")
+    parser.add_argument(
+        "--require-derived",
+        "--require-coupling",
+        dest="require_coupling",
+        action="store_true",
+        help="检查明确指定的派生指标；旧耦合检查参数保留为别名",
+    )
+    parser.add_argument(
+        "--derived-output",
+        "--coupling-output",
+        dest="coupling_output",
+        action="append",
+        default=[],
+        help="本项目要求检查的派生输出变量名，可重复",
+    )
+    parser.add_argument(
+        "--strict-endogenous", action="store_true", help="明确要求严格检查存量流率中的历史路径回填"
+    )
     parser.add_argument("--report", type=Path, help="写入 JSON 审计报告")
     args = parser.parse_args(argv)
     if not args.model.exists():
         parser.error(f"模型不存在：{args.model}")
     if args.report:
-        separate_output(args.report, [args.model, *([args.spec] if args.spec else []),
-                                      *(list(_iter_reference_files(args.references)) if args.references else [])])
-    report = check_model(args.model, args.references, args.spec, args.require_coupling, args.coupling_output, args.strict_endogenous)
+        separate_output(
+            args.report,
+            [
+                args.model,
+                *([args.spec] if args.spec else []),
+                *(list(_iter_reference_files(args.references)) if args.references else []),
+            ],
+        )
+    report = check_model(
+        args.model,
+        args.references,
+        args.spec,
+        args.require_coupling,
+        args.coupling_output,
+        args.strict_endogenous,
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if args.report:
-        atomic_write(args.report, (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
+        atomic_write(
+            args.report, (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        )
     return 0 if report["pass"] else 1
 
 

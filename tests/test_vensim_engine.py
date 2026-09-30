@@ -1,5 +1,5 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "skills" / "vensim-skill" / "scripts"
@@ -83,7 +83,7 @@ Delayed = DELAY FIXED(Input, 3, 0)
 
 def test_with_lookup_accepts_expression_argument():
     text = """
-Y = WITH LOOKUP( Price / Base Price, ( [0,0)-(2,10)], (0,0), (1,5), (2,10) )
+Y = WITH LOOKUP( Price / Base Price, ( [(0,0)-(2,10)], (0,0), (1,5), (2,10) ) )
     ~ Dmnl
     |
 Price = 10
@@ -101,7 +101,7 @@ Base Price = 10
 
 def test_with_lookup_does_not_swallow_surrounding_expression():
     text = """
-Y = WITH LOOKUP( Price, ( [0,0)-(2,10)], (0,0), (1,5), (2,10) ) + 1
+Y = WITH LOOKUP( Price, ( [(0,0)-(2,10)], (0,0), (1,5), (2,10) ) ) + 1
     ~ Dmnl
     |
 Price = 1
@@ -132,7 +132,7 @@ A = INTEG( 0, 10 )
 
 def test_guard_and_integer_functions_are_allowed():
     text = """
-X = INTEGER( XIDZ(10, 0, 3) + ZIDZ(4, 2, 0) )
+X = INTEGER( XIDZ(10, 0, 3) + ZIDZ(4, 2) )
     ~ Dmnl
     |
 """ + control_block(final_time=1)
@@ -182,9 +182,8 @@ Y = []
     |
 """ + control_block(final_time=1)
 
-    equations = parse_equations(text)
-
     try:
+        equations = parse_equations(text)
         simulate(equations, *get_time_bounds(equations))
     except ValueError as exc:
         assert "LOOKUP" in str(exc)

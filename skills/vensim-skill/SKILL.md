@@ -3,7 +3,7 @@ name: vensim-skill
 description: "Use for Vensim modeling with circular feedback layouts by default, native MDL and shadow-variable repair, polarity and loop checks, Chinese diagrams, reproducible simulation, calibration, policy optimization, sensitivity analysis, and colored Python publication figures on Windows, macOS, or Linux."
 license: "Non-commercial only; commercial use, paid redistribution, and commercial delivery are prohibited; see LICENSE"
 metadata:
-  version: "2.2.3"
+  version: "2.2.4"
 ---
 
 # Vensim 建模、排版与仿真

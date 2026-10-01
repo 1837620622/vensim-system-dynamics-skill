@@ -43,7 +43,7 @@ def test_machine_readable_versions_stay_in_sync():
     skill_version = re.search(r"^\s+version:\s*[\"']([^\"']+)", skill, re.MULTILINE)
     project_version = re.search(r"^version\s*=\s*[\"']([^\"']+)", pyproject, re.MULTILINE)
     assert skill_version and project_version
-    assert skill_version.group(1) == project_version.group(1) == "2.2.3"
+    assert skill_version.group(1) == project_version.group(1) == "2.2.4"
 
 
 def test_local_document_links_resolve():

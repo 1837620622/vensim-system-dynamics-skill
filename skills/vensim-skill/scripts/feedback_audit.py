@@ -212,8 +212,9 @@ def audit_feedback(text, loops=None):
             if not visible(arrow):
                 continue
             source, target = labels.get(arrow.from_id), labels.get(arrow.to_id)
+            raw_polarity = arrow.fields[6] if len(arrow.fields) > 6 else "0"
             if source not in equations or target not in equations:
-                if arrow.fields[6] not in ("0", ""):
+                if raw_polarity not in ("0", ""):
                     unresolved.append(
                         {
                             "view": view.name,
@@ -225,6 +226,7 @@ def audit_feedback(text, loops=None):
             eq = equations[target]
             init_expression = eq.integ_init_expr or ""
             flow_expression = eq.integ_flow or ""
+            ambiguous_initial_dynamic = False
             if eq.integ_flow is None:
                 expression = eq.rhs
                 kind = "information"
@@ -242,6 +244,7 @@ def audit_feedback(text, loops=None):
                 if in_init and in_flow:
                     expression = flow_expression
                     kind = "information"
+                    ambiguous_initial_dynamic = True
                 elif in_flow:
                     expression = flow_expression
                     kind = "information"
@@ -249,7 +252,6 @@ def audit_feedback(text, loops=None):
                     expression = init_expression
                     kind = "initial"
             expression = expression or ""
-            raw_polarity = arrow.fields[6] if len(arrow.fields) > 6 else "0"
             try:
                 code = int(raw_polarity or 0)
             except (TypeError, ValueError):
@@ -269,7 +271,9 @@ def audit_feedback(text, loops=None):
                 "no_dependency" if not exists else "unmarked" if not displayed else "needs_review"
             )
             if exists and expected == "0":
-                status = "needs_review" if displayed else "unmarked"
+                status = "needs_review"
+            elif ambiguous_initial_dynamic:
+                status = "needs_review"
             elif exists and sign and expected != "unknown":
                 status = "verified" if sign == SIGNS.get(expected) else "conflict"
             rows.append(
@@ -282,7 +286,7 @@ def audit_feedback(text, loops=None):
                     "displayed": displayed,
                     "expected": expected,
                     "status": status,
-                    "native_dtype": arrow.fields[9],
+                    "native_dtype": arrow.fields[9] if len(arrow.fields) > 9 else "",
                 }
             )
     loop_rows = check_loops(equations, [] if loops is None else loops)

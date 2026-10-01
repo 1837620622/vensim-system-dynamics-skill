@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "skills/vensim-skill/scripts"
 sys.path.insert(0, str(TOOLS))
 
+import optimization  # noqa: E402
 from optimization import (  # noqa: E402
     observation_indices,
     run_search,
@@ -192,6 +193,36 @@ def test_search_refuses_existing_files_and_resource_overrun(model, tmp_path):
     with pytest.raises(ValueError, match="work_limit"):
         run_search(model, {**policy_spec(), "work_limit": 1}, tmp_path / "overrun", "optimize")
     assert not (tmp_path / "overrun").exists()
+
+
+def test_search_rejects_per_run_model_identity_change_even_after_restore(
+    model, tmp_path, monkeypatch
+):
+    pytest.importorskip("scipy")
+    original_bytes = model.read_bytes()
+    edited_bytes = original_bytes.replace("初始量=2".encode(), "初始量=1000".encode())
+    real_run = optimization.run_model
+    calls = 0
+
+    def edit_between_runs(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            model.write_bytes(edited_bytes)
+            result = real_run(*args, **kwargs)
+            model.write_bytes(original_bytes)
+            return result
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(optimization, "run_model", edit_between_runs)
+    with pytest.raises(RuntimeError, match="源模型发生变化"):
+        run_search(
+            model,
+            {**policy_spec(), "max_evaluations": 10},
+            tmp_path / "identity-change",
+            "optimize",
+        )
+    assert not (tmp_path / "identity-change").exists()
 
 
 def test_optimize_cli_and_pysd_backend(model, tmp_path):

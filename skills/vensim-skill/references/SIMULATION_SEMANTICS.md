@@ -44,6 +44,8 @@ MODULO 官方说明使用 C 余数，同时写为 `A-QUANTUM(A,B)`；QUANTUM 对
 
 PySD 使用临时副本翻译自包含标量模型，显式传入本封装解析的有效时间设置。需要外部数据、数组、宏或其他高级结构时，在原始工程使用已确认支持该模型的 PySD 或原生 Vensim，不能悄悄改变相对数据路径。
 
+`crosscheck` 在同一组参数、时间控制、变量和初值下运行内置 Euler 与 PySD，先拒绝非整数保存网格，再逐点比较时间和值；它的 `pass` 只表示两条 Python 路径一致，报告始终保留 `native_verified: false`。这项检查不能替代原生 Vensim 对未覆盖函数、数组、外部数据、单位和结构图的核对；需要原生等价结论时必须保存对应版本和软件导出的证据。
+
 ## CSV 与运行清单
 
 单次仿真保存 `result.csv` 和 `result.csv.run.json`。实验保存 `series.csv`、`summary.csv` 与 `experiment.json`。搜索保存数据和 `optimization.json`。新输出清单记录数据文件 SHA-256，运行记录包含模型哈希、后端/版本、Python 版本、Euler 方法、参数、时间网格、单位及诊断状态。

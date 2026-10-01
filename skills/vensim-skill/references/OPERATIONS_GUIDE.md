@@ -60,6 +60,7 @@
 ./skill.sh simulate work/inventory.mdl --var 库存 --output results/base.csv
 ./skill.sh simulate work/inventory.mdl --var 库存 --set '调整时间=2' --time-step 0.125 --saveper 1 --output results/policy.csv
 ./skill.sh simulate work/inventory.mdl --backend pysd --var 库存 --output results/pysd.csv
+./skill.sh crosscheck work/inventory.mdl --var 库存 --output results/python_crosscheck.json
 ./skill.sh graph work/inventory.mdl --var 库存 --output results/stock.svg
 ./skill.sh compare base.mdl --scenario policy.mdl --var 库存 --output results/comparison.png
 ```
@@ -70,7 +71,7 @@
 
 `simulate` 生成 CSV 和 `.csv.run.json`；元数据记录后端、模型哈希、实际时间设置、参数覆盖和诊断警告。`--keep-going` 遇到错误可能使用替代值，元数据会标记 `diagnostic_only`，不得用于结论。CSV 使用 UTF-8 BOM，便于 Windows 表格软件读取中文。
 
-PySD 是可选后端，临时翻译自包含 MDL，不在输入目录留下 Python 文件。含相对外部数据引用的模型明确拒绝，以免静默改变数据路径；这类模型在其原工程中调用 PySD 或原生 Vensim。
+PySD 是可选后端，临时翻译自包含 MDL，不在输入目录留下 Python 文件。`crosscheck` 使用同一组变量、参数和时间设置逐点比较内置 Euler 与 PySD，并核对保存网格；差值超过容差或网格不同就返回失败。含相对外部数据引用的模型明确拒绝，以免静默改变数据路径；这类模型在其原工程中调用 PySD 或原生 Vensim。Python 后端一致不等于原生 Vensim 逐点证明，未覆盖函数仍需原生核对。
 
 结果图默认使用 Python，600 DPI PNG、PDF/SVG 矢量版，无标题/图号/水印，按变量分别输出。使用 `--formats png,pdf,svg` 同时导出，`--plot-config my_plot.json` 调整样式。编号曲线、下方长线图例、CSV 重绘和 Monte Carlo 分位带见 [结果图手册](RESULT_PLOTS.md)。
 

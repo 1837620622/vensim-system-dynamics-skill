@@ -40,6 +40,11 @@ def test_direct_polarity_is_conservative(expression, expected):
     assert infer_polarity(expression, "输入", equations()) == expected
 
 
+@pytest.mark.parametrize("expression", ["SMOOTH(输入, 3)", "DELAY3(输入, 3)"])
+def test_smoothing_and_delay_preserve_positive_input_polarity(expression):
+    assert infer_polarity(expression, "输入", equations()) == "+"
+
+
 def test_changed_parameter_sign_requires_rechecking():
     eqs = equations()
     assert infer_polarity("输入*系数", "输入", eqs) == "+"
@@ -128,3 +133,10 @@ def test_direct_self_feedback_and_fixed_delay_initial_edges():
     )
     with pytest.raises(ValueError, match="初值关系"):
         check_loops(eqs, [{"variables": ["Initial", "Output"]}])
+
+
+def test_zero_effect_is_review_not_conflict():
+    eqs = parse_equations("开关=0~Dmnl~|强度=1~1/Month~|效果=开关*强度~1/Month~|", expand=False)
+    # A zero derivative at the current parameter point is not evidence of a
+    # wrong displayed sign; it requires a range or native review.
+    assert infer_polarity("0*强度", "强度", eqs) == "0"

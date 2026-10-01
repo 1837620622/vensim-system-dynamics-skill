@@ -16,6 +16,8 @@
 vensim-system-dynamics-skill/
 ├── README.md                         仓库说明与使用导航
 ├── LICENSE                           非商业许可
+├── pyproject.toml                    机器可读项目版本与 Ruff 规则
+├── docs/DEVELOPMENT.md               可分发的开发、验证与发布说明
 ├── .github/workflows/validate.yml    跨平台与可选集成检查
 ├── docs/                             本仓库的验收记录与真实示例图
 ├── tests/                            解析、几何、仿真、绘图、MCP 回归
@@ -129,6 +131,7 @@ Vensim 原生导出的库存示例（对应 [MDL](skills/vensim-skill/assets/exa
 ./skill.sh graph work/inventory.mdl --var 库存 --output results/stock.png
 ./skill.sh experiment work/inventory.mdl --spec assets/templates/inventory_scenarios.json --output-dir results/scenarios --plot results/scenarios.png
 ./skill.sh experiment work/inventory.mdl --spec assets/templates/inventory_sensitivity.json --output-dir results/sensitivity
+./skill.sh crosscheck work/inventory.mdl --var 库存 --output results/python_crosscheck.json
 ./skill.sh convergence work/inventory.mdl --var 库存 --output results/convergence.json
 ```
 
@@ -217,6 +220,7 @@ Vensim 原生导出的库存示例（对应 [MDL](skills/vensim-skill/assets/exa
 | --- | --- |
 | 内置标量仿真 | Euler；INTEG、常见数学函数、条件、Lookup、平滑和延迟子集 |
 | 可选 PySD | `--backend pysd`；本封装仅处理自包含标量模型，外部数据和高级模型需原项目 PySD/原生 Vensim |
+| Python 逐点交叉检查 | `crosscheck` 使用相同参数和保存网格比较内置 Euler/PySD；报告失败时不应发布结果 |
 | 常量覆盖 | `--set '调整时间=2'`；不修改 MDL，不覆盖存量、控制变量或反馈方程 |
 | 时间设置 | `--time-step`、`--final-time`、`--saveper`；记录实际有效值 |
 | 情景实验 | 每个情景从原始初值重新开始，参数与结果可追溯 |
@@ -228,7 +232,7 @@ Vensim 原生导出的库存示例（对应 [MDL](skills/vensim-skill/assets/exa
 | 有约束政策搜索 | 终值、极值、均值或积分等目标，支持上下界约束；分别报告可行性、收敛和预算终止 |
 | 结果文件 | 带 BOM 的 UTF-8 CSV；运行元数据、模型 SHA-256、后端、种子和参数 |
 
-实验保存 `series.csv`、`summary.csv` 和 `experiment.json`；摘要包括初值、末值、最小值、最大值和峰值时刻。现有目录中同名输出不会被实验命令覆盖。批量实验最多 200 次，输出规模有上限。
+实验保存 `series.csv`、`summary.csv` 和 `experiment.json`；摘要包括初值、`FINAL TIME` 值、最小值、最大值和峰值时刻。最后保存点不在 `FINAL TIME` 时整组拒绝，避免把最后保存点误称为末值。现有目录中同名输出不会被实验命令覆盖。批量实验最多 200 次，输出规模有上限；参数不能通过间接改变时间控制绕过上限。
 
 `SMOOTH3` 和 `DELAY3` 使用三阶段状态；物料延迟按各阶段的流出传递，避免错误地把上游存量当作下游流入。默认严格求值；不支持的函数和无效参数会报错。`--keep-going` 仅用于诊断，其结果不适合用于研究结论。
 
@@ -286,9 +290,10 @@ Ventana 的 [官方会议资源页](https://vensim.com/conference/) 已提供 **
 
 `fix` 不再猜测缺失单位：单位表由用户或研究依据明确提供。断裂箭头删除需显式 `--drop-broken-arrows`，不能代替语义修复。研究专项要求见 [研究工作流](skills/vensim-skill/references/RESEARCH_WORKFLOW.md)。
 
-从仓库根目录运行：
+从仓库根目录运行（质量工具版本见 `skills/vensim-skill/requirements/dev.txt`）：
 
 ```bash
+python3 -m pip install -r skills/vensim-skill/requirements/dev.txt
 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider
 python3 -m ruff check .
 python3 -m ruff format --check .
@@ -298,7 +303,7 @@ shellcheck skills/vensim-skill/skill.sh
 
 Windows 测试用 `python -m pytest -q -p no:cacheprovider`。CI 已配置 Windows、macOS 与 Linux 矩阵；可选 PySD/MCP/Matplotlib/SciPy 集成检查在安装对应依赖的任务中运行。配置存在不等于远程测试已通过，实际执行状态见 [GitHub Actions](https://github.com/1837620622/vensim-system-dynamics-skill/actions/workflows/validate.yml)，每次发布分别说明本机与远程验证情况。解析、真实圆弧、编码续行、影子重叠、不变量、求解器、校准和约束优化、绘图、技能识别和输出路径是主要回归范围。
 
-原生验收已经覆盖中文库存示例的模型检查、单位检查、原生 SVG 与库存轨迹的可视检查；内置引擎与 PySD 对相同示例做逐点数值对照。原生轨迹的可视检查不等同于原生全量数值误差验证，验收记录明确区分这些证据。
+Python 内置 Euler 是默认仿真通道，适合批量实验和发布结果；安装 PySD 后可用相同 MDL 做逐点交叉检查。两条 Python 通道现在共同拒绝非整数 `SAVEPER/TIME STEP`，并核对实际返回保存网格。只有在时间设置、变量、参数、初值和保存点完全一致时，逐点相等才有意义。原生 Vensim 仍负责 MDL 语义、单位、结构图和未覆盖函数的最终核对；原生轨迹可视检查不等同于原生全量数值误差验证，验收记录明确区分这些证据。
 
 ## 文献、方程与图件的一致性
 
@@ -307,6 +312,8 @@ Windows 测试用 `python -m pytest -q -p no:cacheprovider`。CI 已配置 Windo
 文献提供表达和验证依据；业务方程、参数、实验幅度仍从当前任务取得。数学符号、中文 MDL 名称、CSV 列和图例保持对应。代码不会为了拟合参考图的外形修改仿真数值；原生检查、跨后端数值比较与研究有效性分别报告。
 
 ## 兼容性与升级说明
+
+`v2.2.3` 把批量实验的规模检查移到参数依赖核对之后，拒绝通过 `FINAL TIME = 参数` 绕过输出上限；摘要要求最后保存点确实等于 `FINAL TIME`，不再把最后保存点误称为终值。校准/政策搜索每次求解都核对源 MDL 与运行哈希，编辑后撤销也不会发布污染的最优解。PySD 与内置 Euler 统一检查时间网格并核对实际保存点。反馈审计修复空极性字段、原生名称等价、SMOOTH/DELAY 正向链接和零作用相消状态；学术门禁改用嵌套条件解析、受限 AST 量纲判断和真实外部数据函数证据，避免把 `价格/参考价格-1`、科学计数法或名为“历史”的内生存量误报。新增机器可读版本、固定质量工具、Python 3.11 集成矩阵和可分发开发说明。
 
 `v2.2.2` 修复 `STEP` 非网格时刻与半步边界，按有效 `TIME STEP` 使用官方严格比较；`MODULO` 的负被除数采用 C 浮点余数，非正除数明确报出原生核对要求。`RAMP` 在开始时刻保持零，反向区间与极小取余除数的后端差异列入语义手册。批量情景、敏感性与步长检查核对整组源 MDL 哈希；模型在两次运行之间改变时停止发布，步长结果还须有相同保存时刻。新增实际 PySD 对照、运行中修改模型和时间网格错配回归。
 
@@ -336,7 +343,7 @@ CSV 与相邻运行清单现在通过 SHA-256 对应；`plot-data` 恢复诊断�
 
 本项目补充 PLE 外的实验与出图工作流，**不解锁 DSS，也不替代 DSS 全部功能**。所有后端都应按模型实际使用的函数、数据源、数组和积分方式确认支持情况；遇到未覆盖语法要报错或切换后端，不静默近似为“正确结果”。
 
-更多命令见 [操作手册](skills/vensim-skill/references/OPERATIONS_GUIDE.md)，格式和算法来源见 [参考资料](skills/vensim-skill/references/REFERENCES.md)。仓库保留早期示例用于兼容测试，不代表每个历史示例都已完成最新原生图面验收。
+更多命令见 [操作手册](skills/vensim-skill/references/OPERATIONS_GUIDE.md)，格式和算法来源见 [参考资料](skills/vensim-skill/references/REFERENCES.md)，贡献和发布边界见 [开发说明](docs/DEVELOPMENT.md)。仓库保留早期示例用于兼容测试，不代表每个历史示例都已完成最新原生图面验收。
 
 ## 作者与许可
 

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib.metadata
 import importlib.util
 import json
@@ -49,7 +50,16 @@ def _invoke(module_main: Callable[[], int], argv: list[str]) -> int:
         return int(module_main() or 0)
     except SystemExit as exc:
         return int(exc.code or 0)
-    except (ValueError, RuntimeError, OSError, ImportError, json.JSONDecodeError) as exc:
+    except (
+        ValueError,
+        RuntimeError,
+        OSError,
+        ImportError,
+        TypeError,
+        AttributeError,
+        KeyError,
+        json.JSONDecodeError,
+    ) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     finally:
@@ -230,6 +240,39 @@ def _auto(args: list[str]) -> int:
     return 0
 
 
+def _crosscheck() -> int:
+    from mdl_document import atomic_write, preflight_outputs
+    from simulation_runner import compare_backends, parse_overrides
+
+    parser = argparse.ArgumentParser(description="逐点比较内置 Euler 与 PySD")
+    parser.add_argument("model", type=Path)
+    parser.add_argument("--var", action="append", required=True, dest="variables")
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--set", action="append", default=[], dest="overrides")
+    parser.add_argument("--time-step", type=float)
+    parser.add_argument("--final-time", type=float)
+    parser.add_argument("--saveper", type=float)
+    parser.add_argument("--tolerance", type=float, default=1e-10)
+    args = parser.parse_args()
+    params = parse_overrides(args.overrides)
+    preflight_outputs([args.output], [args.model])
+    report = compare_backends(
+        args.model,
+        args.variables,
+        params=params,
+        time_step=args.time_step,
+        final_time=args.final_time,
+        saveper=args.saveper,
+        tolerance=args.tolerance,
+    )
+    atomic_write(
+        args.output,
+        (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["pass"] else 1
+
+
 def _help() -> int:
     print("""Vensim System Dynamics Skill
 用法: ./skill.sh <命令> [参数]  /  skill.cmd <命令> [参数]
@@ -248,6 +291,8 @@ def _help() -> int:
   visual model.mdl [--strict] [--output geometry.json]
   quick model.mdl                  检查、布局和前后预览
   simulate model.mdl --var 变量 [--output result.csv] [--plot result.png]
+  crosscheck model.mdl --var 变量 --output backend-check.json
+         逐点比较内置 Euler 与 PySD；需安装 requirements/pysd.txt
   graph model.mdl --var 变量 --output result.svg
   plot-data series.csv --output result.png --time-unit 单位
          绘图选项: --dpi 600 --formats png,pdf,svg（默认无标题，每个变量单独出图）
@@ -331,6 +376,8 @@ def main(argv: list[str] | None = None) -> int:
         return _invoke(academic_gate.main, rest)
     if cmd == "auto":
         return _auto(rest)
+    if cmd == "crosscheck":
+        return _invoke(_crosscheck, rest)
     print(f"ERROR: 未知命令 {cmd}；使用 --help 查看用法", file=sys.stderr)
     return 2
 

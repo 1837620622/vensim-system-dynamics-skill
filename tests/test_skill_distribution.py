@@ -37,6 +37,15 @@ def test_skill_entrypoint_and_packaged_assets():
     assert (SKILL / "LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes()
 
 
+def test_machine_readable_versions_stay_in_sync():
+    skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    skill_version = re.search(r"^\s+version:\s*[\"']([^\"']+)", skill, re.MULTILINE)
+    project_version = re.search(r"^version\s*=\s*[\"']([^\"']+)", pyproject, re.MULTILINE)
+    assert skill_version and project_version
+    assert skill_version.group(1) == project_version.group(1) == "2.2.3"
+
+
 def test_local_document_links_resolve():
     files = [ROOT / "README.md", ROOT / "README.en.md", *SKILL.rglob("*.md")]
     for file in files:

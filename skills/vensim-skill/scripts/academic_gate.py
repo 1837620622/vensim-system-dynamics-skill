@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -21,34 +22,148 @@ if str(ROOT) not in sys.path:
 
 from mdl_document import atomic_write, separate_output  # noqa: E402
 from vensim_autolayout import _read_text  # noqa: E402
-from vensim_engine import extract_deps, parse_equations  # noqa: E402
+from vensim_engine import (  # noqa: E402
+    _matching_paren,
+    _name_pattern,
+    _split_top_level_args,
+    _to_python_expr,
+    canonical_name,
+    extract_deps,
+    parse_equations,
+)
 
 CONTROL_NAMES = {"INITIAL TIME", "FINAL TIME", "TIME STEP", "SAVEPER"}
-HISTORY_FUNCTIONS = re.compile(r"\b(GET\s+(?:XLS|DIRECT|DATA)|GET\s+DIRECT|DATA\s+ONLY)\b", re.I)
-HISTORY_TERMS = re.compile(
-    r"历史|观测|实际值|实际输出|回放|重构|预测输出|history|observed|replay", re.I
-)
-TIME_SWITCH = re.compile(r"IF\s+THEN\s+ELSE\s*\([^)]*\bTIME\b", re.I)
 STANDARDIZATION_HINT = re.compile(r"标准化|归一化|normaliz", re.I)
-BARE_UNIT_SUBTRACTION = re.compile(r"-\s*\d+(?:\.\d+)?")
-BOUNDARY_SWITCH_HINTS = ("情景", "policy", "scenario")
+TIME_TOKEN = re.compile(r"(?<![\w$])TIME(?![\w$])", re.I)
+HISTORY_FUNCTIONS = re.compile(r"\b(GET\s+(?:XLS|DIRECT|DATA)|DATA\s+ONLY)\b", re.I)
+
+
+def _iter_if_conditions(expression):
+    """遍历 IF THEN ELSE 的条件参数，支持嵌套括号与查表表达式。"""
+    lower = expression.lower()
+    needle = "if then else"
+    cursor = 0
+    while True:
+        start = lower.find(needle, cursor)
+        if start < 0:
+            return
+        before = expression[start - 1] if start else ""
+        after_index = start + len(needle)
+        if before and (before.isalnum() or before in "_$"):
+            cursor = after_index
+            continue
+        open_index = after_index
+        while open_index < len(expression) and expression[open_index].isspace():
+            open_index += 1
+        if open_index >= len(expression) or expression[open_index] != "(":
+            cursor = after_index
+            continue
+        try:
+            close_index = _matching_paren(expression, open_index)
+            args = _split_top_level_args(expression[open_index + 1 : close_index])
+        except (ValueError, IndexError):
+            cursor = after_index
+            continue
+        if args:
+            yield args[0]
+        cursor = close_index + 1
+
+
+def _contains_time_condition(expression, names):
+    """只识别条件中的内置 TIME，忽略名为“adjustment time”的业务变量。"""
+    for condition in _iter_if_conditions(expression):
+        cleaned = condition
+        for name in sorted(names, key=len, reverse=True):
+            if canonical_name(name) == "time":
+                continue
+            cleaned = re.sub(_name_pattern(name), " ", cleaned, flags=re.I)
+        if TIME_TOKEN.search(cleaned):
+            return True
+    return False
+
+
+def _standardization_subtractions(rhs, equations):
+    """返回带单位表达式减裸数字的变量名；比值减 1 不应被误报。
+
+    使用受限 AST 判断减号左侧是否已经是无量纲比值，而不是在原始字符串
+    中搜索 ``- 1``。这样也不会把科学计数法 ``1e-6`` 当作减法。
+    """
+    name_map = {name: f"v{index}" for index, name in enumerate(equations)}
+    reverse = {alias: name for name, alias in name_map.items()}
+    dimensionless = {"", "dmnl", "dimensionless"}
+
+    def unit_of(node):
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            return "dmnl"
+        if isinstance(node, ast.Name):
+            name = reverse.get(node.id)
+            if name is None:
+                return None
+            return equations[name].unit.strip().lower()
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            return unit_of(node.operand)
+        if isinstance(node, ast.BinOp):
+            left, right = unit_of(node.left), unit_of(node.right)
+            if isinstance(node.op, (ast.Add, ast.Sub)):
+                return left if left == right else None
+            if isinstance(node.op, ast.Mult):
+                if left in dimensionless:
+                    return right
+                if right in dimensionless:
+                    return left
+                return None
+            if isinstance(node.op, ast.Div):
+                if left == right or (left in dimensionless and right in dimensionless):
+                    return "dmnl"
+                if right in dimensionless:
+                    return left
+                return None
+            return None
+        if isinstance(node, ast.IfExp):
+            left, right = unit_of(node.body), unit_of(node.orelse)
+            return left if left == right else None
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in {"_sd_abs", "_sd_min", "_sd_max"}:
+                units = [unit_of(arg) for arg in node.args]
+                return units[0] if units and all(item == units[0] for item in units) else None
+        return None
+
+    def dimensional_dependencies(node):
+        result = []
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name) and child.id in reverse:
+                name = reverse[child.id]
+                if equations[name].unit.strip().lower() not in dimensionless:
+                    result.append(name)
+        return list(dict.fromkeys(result))
+
+    def is_numeric(node):
+        return isinstance(node, ast.Constant) and type(node.value) in (int, float)
+
+    try:
+        translated = _to_python_expr(rhs, name_map)
+        tree = ast.parse(translated, mode="eval")
+    except (ValueError, SyntaxError, RecursionError):
+        return []
+    violations = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Sub):
+            continue
+        right = node.right.operand if isinstance(node.right, ast.UnaryOp) else node.right
+        if is_numeric(right) and unit_of(node.left) not in dimensionless:
+            violations.extend(dimensional_dependencies(node.left))
+    return list(dict.fromkeys(violations))
 
 
 def _iter_reference_files(path: Path) -> Iterable[Path]:
+    allowed = {".pdf", ".doc", ".docx", ".md", ".txt", ".bib", ".ris"}
     if path.is_file():
-        yield path
+        if path.suffix.lower() in allowed:
+            yield path
         return
     if path.is_dir():
         for child in sorted(path.rglob("*")):
-            if child.is_file() and child.suffix.lower() in {
-                ".pdf",
-                ".doc",
-                ".docx",
-                ".md",
-                ".txt",
-                ".bib",
-                ".ris",
-            }:
+            if child.is_file() and child.suffix.lower() in allowed:
                 yield child
 
 
@@ -58,7 +173,12 @@ def _load_spec(path: Path) -> list[str]:
     except (OSError, json.JSONDecodeError) as exc:
         return [f"无法读取 spec：{exc}"]
     errors: list[str] = []
-    project = data.get("project", {}) if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return ["spec 顶层必须是 JSON 对象"]
+    project = data.get("project", {})
+    if not isinstance(project, dict):
+        errors.append("spec.project 必须是对象，包含 research_question 和 system_boundary")
+        project = {}
     for key in ("research_question", "system_boundary"):
         value = project.get(key)
         if not value or str(value).strip().startswith("填写"):
@@ -116,26 +236,35 @@ def check_model(
     if not stocks:
         warnings.append("模型没有检测到 INTEG 存量；如果这是 CLD 或纯代数模型，请在报告中说明")
 
-    # 历史行为生成门禁：历史期的观测值只能作为外部边界驱动或比较序列，
-    # 不应写成“历史状态/输出路径”注入同一组内生存量方程。
+    # 历史行为生成门禁：只有真实外部数据函数才构成“回填”证据。
+    # 变量名含“历史/观测”本身不说明它来自外部序列，不能据此否定内生存量。
     history_hits = []
+    endogenous_history_hits = []
+    stock_flow_dependencies = {
+        dependency
+        for equation in equations.values()
+        if equation.integ_flow is not None
+        for dependency in extract_deps(equation.integ_flow, names)
+    }
     for name, eq in equations.items():
         rhs = eq.integ_flow or eq.rhs
         if HISTORY_FUNCTIONS.search(rhs):
             history_hits.append(f"{name}: 使用外部数据函数")
-        if eq.integ_flow is not None and HISTORY_TERMS.search(rhs):
-            history_hits.append(f"{name}: 存量流率含历史/观测回填词")
-        if TIME_SWITCH.search(rhs):
-            # 情景/政策乘数是模型边界输入，按 TIME 在政策起始年切换属于
-            # 正常实验设置；核心存量、流率和综合输出仍必须保持同一套方程。
-            if any(hint.lower() in name.lower() for hint in BOUNDARY_SWITCH_HINTS):
-                boundary_time_switches.append(name)
+            if eq.integ_flow is not None:
+                endogenous_history_hits.append(name)
+        if _contains_time_condition(rhs, names):
+            # 变量名不再提供豁免；被存量流率使用的分段方程必须人工说明其
+            # 边界含义，避免把 scenario output 一类名称当成结构证明。
+            if name in stock_flow_dependencies or eq.integ_flow is not None:
+                warnings.append(
+                    f"{name}: 方程按 TIME 分段且位于存量/流率路径；请证明这是边界输入而非历史输出回放"
+                )
             else:
-                warnings.append(f"{name}: 方程按 TIME 分段切换；请证明这是边界输入而非历史输出回放")
+                boundary_time_switches.append(name)
     if history_hits:
         message = "检测到需核对的历史/外部数据输入：" + "；".join(history_hits[:4])
         # 外部需求与政策数据可以是合理边界；严格内生检验必须由任务显式选择。
-        if strict_endogenous and any("存量流率" in hit for hit in history_hits):
+        if strict_endogenous and endogenous_history_hits:
             errors.append("严格内生检查发现可能的历史路径注入：" + "；".join(history_hits[:4]))
         else:
             warnings.append(message + "；请区分外生边界驱动、数据比较和输出路径回填")
@@ -154,7 +283,7 @@ def check_model(
                 rhs = equations[name].rhs or ""
                 if not extract_deps(rhs, names):
                     errors.append(f"所选派生输出“{name}”没有来自模型变量的计算依赖")
-                if HISTORY_TERMS.search(rhs) or HISTORY_FUNCTIONS.search(rhs):
+                if HISTORY_FUNCTIONS.search(rhs):
                     errors.append(f"所选派生输出“{name}”疑似直接读取历史评价序列，请核对计算来源")
 
             # 量纲门禁：带单位的指标不能直接减裸数字做标准化。应把历史边界
@@ -164,16 +293,7 @@ def check_model(
                 if not STANDARDIZATION_HINT.search(name):
                     continue
                 rhs = equation.rhs or ""
-                if not BARE_UNIT_SUBTRACTION.search(rhs):
-                    continue
-                deps = extract_deps(rhs, names)
-                dimensional = [
-                    dep
-                    for dep in deps
-                    if equations.get(dep) is not None
-                    and equations[dep].unit
-                    and equations[dep].unit.lower() not in {"dmnl", "dimensionless"}
-                ]
+                dimensional = _standardization_subtractions(rhs, equations)
                 if dimensional:
                     errors.append(
                         f"标准化方程“{name}”对带单位变量 {','.join(dimensional[:3])} 使用裸数字边界；"

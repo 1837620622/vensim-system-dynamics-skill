@@ -16,6 +16,8 @@ A reusable Agent Skill for editable Vensim `.mdl` models, native sketch repair, 
 vensim-system-dynamics-skill/
 ├── README.md / README.en.md          Chinese and English repository guides
 ├── LICENSE                          Non-commercial license
+├── pyproject.toml                   Machine-readable version and Ruff rules
+├── docs/DEVELOPMENT.md              Portable development and release notes
 ├── pyproject.toml                   Shared Ruff lint and format rules
 ├── .github/workflows/validate.yml   Platform and optional integration checks
 ├── docs/                            Audit records and native example exports
@@ -194,6 +196,7 @@ See [plotting guidance](skills/vensim-skill/references/RESULT_PLOTS.md) and the 
 ./skill.sh simulate work/model.mdl --var 库存 --output results/base.csv
 ./skill.sh simulate work/model.mdl --backend pysd --var 库存 --output results/pysd.csv
 ./skill.sh experiment work/model.mdl --spec experiment.json --output-dir results/scenarios
+./skill.sh crosscheck work/model.mdl --var 库存 --output results/python_crosscheck.json
 ./skill.sh convergence work/model.mdl --var 库存 --output results/convergence.json
 ```
 
@@ -201,6 +204,7 @@ See [plotting guidance](skills/vensim-skill/references/RESULT_PLOTS.md) and the 
 | --- | --- |
 | Built-in solver | Scalar Euler integration and a tested subset of native functions |
 | PySD | Optional translation of self-contained scalar models in a temporary directory |
+| Python pointwise cross-check | `crosscheck` compares the built-in Euler and PySD paths with identical settings and refuses mismatched grids |
 | Parameter override | Finite literal constants via `--set`; no replacement of feedback equations or states |
 | Time override | Explicit step, final time, and save interval, recorded in run metadata |
 | Scenarios | Each run starts from original initial conditions |
@@ -210,7 +214,7 @@ See [plotting guidance](skills/vensim-skill/references/RESULT_PLOTS.md) and the 
 | Convergence | Compare dt, dt/2, and dt/4 on the same saved time grid |
 | Provenance | Model hash, parameters, backend/version, Python version, method, units, and result-file hashes |
 
-Experiments save `series.csv`, `summary.csv`, and `experiment.json`. Summaries include first and last saved values, min/max, and peak time. Runs and output values have resource limits; existing files are preserved.
+Experiments save `series.csv`, `summary.csv`, and `experiment.json`. Summaries include first and final-time values, min/max, and peak time; a run whose last save point is not `FINAL TIME` is rejected instead of being mislabeled. Runs and output values have resource limits; existing files are preserved.
 
 `ZIDZ(A,B)` has two arguments. XIDZ/ZIDZ use the native absolute-denominator threshold of `1e-6`. `PULSE` handles zero width and the official half-step comparison. `DELAY FIXED` is an independent discrete state: its duration and initial value are frozen at initialization, with a minimum of one time step. Off-grid durations round to discrete steps; it cannot be embedded in another RHS expression. Fixed-delay feedback and rounding have PySD regression comparisons.
 
@@ -279,6 +283,7 @@ Unit repair requires an evidenced map. Removing broken arrows requires explicit 
 From the repository root:
 
 ```bash
+python -m pip install -r skills/vensim-skill/requirements/dev.txt
 PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider
 python3 -m ruff check .
 python3 -m ruff format --check .
@@ -288,11 +293,13 @@ shellcheck skills/vensim-skill/skill.sh
 
 On Windows use `python -m pytest -q -p no:cacheprovider`. `pyproject.toml` configures Python 3.10-compatible annotations, import ordering, error/closure checks, and formatting. CI includes Windows, macOS, and Linux core matrices plus optional integration jobs. Configuration does not establish execution success; consult [actual Actions runs](https://github.com/1837620622/vensim-system-dynamics-skill/actions/workflows/validate.yml).
 
-Native demonstration records distinguish model checks, units checks, exported diagram hashes, and visual trajectory review. A visual trajectory check is not a full native pointwise numerical comparison. Current local and remote audit scope is recorded in [the audit report](docs/AUDIT.md).
+The built-in Python Euler engine is the default simulation path for reproducible experiments and publication outputs. With PySD installed, the same MDL can be checked point by point; both Python paths reject non-integer `SAVEPER/TIME STEP` grids and verify the returned saved times. A comparison is meaningful only when time settings, variables, parameters, initial conditions, and save points match. Native Vensim remains the authority for MDL semantics, units, structure diagrams, and unsupported functions. Native demonstration records distinguish model checks, units checks, exported diagram hashes, and visual trajectory review. A visual trajectory check is not a full native pointwise numerical comparison. Current local and remote audit scope is recorded in [the audit report](docs/AUDIT.md).
 
 The [academic presentation guide](skills/vensim-skill/references/ACADEMIC_PRESENTATION.md) connects diagram, equation, initial-condition, unit, experiment, and figure reporting to primary literature. References guide documentation and validation; they do not provide transferable business assumptions. Supporting manuals are primarily Chinese; both README versions describe the same implementation and limits.
 
 ## Upgrade notes
+
+**v2.2.3** moves batch-size checks after parameter-to-time-control dependency validation, so `FINAL TIME = parameter` cannot bypass the output cap. Batch summaries now require the last saved point to equal `FINAL TIME`; they never label an unsaved point as a final value. Calibration and policy search check the source MDL and each run hash before scoring, so an edit followed by an undo cannot publish a contaminated optimum. PySD and the built-in Euler path share time-grid validation and verify returned save points. Feedback auditing now handles blank polarity fields, native-equivalent loop names, positive `SMOOTH`/`DELAY` links, and zero/cancelled effects as review states. The academic gate uses nested-condition parsing, restricted-AST dimensional checks, and actual external-data functions, avoiding false positives for ratio-minus-one normalization, scientific notation, and endogenous variables whose names contain “history” or “observed”. The release adds machine-readable version checks, pinned quality tools, Python 3.11 integration coverage, and portable development notes.
 
 **v2.2.2** corrects off-grid and half-step `STEP` boundaries using the effective time step and the official strict comparison. `MODULO` now uses C floating-point remainder for positive divisors, retaining the dividend's sign; non-positive divisors fail with a native-verification requirement. `RAMP` returns zero at its start time. Very small modulo divisors and reversed ramp intervals have documented backend differences. Scenario, sensitivity, and convergence batches check one source MDL hash across all runs and before publication; convergence also checks identical saved times. New regressions include actual PySD comparisons, source changes between runs, and mismatched time grids.
 
@@ -306,7 +313,7 @@ The previous three-argument `ZIDZ` was invalid native syntax and is now rejected
 
 Inputs and existing outputs are preserved. Atomic new-file publication requires a local filesystem supporting hard links, such as APFS, NTFS, or ext4. Unsupported filesystems fail explicitly; there is no fallback that silently overwrites data. Keep temporary simulation caches, debug previews, and Python caches out of the distributed Skill.
 
-No version guarantees arbitrary zero-crossing layout, universal AI compatibility, complete Vensim function coverage, or untested official MCP access.
+No version guarantees arbitrary zero-crossing layout, universal AI compatibility, complete Vensim function coverage, or untested official MCP access. Detailed reference manuals under `skills/vensim-skill/references/` are primarily Chinese; the English README documents the same implementation boundaries.
 
 ## Author and license
 
@@ -316,4 +323,4 @@ No version guarantees arbitrary zero-crossing layout, universal AI compatibility
 - Contact email: 2040168455@qq.com
 - Xianyu / Bilibili: 万能程序员
 
-Code and documentation are provided under the [non-commercial license](LICENSE). Commercial use, paid redistribution, paid-service integration, and commercial client delivery are prohibited. Copies and non-commercial modifications must retain attribution and license notices. Third-party software retains its own license. Previously released versions retain the terms distributed with those versions.
+Code and documentation are provided under the [non-commercial license](LICENSE). Commercial use, paid redistribution, paid-service integration, and commercial client delivery are prohibited. Copies and non-commercial modifications must retain attribution and license notices. Third-party software retains its own license. See the portable [development and release notes](docs/DEVELOPMENT.md) before contributing or publishing. Previously released versions retain the terms distributed with those versions.

@@ -14,7 +14,7 @@ import experiments  # noqa: E402
 from experiments import execute_experiment  # noqa: E402
 from model_builder import build_model  # noqa: E402
 from result_plotting import read_result_csv, validate_results  # noqa: E402
-from simulation_runner import run_model  # noqa: E402
+from simulation_runner import compare_backends, run_model  # noqa: E402
 from vensim_engine import command_simulate, parse_equations  # noqa: E402
 
 CONTROLS = "INITIAL TIME=0~Hour~|FINAL TIME=4~Hour~|TIME STEP=1~Hour~|SAVEPER=1~Hour~|"
@@ -83,6 +83,33 @@ def test_step_uses_effective_overridden_time_step(tmp_path):
         2,
         2,
     ]
+
+
+def test_parameter_cannot_change_time_control_indirectly(tmp_path):
+    model = tmp_path / "indirect.mdl"
+    model.write_text(
+        "周期=4~Hour~|累计量=INTEG(速率,0)~Item~|速率=1~Item/Hour~|"
+        "INITIAL TIME=0~Hour~|FINAL TIME=周期~Hour~|TIME STEP=1~Hour~|SAVEPER=1~Hour~|",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="影响时间控制"):
+        run_model(model, ["累计量"], params={"周期": 300000})
+
+
+def test_pysd_rejects_non_integer_save_grid(tmp_path):
+    pytest.importorskip("pysd")
+    model = model_file(tmp_path, "Output=1~Dmnl~|")
+    with pytest.raises(ValueError, match="SAVEPER/TIME STEP"):
+        run_model(model, ["Output"], backend="pysd", time_step=0.3, saveper=1, final_time=3)
+
+
+def test_crosscheck_reports_pointwise_python_agreement(tmp_path):
+    pytest.importorskip("pysd")
+    model = model_file(tmp_path, "Output=STEP(2,1)~Dmnl~|")
+    report = compare_backends(model, ["Output"])
+    assert report["pass"]
+    assert report["max_absolute_error"] == 0
+    assert report["native_verified"] is False
 
 
 @pytest.mark.parametrize("duration", [0, 1, 1.5, 2.5])
@@ -186,6 +213,32 @@ def test_experiment_csv_keeps_sampling_metadata_and_hash(tmp_path):
         and result.metadata["provenance_verified"]
         for _, result in results
     )
+
+
+def test_experiment_rejects_parameter_horizon_and_unsaved_final(tmp_path):
+    indirect = tmp_path / "indirect.mdl"
+    indirect.write_text(
+        "周期=1~Hour~|Output=周期~Dmnl~|INITIAL TIME=0~Hour~|"
+        "FINAL TIME=周期~Hour~|TIME STEP=1~Hour~|SAVEPER=1~Hour~|",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="影响时间控制"):
+        execute_experiment(
+            indirect,
+            {"variables": ["Output"], "scenarios": [{"name": "large", "params": {"周期": 300000}}]},
+            tmp_path / "large",
+        )
+    fixed = model_file(tmp_path, "Output=1~Dmnl~|")
+    with pytest.raises(ValueError, match="保存 FINAL TIME"):
+        execute_experiment(
+            fixed,
+            {
+                "variables": ["Output"],
+                "scenarios": [{"name": "coarse"}],
+                "time": {"saveper": 3},
+            },
+            tmp_path / "coarse",
+        )
 
 
 @pytest.mark.parametrize("workflow", ["experiment", "convergence"])

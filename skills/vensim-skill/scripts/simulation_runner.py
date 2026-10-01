@@ -12,12 +12,136 @@ from pathlib import Path
 from mdl_document import MdlDocument
 from vensim_engine import (
     SimResult,
+    canonical_name,
+    extract_deps,
     get_time_bounds,
     parse_equations,
     simulate,
 )
 
 CONTROL_NAMES = {"INITIAL TIME", "FINAL TIME", "TIME STEP", "SAVEPER"}
+TIME_OPTION_NAMES = {
+    "time_step": "TIME STEP",
+    "final_time": "FINAL TIME",
+    "saveper": "SAVEPER",
+}
+
+
+def validate_parameter_time_dependencies(equations, params, overridden=()):
+    """拒绝通过业务参数偷偷改变仿真时间控制。
+
+    直接覆盖控制变量本来就会被 ``run_model`` 拒绝，但 ``FINAL TIME = 周期``
+    这类间接依赖同样会改变输出规模和比较口径。只检查本次没有显式覆盖的
+    控制变量；显式时间选项已经由调用方承担其资源上限和时间网格责任。
+    """
+    if not params:
+        return
+    overridden_names = {
+        canonical_name(TIME_OPTION_NAMES[key]) for key in overridden if key in TIME_OPTION_NAMES
+    }
+    names = set(equations)
+    pending = [
+        name
+        for name in CONTROL_NAMES
+        if name in equations and canonical_name(name) not in overridden_names
+    ]
+    visited = set()
+    dependencies = set()
+    while pending:
+        name = pending.pop()
+        key = canonical_name(name)
+        if key in visited or name not in equations:
+            continue
+        visited.add(key)
+        for dependency in extract_deps(equations[name].rhs, names):
+            dependencies.add(canonical_name(dependency))
+            if canonical_name(dependency) not in visited:
+                pending.append(dependency)
+    affected = [name for name in params if canonical_name(name) in dependencies]
+    if affected:
+        raise ValueError(
+            "参数影响时间控制（"
+            + "、".join(affected)
+            + "）；请使用 time_step/final_time/saveper 显式设置仿真时间"
+        )
+
+
+def _validate_pysd_time_grid(t0, tf, dt, saveper):
+    """PySD 也必须遵守内置 Euler 使用的保存网格约束。"""
+    for label, ratio in (
+        ("仿真区间/TIME STEP", (tf - t0) / dt),
+        ("SAVEPER/TIME STEP", saveper / dt),
+    ):
+        if not math.isfinite(ratio) or not math.isclose(
+            ratio, round(ratio), rel_tol=1e-9, abs_tol=1e-9
+        ):
+            raise ValueError(f"PySD 要求 {label} 为整数，请调整步长或保存间隔")
+    if saveper < dt:
+        raise ValueError("SAVEPER 不能小于 TIME STEP")
+
+
+def _expected_saved_times(t0, tf, saveper):
+    count = int(math.floor((tf - t0) / saveper + 1e-9)) + 1
+    return [t0 + index * saveper for index in range(count)]
+
+
+def compare_backends(
+    path: Path,
+    variables,
+    params=None,
+    time_step=None,
+    final_time=None,
+    saveper=None,
+    tolerance=1e-10,
+):
+    """用同一 MDL、参数和保存网格逐点比较内置 Euler 与 PySD。
+
+    这是 Python 后端的交叉检查，不把两套实现的一致性冒充原生 Vensim
+    证明。时间网格不一致或差值超过容差时返回失败报告，调用方可据此阻止
+    发布结果。
+    """
+    if isinstance(tolerance, bool) or not isinstance(tolerance, (int, float)):
+        raise ValueError("tolerance 必须是有限非负数")
+    if not math.isfinite(tolerance) or tolerance < 0:
+        raise ValueError("tolerance 必须是有限非负数")
+    options = {
+        key: value
+        for key, value in {
+            "params": params or {},
+            "time_step": time_step,
+            "final_time": final_time,
+            "saveper": saveper,
+        }.items()
+        if value is not None or key == "params"
+    }
+    builtin = run_model(path, variables, backend="builtin", **options)
+    pysd = run_model(path, variables, backend="pysd", **options)
+    if len(builtin.times) != len(pysd.times) or any(
+        not math.isclose(left, right, rel_tol=0, abs_tol=tolerance)
+        for left, right in zip(builtin.times, pysd.times, strict=False)
+    ):
+        raise ValueError("内置 Euler 与 PySD 的保存时刻不一致，不能进行逐点比较")
+    differences = {}
+    for name in variables:
+        differences[name] = max(
+            abs(left - right)
+            for left, right in zip(builtin.series[name], pysd.series[name], strict=False)
+        )
+    maximum = max(differences.values(), default=0.0)
+    return {
+        "pass": maximum <= tolerance,
+        "tolerance": tolerance,
+        "max_absolute_error": maximum,
+        "differences": differences,
+        "variables": list(variables),
+        "saved_points": len(builtin.times),
+        "time_grid": builtin.times,
+        "model_sha256": builtin.metadata["model_sha256"],
+        "builtin": builtin.metadata,
+        "pysd": pysd.metadata,
+        "native_verified": False,
+        "scope": "仅比较当前 MDL 支持子集的 Python 内置 Euler 与 PySD；不等同于原生 Vensim 逐点证明",
+    }
 
 
 def parse_overrides(items):
@@ -89,6 +213,19 @@ def run_model(
         )
     if any(originals[name].is_lookup for name in selected):
         raise ValueError("Lookup 是函数，不能作为标量轨迹导出；请选择调用该表的变量")
+    validate_parameter_time_dependencies(
+        originals,
+        params,
+        overridden=[
+            key
+            for key, value in {
+                "time_step": time_step,
+                "final_time": final_time,
+                "saveper": saveper,
+            }.items()
+            if value is not None
+        ],
+    )
     for name, value in params.items():
         originals[name].rhs = str(value)
     t0, tf, dt, sp = get_time_bounds(originals)
@@ -121,6 +258,7 @@ def run_model(
     elif backend == "pysd":
         if not strict:
             raise ValueError("PySD 后端不支持 --keep-going")
+        _validate_pysd_time_grid(t0, tf, dt, sp)
         try:
             import pysd
         except ImportError as exc:
@@ -154,6 +292,12 @@ def run_model(
             not math.isfinite(value) for values in result.series.values() for value in values
         ):
             raise ValueError("PySD 返回空数据或非有限数值")
+        expected_times = _expected_saved_times(t0, tf, sp)
+        if len(result.times) != len(expected_times) or any(
+            not math.isclose(actual, expected, rel_tol=0, abs_tol=1e-9)
+            for actual, expected in zip(result.times, expected_times, strict=False)
+        ):
+            raise ValueError("PySD 返回的保存网格与请求的 TIME STEP/SAVEPER 不一致")
     else:
         raise ValueError(f"不支持的仿真后端: {backend}")
     if hashlib.sha256(path.read_bytes()).hexdigest() != fingerprint:
@@ -167,6 +311,8 @@ def run_model(
         "final_time": tf,
         "time_unit": originals["INITIAL TIME"].unit if "INITIAL TIME" in originals else "",
         "saveper": sp,
+        "saved_points": len(result.times),
+        "actual_last_time": result.times[-1] if result.times else None,
         "native_verified": False,
         "variables": selected,
         "variable_units": {name: originals[name].unit for name in selected},

@@ -61,12 +61,19 @@ def test_academic_gate_accepts_endogenous_coupling_model(tmp_path):
     assert report["stock_count"] == 1
 
 
-def test_academic_gate_rejects_observed_replay_in_stock_flow(tmp_path):
-    path = tmp_path / "replay.mdl"
+def test_academic_gate_does_not_reject_history_named_endogenous_stock(tmp_path):
+    path = tmp_path / "history_named_stock.mdl"
     path.write_text(
         _model("Observed Stock - 存量") + "Observed Stock = 10\n    ~ Unit\n    |\n",
         encoding="utf-8",
     )
+    report = check_model(path, None, None, False, [], strict_endogenous=True)
+    assert report["pass"] is True
+
+
+def test_academic_gate_rejects_external_data_in_stock_flow(tmp_path):
+    path = tmp_path / "replay.mdl"
+    path.write_text(_model("GET DATA('observations', 'Observed Stock') - 存量"), encoding="utf-8")
     report = check_model(path, None, None, False, [], strict_endogenous=True)
     assert report["pass"] is False
     assert any("历史路径注入" in item for item in report["errors"])
@@ -80,7 +87,7 @@ def test_academic_gate_does_not_bind_general_model_to_one_case(tmp_path):
     )
     report = check_model(path, None, None, False, [])
     assert report["pass"]
-    assert any("边界驱动" in warning for warning in report["warnings"])
+    assert not any("历史路径注入" in warning for warning in report["warnings"])
     report = check_model(path, None, None, True, [])
     assert not report["pass"]
     assert any("明确本项目" in error for error in report["errors"])
@@ -129,6 +136,30 @@ def test_academic_gate_treats_policy_time_switch_as_boundary_input(tmp_path):
     assert report["pass"] is True
     assert not any("按 TIME 分段切换" in warning for warning in report["warnings"])
     assert report["boundary_time_switches"] == ["基础设施投入情景"]
+
+
+def test_academic_gate_time_detection_ignores_variable_name_and_catches_nested_time(tmp_path):
+    path = tmp_path / "time_detection.mdl"
+    path.write_text(
+        _model("流量")
+        + (
+            "adjustment time = 2\n    ~ Year\n    |\n"
+            "模型值 = IF THEN ELSE(MAX(存量, 0) > 0 :AND: Time <= 1, 3, 5)\n"
+            "    ~ Unit/Year\n    |\n"
+        ),
+        encoding="utf-8",
+    )
+    report = check_model(path, None, None, False, [])
+    assert report["boundary_time_switches"] == ["模型值"]
+    assert not any("adjustment time" in warning for warning in report["warnings"])
+
+
+def test_academic_gate_does_not_accept_model_file_as_reference(tmp_path):
+    path = tmp_path / "model.mdl"
+    path.write_text(_model("流量"), encoding="utf-8")
+    report = check_model(path, path, None, False, [])
+    assert report["pass"] is False
+    assert any("没有可读文献文件" in error for error in report["errors"])
 
 
 def test_derived_output_check_uses_project_names_and_dependencies(tmp_path):

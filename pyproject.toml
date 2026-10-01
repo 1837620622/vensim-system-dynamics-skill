@@ -1,3 +1,10 @@
+[project]
+name = "vensim-system-dynamics-skill"
+version = "2.2.3"
+description = "Cross-platform Vensim MDL layout, simulation, audit, and publication workflow"
+requires-python = ">=3.10"
+readme = "README.md"
+
 [tool.ruff]
 target-version = "py310"
 line-length = 100

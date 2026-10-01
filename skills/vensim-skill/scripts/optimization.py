@@ -18,6 +18,17 @@ from vensim_engine import extract_deps, get_time_bounds, load_mdl_text, parse_eq
 STATISTICS = {"initial", "final", "min", "max", "mean", "integral"}
 
 
+class ModelIdentityError(RuntimeError):
+    """搜索期间源模型或单次仿真身份不一致，必须中止而不能记为普通坏分数。"""
+
+
+def _check_model_identity(model, fingerprint, result=None):
+    if hashlib.sha256(model.read_bytes()).hexdigest() != fingerprint or (
+        result is not None and result.metadata.get("model_sha256") != fingerprint
+    ):
+        raise ModelIdentityError("搜索期间源模型发生变化，结果已拒绝发布，请在稳定模型上重跑")
+
+
 def number(value, label, positive=False):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ValueError(f"{label} 必须是有限数值")
@@ -224,7 +235,9 @@ def run_search(
         raise ValueError(
             "预计仿真工作量超过 work_limit；请减少搜索次数，或评估计算资源后显式提高限制"
         )
+    _check_model_identity(model, fingerprint)
     base = run_model(model, variables, backend=backend, **spec.get("time", {}))
+    _check_model_identity(model, fingerprint, base)
     observed, indices = None, None
     if mode == "calibrate":
         if data is None:
@@ -284,6 +297,7 @@ def run_search(
     def evaluate(values):
         nonlocal best
         key = tuple(float(value) for value in values)
+        _check_model_identity(model, fingerprint)
         if key in cache:
             return cache[key]
         if len(trace) >= spec["max_evaluations"]:
@@ -298,6 +312,7 @@ def run_search(
                     model, variables, backend=backend, params=params, **spec.get("time", {})
                 )
             )
+            _check_model_identity(model, fingerprint, result)
             score, residuals = assessment(result)
             feasible = all(value <= 0 for value in residuals) and all(
                 low <= value <= high for value, (low, high) in zip(key, bounds, strict=False)
@@ -345,8 +360,7 @@ def run_search(
         termination = "converged" if solver_success else "solver_stopped"
     except EvaluationBudgetReached:
         pass
-    if hashlib.sha256(model.read_bytes()).hexdigest() != fingerprint:
-        raise ValueError("搜索期间源模型发生变化，结果已拒绝发布，请在稳定模型上重跑")
+    _check_model_identity(model, fingerprint)
     report = {
         "mode": mode,
         "spec": spec,

@@ -65,6 +65,29 @@ def infer_polarity(expression, source, equations):
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
+            and node.func.id.upper()
+            in {
+                "SMOOTH",
+                "SMOOTH3",
+                "SMOOTHI",
+                "SMOOTH3I",
+                "DELAY1",
+                "DELAY3",
+                "DELAY1I",
+                "DELAY3I",
+            }
+            and node.args
+            and not node.keywords
+        ):
+            # 平滑/延迟对输入保持正向单调；延迟时间等其他参数若含有
+            # source，则作用路径不再能由这一条规则证明。
+            rows = [walk(arg) for arg in node.args]
+            if any(row[1] != (0.0, 0.0) for row in rows[1:]):
+                raise ValueError("延迟时间也依赖 source")
+            return rows[0]
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
             and node.func.id in {"_sd_min", "_sd_max"}
             and node.args
             and not node.keywords
@@ -98,20 +121,32 @@ def infer_polarity(expression, source, equations):
 def check_loops(equations, loops):
     if not isinstance(loops, list):
         raise ValueError("feedback_loops 必须是列表")
+    aliases = {canonical_name(name): name for name in equations}
     result = []
     for loop in loops:
         if not isinstance(loop, dict) or set(loop) - {"name", "variables", "polarity"}:
             raise ValueError("回路只接受 name、variables、polarity")
         path = loop.get("variables")
+        resolved_path = (
+            [aliases.get(canonical_name(name)) if isinstance(name, str) else None for name in path]
+            if isinstance(path, list)
+            else None
+        )
         if (
             not isinstance(path, list)
             or len(path) < 1
-            or any(not isinstance(name, str) or name not in equations for name in path)
-            or len(set(path)) != len(path)
+            or any(
+                not isinstance(name, str) or resolved is None
+                for name, resolved in zip(path, resolved_path or [], strict=False)
+            )
+            or resolved_path is None
+            or len(resolved_path) != len(path)
+            or len({canonical_name(name) for name in path}) != len(path)
         ):
             raise ValueError(
                 "回路 variables 至少包含一个真实变量且不能重复；最后一个自动连回第一个"
             )
+        path = resolved_path
         declared = loop.get("polarity")
         if declared is not None and (not isinstance(declared, str) or declared not in {"R", "B"}):
             raise ValueError("回路 polarity 仅支持 R 或 B；不能用顺逆时针代替回路正负")
@@ -188,15 +223,44 @@ def audit_feedback(text, loops=None):
                     )
                 continue
             eq = equations[target]
-            expression = (
-                eq.integ_flow
-                if arrow.is_physical_flow and eq.integ_flow is not None
-                else eq.integ_init_expr
-                if eq.integ_flow is not None
-                else eq.rhs
-            )
+            init_expression = eq.integ_init_expr or ""
+            flow_expression = eq.integ_flow or ""
+            if eq.integ_flow is None:
+                expression = eq.rhs
+                kind = "information"
+            elif arrow.is_physical_flow:
+                expression = flow_expression
+                kind = "flow"
+            else:
+                # 信息箭头指向存量时不能无条件拿初值关系判断。若 source
+                # 只出现在净流率中，它仍是动态作用；只有初值中存在时才标为
+                # initial。两者同时出现则保守地要求人工核对。
+                init_deps = extract_deps(init_expression, set(equations))
+                flow_deps = extract_deps(flow_expression, set(equations))
+                in_init = source in init_deps
+                in_flow = source in flow_deps
+                if in_init and in_flow:
+                    expression = flow_expression
+                    kind = "information"
+                elif in_flow:
+                    expression = flow_expression
+                    kind = "information"
+                else:
+                    expression = init_expression
+                    kind = "initial"
             expression = expression or ""
-            code = int(arrow.fields[6])
+            raw_polarity = arrow.fields[6] if len(arrow.fields) > 6 else "0"
+            try:
+                code = int(raw_polarity or 0)
+            except (TypeError, ValueError):
+                code = -1
+                unresolved.append(
+                    {
+                        "view": view.name,
+                        "arrow": arrow.obj_id,
+                        "reason": "箭头极性字段不是有效字符编码；需要原生核对",
+                    }
+                )
             displayed = chr(code) if 0 < code < 128 else "" if code == 0 else "unsupported"
             exists = source in extract_deps(expression, set(equations))
             expected = infer_polarity(expression, source, equations) if exists else "unknown"
@@ -204,7 +268,9 @@ def audit_feedback(text, loops=None):
             status = (
                 "no_dependency" if not exists else "unmarked" if not displayed else "needs_review"
             )
-            if exists and sign and expected != "unknown":
+            if exists and expected == "0":
+                status = "needs_review" if displayed else "unmarked"
+            elif exists and sign and expected != "unknown":
                 status = "verified" if sign == SIGNS.get(expected) else "conflict"
             rows.append(
                 {
@@ -212,11 +278,7 @@ def audit_feedback(text, loops=None):
                     "arrow": arrow.obj_id,
                     "source": source,
                     "target": target,
-                    "kind": "flow"
-                    if arrow.is_physical_flow
-                    else "initial"
-                    if eq.integ_flow is not None
-                    else "information",
+                    "kind": kind,
                     "displayed": displayed,
                     "expected": expected,
                     "status": status,

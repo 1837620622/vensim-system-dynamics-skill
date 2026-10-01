@@ -1,7 +1,9 @@
 ---
 name: vensim-skill
 description: "Use for Vensim modeling with circular feedback layouts by default, native MDL and shadow-variable repair, polarity and loop checks, Chinese diagrams, reproducible simulation, calibration, policy optimization, sensitivity analysis, and colored Python publication figures on Windows, macOS, or Linux."
-license: "Non-commercial; see LICENSE"
+license: "Non-commercial only; commercial use, paid redistribution, and commercial delivery are prohibited; see LICENSE"
+metadata:
+  version: "2.2.3"
 ---
 
 # Vensim 建模、排版与仿真
@@ -73,6 +75,7 @@ license: "Non-commercial; see LICENSE"
 ./skill.sh visual work/model_layout.mdl --strict --max-crossings 0
 ./skill.sh simulate work/model_layout.mdl --var 目标变量 --output results/base.csv
 ./skill.sh simulate work/model_layout.mdl --backend pysd --var 目标变量 --output results/pysd.csv
+./skill.sh crosscheck work/model_layout.mdl --var 目标变量 --output results/python_crosscheck.json
 ./skill.sh experiment work/model_layout.mdl --spec experiment.json --output-dir results/scenarios
 ./skill.sh convergence work/model_layout.mdl --var 目标变量 --output results/convergence.json
 ./skill.sh calibrate work/model_layout.mdl --spec calibration.json --data observations.csv --output-dir results/calibration

@@ -13,7 +13,7 @@ import random
 from pathlib import Path
 
 from mdl_document import MdlDocument, atomic_write, preflight_outputs, separate_output
-from simulation_runner import run_model
+from simulation_runner import run_model, validate_parameter_time_dependencies
 from vensim_engine import get_time_bounds, parse_equations
 
 MAX_RUNS = 200
@@ -190,9 +190,13 @@ def execute_experiment(
         ):
             raise ValueError(f"无效的时间设置: {name}")
     settings = get_time_bounds(equations)
-    points = (time.get("final_time", settings[1]) - settings[0]) / time.get(
-        "saveper", settings[3]
-    ) + 1
+    for run in runs:
+        validate_parameter_time_dependencies(equations, run["params"], time)
+    effective_final = time.get("final_time", settings[1])
+    effective_saveper = time.get("saveper", settings[3])
+    if effective_final < settings[0]:
+        raise ValueError("FINAL TIME 不能早于 INITIAL TIME")
+    points = math.floor((effective_final - settings[0]) / effective_saveper + 1e-9) + 1
     if points * len(runs) * len(variables) > MAX_EXPERIMENT_VALUES:
         raise ValueError("实验输出过大，请缩短仿真区间、增大保存间隔或减少参数组合")
     series, summary, manifest, results = [], [], [], []
@@ -200,6 +204,13 @@ def execute_experiment(
         _check_model_identity(model, fingerprint)
         result = run_model(model, variables, backend=backend, params=run["params"], **time)
         _check_model_identity(model, fingerprint, result)
+        if not result.times or not math.isclose(
+            result.times[-1], result.metadata["final_time"], rel_tol=0, abs_tol=1e-9
+        ):
+            raise ValueError(
+                "批量摘要需要保存 FINAL TIME；请调整 SAVEPER 或实验时间设置，"
+                "不能把最后保存点误称为终值"
+            )
         result.metadata["experiment_mode"] = spec.get("mode", "scenarios")
         manifest.append({"name": run["name"], **result.metadata})
         results.append((run["name"], result))

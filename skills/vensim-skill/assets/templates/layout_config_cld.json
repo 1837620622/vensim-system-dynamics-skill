@@ -5,6 +5,7 @@
   "rankdir": "LR",
   "nodesep": 0.65,
   "ranksep": 1.05,
+  "graphviz_max_span": 1600,
   "move_stocks": true,
   "lock_node_names": [],
   "lock_object_ids": [],

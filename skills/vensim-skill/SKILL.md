@@ -3,7 +3,7 @@ name: vensim-skill
 description: "Use for Vensim modeling with circular feedback layouts by default, native MDL and shadow-variable repair, polarity and loop checks, Chinese diagrams, reproducible simulation, calibration, policy optimization, sensitivity analysis, and colored Python publication figures on Windows, macOS, or Linux."
 license: "Non-commercial only; commercial use, paid redistribution, and commercial delivery are prohibited; see LICENSE"
 metadata:
-  version: "2.2.4"
+  version: "2.2.5"
 ---
 
 # Vensim 建模、排版与仿真
@@ -26,6 +26,7 @@ metadata:
 11. **逐条核对正负极性与整条回路性质。** 箭头 `+/-` 与回路 `R/B` 分开判断；依据动态方程和适用域，不能用名称、相关性、曲线上升或顺逆时针代替。正负号靠近所属箭头的目标端空白侧，R/B 仅放在已核对回路的内部留白，不压字、不遮线。初值引用不构成动态反馈。未知非线性报告待核对，不硬填符号。原生符号位置必须实际检查。
 
 12. **仿真结果图默认彩色。** 单曲线、情景比较和样本分位带都使用统一的科研配色；图例、编号、线型与曲线同步，不为“高级感”添加渐变背景或装饰。模型结构图仍执行黑色／纯蓝原生箭头规则。数据保持真实，密集编号通过采样点上的位置选择避让。
+13. **情景、策略与模块必须按当前资料声明。** 基准、策略、机制、独立博弈和耦合仿真可以作为任务类型，但不得把任何角色名、参数名、收益公式或耦合接口写成内置特例。先锁定模型哈希、单位、时间网格、接口方向和收敛规则，再分别保存独立与耦合结果，详见 [情景与耦合仿真规范](references/SCENARIO_WORKFLOWS.md)。
 
 ## 先看哪些文件
 
@@ -36,6 +37,7 @@ metadata:
 - Python 结果图、编号图例、DPI 和敏感性：[结果图手册](references/RESULT_PLOTS.md)。
 - 对照文献完善流图、方程与仿真图：[学术表达与文献依据](references/ACADEMIC_PRESENTATION.md)。按当前模型选择，不照抄文献参数或把一种版式写死。
 - PLE 外的参数校准、有约束政策搜索：[Python 高级分析](references/ADVANCED_ANALYSIS.md)。只有明确观测数据、目标或约束时使用；搜索结果不能称为已证明的全局最优。
+- 基准、策略、机制、独立模块和耦合接口：[情景与耦合仿真规范](references/SCENARIO_WORKFLOWS.md)。变量名、单位和参数必须来自当前资料，不套用旧案例。
 - 准备建模或实验 JSON：[输入规范](references/SPECIFICATIONS.md)。
 - 官方格式、版本、Graphviz 和 PySD 边界：[实现依据](references/REFERENCES.md)。
 - 仿真函数、名称、Lookup、时间网格与结果清单：[仿真语义边界](references/SIMULATION_SEMANTICS.md)，改变求解器或涉及延迟、脉冲、查表时阅读。

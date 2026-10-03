@@ -203,11 +203,18 @@ def measure_view(view, clearance=6.0):
                 paths[arrow.obj_id], box(obj, clearance)
             ):
                 collisions.append({"arrow": arrow.obj_id, "object": obj.obj_id})
+    ordered_objects = sorted(objects, key=lambda item: item.line_index)
+    attached_parents = {
+        current.obj_id: previous.obj_id
+        for previous, current in zip(ordered_objects, ordered_objects[1:], strict=False)
+        if previous.kind == 11 and current.kind == 10 and current.attached_to_valve
+    }
     physical_collisions = [
         {"arrow": arrow.obj_id, "object": obj.obj_id}
         for arrow in physical
         for obj in objects
         if obj.obj_id not in (arrow.from_id, arrow.to_id)
+        and attached_parents.get(obj.obj_id) != arrow.from_id
         and path_hits_box(paths[arrow.obj_id], box(obj, clearance))
     ]
     crossings = [
@@ -237,6 +244,20 @@ def measure_view(view, clearance=6.0):
     ]
     shadow_ids = {obj.obj_id for obj in variables if obj.is_shadow}
     shadow_overlaps = [pair for pair in overlaps if shadow_ids.intersection(pair)]
+    # 记录可见对象的实际包围盒。长度和交叉数相同的候选布局中，优先选择
+    # 更紧凑的版面，避免把少量节点拉到画布两端后留下大块空白。
+    object_bounds = bounds(
+        [
+            corner
+            for obj in objects
+            for corner in (
+                (box(obj)[0], box(obj)[1]),
+                (box(obj)[2], box(obj)[3]),
+            )
+        ]
+    )
+    layout_width = max(0.0, object_bounds[2] - object_bounds[0])
+    layout_height = max(0.0, object_bounds[3] - object_bounds[1])
     defined = {}
     names = {}
     for obj in view.objects.values():
@@ -264,12 +285,16 @@ def measure_view(view, clearance=6.0):
         "total_information_length": round(
             sum(path_length(paths[a.obj_id]) for a in information), 2
         ),
+        "layout_bounds": [round(value, 2) for value in object_bounds],
+        "layout_width": round(layout_width, 2),
+        "layout_height": round(layout_height, 2),
+        "layout_span": round(layout_width + layout_height, 2),
         "approximation_tolerance_px": 0.5,
     }
 
 
 def quality_key(metrics):
-    """优先避开文字与断链，再减少交叉，最后缩短路径。"""
+    """优先避开文字与断链，再减少交叉，最后选择紧凑的自然路径。"""
     return (
         len(metrics["broken_arrows"])
         + len(metrics["shadow_inputs"])
@@ -278,6 +303,7 @@ def quality_key(metrics):
         len(metrics["arrow_node_collisions"]) + len(metrics.get("physical_node_collisions", [])),
         len(metrics["arrow_crossings"]) + len(metrics["flow_crossings"]),
         metrics["total_information_length"],
+        metrics.get("layout_span", 0.0),
     )
 
 

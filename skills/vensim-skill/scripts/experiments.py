@@ -204,6 +204,15 @@ def execute_experiment(
         _check_model_identity(model, fingerprint)
         result = run_model(model, variables, backend=backend, params=run["params"], **time)
         _check_model_identity(model, fingerprint, result)
+        # 资源上限必须依据后端实际返回的保存点复核。参数覆盖已经在
+        # run_model 前检查了时间依赖，但后端仍可能因浮点网格或翻译器
+        # 行为返回不同长度；不能只用覆盖前的模型方程估算并放行超大输出。
+        actual_values = len(result.times) * len(runs) * len(variables)
+        if actual_values > MAX_EXPERIMENT_VALUES:
+            raise ValueError(
+                f"实验实际输出过大（{actual_values} > {MAX_EXPERIMENT_VALUES}），"
+                "请缩短仿真区间、增大保存间隔或减少参数组合"
+            )
         if not result.times or not math.isclose(
             result.times[-1], result.metadata["final_time"], rel_tol=0, abs_tol=1e-9
         ):

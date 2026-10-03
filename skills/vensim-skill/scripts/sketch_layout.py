@@ -50,7 +50,12 @@ def control_candidates(view, arrow, config):
     amplitudes.update(
         max(minimum, min(maximum, distance * ratio)) for ratio in (0.07, 0.14, 0.24, 0.36, 0.48)
     )
+    # 直线是原生 Arrow 的合法几何。大型视图先把中点加入候选，只有直线
+    # 会穿过文字、管道或与其他箭头相交时才使用圆弧，避免所有关系被强行
+    # 弯成同一种“AI 弧线”。
     candidates = []
+    if len(view.objects) >= 12:
+        candidates.append((round(left.x + dx * 0.5), round(left.y + dy * 0.5)))
     for amplitude in sorted(amplitudes):
         for direction in (1, -1):
             for fraction in (0.5, 0.35, 0.65):
@@ -128,6 +133,12 @@ def clear_positions(view, proposed, movable, config):
     fixed = [obj for oid, obj in view.objects.items() if oid not in movable and visible(obj)]
     physical = [arrow_path(view, arrow) for arrow in view.arrows if arrow.is_physical_flow]
     placed = list(fixed)
+    placed_positions = {obj.obj_id: (obj.x, obj.y) for obj in fixed}
+    neighbors = {oid: set() for oid in view.objects}
+    for arrow in view.arrows:
+        if arrow.from_id in neighbors and arrow.to_id in neighbors:
+            neighbors[arrow.from_id].add(arrow.to_id)
+            neighbors[arrow.to_id].add(arrow.from_id)
     result = {}
     # 邻居多的节点先落位，参数节点围绕主要结构安排。
     degree = {oid: sum(oid in (a.from_id, a.to_id) for a in view.arrows) for oid in movable}
@@ -141,18 +152,44 @@ def clear_positions(view, proposed, movable, config):
                 candidates.append(
                     (round(x + radius * math.cos(theta)), round(y + radius * math.sin(theta)))
                 )
+        known = [
+            placed_positions[other]
+            for other in sorted(neighbors.get(oid, ()))
+            if other in placed_positions
+        ]
+        if len(view.objects) >= 12 and known:
+            # Graphviz 或旧模型给出的远距离坐标只作为候选；大型视图额外
+            # 尝试围绕已落位的相邻骨架，避免辅助量被拉到画布另一端。
+            center = (
+                sum(point[0] for point in known) / len(known),
+                sum(point[1] for point in known) / len(known),
+            )
+            local_radius = max(clearance * 2, math.hypot(obj.w, obj.h) + clearance * 1.5)
+            candidates.append((round(center[0]), round(center[1])))
+            for angle in range(0, 360, 45):
+                theta = math.radians(angle)
+                candidates.append(
+                    (
+                        round(center[0] + local_radius * math.cos(theta)),
+                        round(center[1] + local_radius * math.sin(theta)),
+                    )
+                )
 
-        def cost(position, obj=obj, origin=(x, y)):
+        def cost(position, obj=obj, origin=(x, y), known=tuple(known)):
             test = dataclasses.replace(obj, x=position[0], y=position[1])
             rect = box(test, clearance / 2)
             collisions = sum(boxes_intersect(rect, box(other, clearance / 2)) for other in placed)
             collisions += sum(path_hits_box(path, rect) for path in physical)
             outside = max(0, obj.w + 24 - position[0]) + max(0, obj.h + 24 - position[1])
+            neighbor_distance = sum(math.dist(position, point) for point in known)
+            if len(view.objects) >= 12 and known:
+                return collisions, round(neighbor_distance, 1), outside, math.dist(position, origin)
             return collisions, outside, math.dist(position, origin)
 
         target = min(candidates, key=cost)
         result[oid] = (round(target[0]), round(target[1]))
         placed.append(dataclasses.replace(obj, x=result[oid][0], y=result[oid][1]))
+        placed_positions[oid] = result[oid]
     return result
 
 
@@ -162,17 +199,38 @@ def graphviz_proposal(view, movable, config, engine):
     positions = graphviz_positions(view, movable, config, engine)
     if not positions:
         return {}
-    # Graphviz 按英寸输出；等比例映射保留宽高关系与文字留白。
-    scale = float(config.get("graphviz_scale", 72))
-    locked = [oid for oid in positions if oid not in movable]
+    # Graphviz 按英寸输出。复杂依赖会产生几十英寸的 rank，若直接乘
+    # 72 写回 MDL 就会得到截图中的超长画布。先按视图规模压缩到有限
+    # 显示跨度，再把可移动节点的中心对齐到当前固定骨架中心；固定的
+    # 存量、阀门和流量文字不改坐标。
+    raw = list(positions.values())
+    raw_min_x, raw_min_y = min(x for x, _ in raw), min(y for _, y in raw)
+    raw_max_x, raw_max_y = max(x for x, _ in raw), max(y for _, y in raw)
+    raw_center = ((raw_min_x + raw_max_x) / 2, (raw_min_y + raw_max_y) / 2)
+    raw_span = max(raw_max_x - raw_min_x, raw_max_y - raw_min_y, 1.0)
+    max_span = float(config.get("graphviz_max_span", 1600))
+    scale = min(float(config.get("graphviz_scale", 72)), max_span / raw_span)
+    locked = [oid for oid in positions if oid not in movable and oid in view.objects]
     if locked:
-        tx = sum(view.objects[oid].x - positions[oid][0] * scale for oid in locked) / len(locked)
-        ty = sum(view.objects[oid].y + positions[oid][1] * scale for oid in locked) / len(locked)
+        target_center = (
+            sum(view.objects[oid].x for oid in locked) / len(locked),
+            sum(view.objects[oid].y for oid in locked) / len(locked),
+        )
     else:
-        tx = 100 - min(x for x, _ in positions.values()) * scale
-        ty = 80 + max(y for _, y in positions.values()) * scale
+        target_nodes = [view.objects[oid] for oid in movable if oid in view.objects]
+        target_center = (
+            (
+                sum(obj.x for obj in target_nodes) / len(target_nodes),
+                sum(obj.y for obj in target_nodes) / len(target_nodes),
+            )
+            if target_nodes
+            else (100.0, 80.0)
+        )
     return {
-        oid: (round(x * scale + tx), round(-y * scale + ty))
+        oid: (
+            round(target_center[0] + (x - raw_center[0]) * scale),
+            round(target_center[1] - (y - raw_center[1]) * scale),
+        )
         for oid, (x, y) in positions.items()
         if oid in movable
     }

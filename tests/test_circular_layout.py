@@ -8,6 +8,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "skills/vensim-skill/scripts"))
 
+import vensim_autolayout  # noqa: E402
 from model_builder import build_model, command_build  # noqa: E402
 from sketch_geometry import measure_view, quality_pass  # noqa: E402
 from vensim_autolayout import (  # noqa: E402
@@ -110,6 +111,57 @@ def test_new_models_default_to_circular_and_allow_local_refinement(tmp_path):
     assert output.read_text() == build_model(spec)
     spec["sketch"] = {"layout_mode": "refine"}
     assert build_model(spec) != output.read_text()
+
+
+def test_large_chinese_stock_backbone_stays_compact_and_connected():
+    stocks = [f"存量{i}" for i in range(1, 10)]
+    variables = [{"name": name, "kind": "stock", "initial": 10, "unit": "Item"} for name in stocks]
+    for index, source in enumerate(stocks):
+        target = stocks[(index + 1) % len(stocks)]
+        variables.append(
+            {
+                "name": f"流量{index + 1}",
+                "kind": "flow",
+                "from": source,
+                "to": target,
+                "equation": f"{source} * 0.1",
+                "unit": "Item/Month",
+            }
+        )
+    spec = {
+        "language": "zh",
+        "name": "大存量骨架",
+        "time": {"initial": 0, "final": 4, "step": 0.25, "saveper": 1, "unit": "Month"},
+        "variables": variables,
+        "links": [],
+    }
+    text = build_model(spec)
+    view = parse_views(text.splitlines(True), set(stocks))[0]
+    stock_objects = [obj for obj in view.objects.values() if obj.stock_like]
+    metrics = measure_view(view)
+    assert len(stock_objects) == len(stocks)
+    assert len({obj.x for obj in stock_objects}) > 2
+    assert len({obj.y for obj in stock_objects}) > 2
+    assert metrics["layout_span"] < 1800
+
+
+def test_graphviz_mapping_has_a_finite_display_span(monkeypatch):
+    from sketch_layout import graphviz_proposal
+
+    view = parse_views(
+        diagram(
+            [word(index, f"变量{index}", index * 100, 100) for index in range(1, 9)], []
+        ).splitlines(True)
+    )[0]
+    movable = dict(view.objects)
+
+    def fake_graphviz_positions(*args, **kwargs):
+        return {obj_id: (index * 0.1, index * 50.0) for index, obj_id in enumerate(view.objects)}
+
+    monkeypatch.setattr(vensim_autolayout, "graphviz_positions", fake_graphviz_positions)
+    positions = graphviz_proposal(view, movable, {"graphviz_max_span": 120}, "dot")
+    assert max(y for _, y in positions.values()) - min(y for _, y in positions.values()) <= 120
+    assert max(x for x, _ in positions.values()) - min(x for x, _ in positions.values()) <= 120
 
 
 def test_build_preserves_explicit_positions_even_when_they_overlap(tmp_path):
@@ -234,6 +286,7 @@ def test_native_example_is_reproducible_and_parameters_stay_near_targets():
         {"max_allowed_crossings": False},
         {"circular_gap": math.inf},
         {"circular_aspect": 0},
+        {"graphviz_max_span": 0},
     ],
 )
 def test_layout_rejects_ambiguous_or_invalid_configuration(config):

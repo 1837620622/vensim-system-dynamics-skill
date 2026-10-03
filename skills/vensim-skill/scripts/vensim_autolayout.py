@@ -724,6 +724,7 @@ def validate_config(config):
         "maximum_curve_pixels",
         "curve_strength",
         "graphviz_scale",
+        "graphviz_max_span",
         "nodesep",
         "ranksep",
         "circular_gap",

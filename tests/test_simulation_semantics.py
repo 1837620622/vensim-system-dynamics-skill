@@ -241,6 +241,28 @@ def test_experiment_rejects_parameter_horizon_and_unsaved_final(tmp_path):
         )
 
 
+def test_experiment_rechecks_actual_backend_output_cap(tmp_path, monkeypatch):
+    model = model_file(tmp_path, "Output=2~Item~|")
+    original = experiments.run_model
+    monkeypatch.setattr(experiments, "MAX_EXPERIMENT_VALUES", 10)
+
+    def backend_returns_extra_points(*args, **kwargs):
+        result = original(*args, **kwargs)
+        result.times = [0, 1, 2, 3, 4, 4]
+        result.series["Output"] = [2] * len(result.times)
+        result.metadata["saved_points"] = len(result.times)
+        return result
+
+    monkeypatch.setattr(experiments, "run_model", backend_returns_extra_points)
+    with pytest.raises(ValueError, match="实际输出过大"):
+        execute_experiment(
+            model,
+            {"variables": ["Output"], "scenarios": [{"name": "a"}, {"name": "b"}]},
+            tmp_path / "too-large",
+        )
+    assert not (tmp_path / "too-large").exists()
+
+
 @pytest.mark.parametrize("workflow", ["experiment", "convergence"])
 @pytest.mark.parametrize("changed_run", [1, 2])
 def test_batch_source_changes_fail_before_publishing(tmp_path, monkeypatch, workflow, changed_run):

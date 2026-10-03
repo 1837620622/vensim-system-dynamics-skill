@@ -179,11 +179,118 @@ def _model_text(spec):
         positions[oid] = (round(x), round(y))
         return oid
 
-    for index, (name, item) in enumerate(stocks.items()):
-        x, y = item.get("position", [340 + index * 400, 220])
+    # 默认存量骨架使用有限宽度的横向分行布局。旧的固定 400 单位间隔
+    # 对多存量模型会制造超宽画布，随后所有辅助量只能在骨架下方拉成长线。
+    # 这里的数值只来自字体和排版留白，不代表任何业务数据；显式 position
+    # 仍完全由用户控制并保持不动。
+    stock_items = list(stocks.items())
+    stock_widths = {name: max(40, len(name) * 6 + 12) * font_scale for name, _ in stock_items}
+    layout_gap = max(96.0, float(sketch_options.get("node_spacing", 24)) * 4)
+    stock_neighbors = {name: set() for name in stocks}
+    stock_outgoing = {name: set() for name in stocks}
+    for flow in flows.values():
+        source, target = flow.get("from"), flow.get("to")
+        if source in stocks and target in stocks:
+            stock_neighbors[source].add(target)
+            stock_neighbors[target].add(source)
+            stock_outgoing[source].add(target)
+    remaining = set(stocks)
+    stock_components = []
+    while remaining:
+        start = min(remaining)
+        component, pending = set(), [start]
+        while pending:
+            name = pending.pop()
+            if name in component:
+                continue
+            component.add(name)
+            pending.extend(stock_neighbors[name] - component)
+        remaining -= component
+        stock_components.append(component)
+
+    def component_order(component):
+        """稳定地沿存量流向排列链或反馈环，避免按字典顺序打乱管道。"""
+        start = min(component, key=lambda name: (-len(stock_neighbors[name]), name))
+        order, seen, current, previous = [], set(), start, None
+        while current not in seen:
+            order.append(current)
+            seen.add(current)
+            options = stock_neighbors[current] - seen
+            if previous is not None and len(options) > 1:
+                options -= {previous}
+            if not options:
+                break
+            current = min(
+                options,
+                key=lambda name: (
+                    name not in stock_outgoing[current],
+                    -len(stock_neighbors[name]),
+                    name,
+                ),
+            )
+            previous = order[-1]
+        return order + sorted(component - seen)
+
+    def contains_cycle(component):
+        """按有向存量流识别反馈环，覆盖两个存量互相作用的边界情况。"""
+        visiting, visited = set(), set()
+
+        def visit(name):
+            if name in visiting:
+                return True
+            if name in visited:
+                return False
+            visiting.add(name)
+            if any(visit(target) for target in stock_outgoing[name] & component):
+                return True
+            visiting.remove(name)
+            visited.add(name)
+            return False
+
+        return any(visit(name) for name in component)
+
+    default_positions = {}
+    cursor_x, cursor_y = 340.0 - stock_widths[stock_items[0][0]] / 2, 220.0
+    for component in stock_components:
+        order = component_order(component)
+        widths = [stock_widths[name] for name in order]
+        has_cycle = len(component) > 1 and contains_cycle(component)
+        if has_cycle:
+            # 反馈环按实际存量连接围成紧凑椭圆；半径由文字框和环上留白决定。
+            circumference = sum(width + layout_gap for width in widths)
+            radius_x = max(
+                (max(widths) + layout_gap) / (2 * math.sin(math.pi / len(order))),
+                circumference / math.tau,
+            )
+            radius_y = max(radius_x * 0.8, max(widths) + layout_gap)
+            center_x, center_y = cursor_x + radius_x, cursor_y + radius_y
+            for index, name in enumerate(order):
+                angle = -math.pi / 2 + math.tau * index / len(order)
+                default_positions[name] = [
+                    round(center_x + radius_x * math.cos(angle)),
+                    round(center_y + radius_y * math.sin(angle)),
+                ]
+            cursor_x += 2 * radius_x + layout_gap
+        else:
+            # 无反馈环的存量链沿同一基线排列；组件之间只在需要时换行，
+            # 不把不相干的模块挤到同一条长对角线上。
+            x = cursor_x
+            for name, width in zip(order, widths, strict=False):
+                default_positions[name] = [round(x + width / 2), round(cursor_y)]
+                x += width + layout_gap
+            cursor_x = x + layout_gap
+        if cursor_x > 1600:
+            cursor_x = 340.0
+            cursor_y += max(widths, default=40) + layout_gap * 2
+    for name, item in stock_items:
+        x, y = item.get("position", default_positions[name])
         ids[name] = object_record(
             10, name, x, y, max(40, len(name) * 6 + 12) * font_scale, 22 * font_scale, 3
         )
+    stock_center = (
+        sum(positions[ids[name]][0] for name in stocks) / len(stocks),
+        sum(positions[ids[name]][1] for name in stocks) / len(stocks),
+    )
     for name, flow in flows.items():
         source = ids.get(flow.get("from"))
         target = ids.get(flow.get("to"))
@@ -197,11 +304,24 @@ def _model_text(spec):
         tx, ty = positions[target]
         x, y = (sx + tx) / 2, (sy + ty) / 2
         valve = object_record(11, "0", x, y, 6, 8, 34, 1)
+        label_x, label_y = x, y + 30 * font_scale
+        if flow.get("from") in stocks and flow.get("to") in stocks:
+            # 环形存量骨架中，流量文字沿管道法向朝外放置，避免压住相邻
+            # 存量。边界源/汇保留原生示例的下方附着位置。
+            dx, dy = tx - sx, ty - sy
+            distance = math.hypot(dx, dy)
+            if distance > 1:
+                nx, ny = -dy / distance, dx / distance
+                radial = (x - stock_center[0], y - stock_center[1])
+                if nx * radial[0] + ny * radial[1] < 0:
+                    nx, ny = -nx, -ny
+                offset = max(30 * font_scale, layout_gap * 0.8)
+                label_x, label_y = x + nx * offset, y + ny * offset
         ids[name] = object_record(
             10,
             name,
-            x,
-            y + 30 * font_scale,
+            label_x,
+            label_y,
             max(30, len(name) * 6) * font_scale,
             12 * font_scale,
             40,

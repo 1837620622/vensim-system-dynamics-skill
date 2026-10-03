@@ -95,6 +95,8 @@ Install Vensim through its [official distribution](https://vensim.com/download/)
 
 The [main Skill](skills/vensim-skill/SKILL.md) and [appearance manual](skills/vensim-skill/references/APPEARANCE.md) define the workflow. Geometry reports support review; they cannot guarantee zero crossings for arbitrary networks or replace native visual inspection.
 
+The [scenario and coupling guide](skills/vensim-skill/references/SCENARIO_WORKFLOWS.md) defines baseline, policy, mechanism, independent game, and coupled runs without baking in business names or values. Every module interface must declare variables, units, time alignment, direction, and convergence evidence; Chinese names remain the default unless English is requested.
+
 Native circular demonstration, exported from the corresponding real MDL:
 
 ![Native Vensim circular feedback example](docs/assets/circular_feedback_native.svg)
@@ -298,6 +300,8 @@ The built-in Python Euler engine is the default simulation path for reproducible
 The [academic presentation guide](skills/vensim-skill/references/ACADEMIC_PRESENTATION.md) connects diagram, equation, initial-condition, unit, experiment, and figure reporting to primary literature. References guide documentation and validation; they do not provide transferable business assumptions. Supporting manuals are primarily Chinese; both README versions describe the same implementation and limits.
 
 ## Upgrade notes
+
+**v2.2.5** repairs a large-model layout regression: new multi-stock backbones no longer use a fixed oversized horizontal spacing, feedback stock components are packed from their actual connections, flow labels are placed outside ring pipes, and large fixed skeletons place auxiliaries near local anchors. Straight arrows remain candidates when they are clearer than artificial arcs, and geometry reports record the visible canvas span. Batch experiments recheck the output cap against the saved points returned by each backend. The release adds a business-name-neutral guide for baseline, strategy, independent-module, and coupled simulations while keeping Chinese business variables as the default.
 
 **v2.2.4** hardens the feedback audit's malformed-input paths: missing arrow fields no longer cause indexing errors, and zero derivatives or stock links present in both the initial expression and dynamic flow are reported as `needs_review` instead of being treated as verified. This patch does not change equations, layout, or simulation results.
 

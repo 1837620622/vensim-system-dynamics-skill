@@ -94,6 +94,8 @@ cd vensim-system-dynamics-skill\skills\vensim-skill
 
 完整约束见 [SKILL.md](skills/vensim-skill/SKILL.md) 和 [图面规则与返工判据](skills/vensim-skill/references/APPEARANCE.md)。规则既约束 Agent 工作流，也有对应几何检查和不变量测试；不能承诺任意复杂网络自动得到零交叉结果。
 
+基准、策略、机制、独立博弈和耦合仿真的变量边界、接口单位、时间对齐、收敛记录与发布门禁见 [情景与耦合仿真规范](skills/vensim-skill/references/SCENARIO_WORKFLOWS.md)。这些名称只代表任务类型，Skill 不内置任何旧案例的变量名或业务数值。
+
 Vensim 原生导出的库存示例（对应 [MDL](skills/vensim-skill/assets/examples/inventory_zh.mdl)，[验收记录](docs/native_example_verification.json)）：
 
 ![Vensim 原生库存模型](docs/assets/inventory_native.svg)
@@ -312,6 +314,8 @@ Python 内置 Euler 是默认仿真通道，适合批量实验和发布结果；
 文献提供表达和验证依据；业务方程、参数、实验幅度仍从当前任务取得。数学符号、中文 MDL 名称、CSV 列和图例保持对应。代码不会为了拟合参考图的外形修改仿真数值；原生检查、跨后端数值比较与研究有效性分别报告。
 
 ## 兼容性与升级说明
+
+`v2.2.5` 修复大型中文模型的布局回归：新建多存量骨架不再使用固定超宽间隔，反馈存量组件按真实连接紧凑排列，流量文字沿管道外侧避让；大型固定骨架的辅助量按局部锚点就近排版，圆弧候选保留清晰直线，布局质量报告新增实际画布跨度。批量实验在每次后端返回后再次按实际保存点核对输出上限。新增不绑定业务名称的情景、策略、独立模块与耦合仿真规范，默认业务变量仍为中文，用户指定英文时才切换。
 
 `v2.2.4` 继续收紧反馈审计的异常路径：缺字段箭头不再触发索引错误，零导数和同时存在于初值/动态流率的存量关系统一进入 `needs_review`，不会被误报为已核对。该补丁不改变方程、布局或仿真结果。
 

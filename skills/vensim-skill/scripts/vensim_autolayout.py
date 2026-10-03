@@ -4,7 +4,7 @@
 依据 Vensim 官方 Sketch Format / Sketch Object Detail / Arrow Class 文档实现：
   - 解析草图对象(10 变量 / 11 阀门 / 12 源汇云图注释 / 1 箭头)的真实字段；
   - 按 thick 区分物理流率管道与信息箭头，不把接入阀门的信息线错判为管道；
-  - 默认局部避让辅助量和影子，库存/阀门/云/流率标签锁定，Graphviz 可选；
+  - 默认局部避让辅助量和影子，库存/阀门/云/流率标签锁定；
   - 只为信息箭头生成单个中间控制点，使普通 Arrow 显示为平滑圆弧；
   - 按真实圆弧检查穿字与交叉，优先局部调整与短路径；
   - 不改方程区，不新建/删除对象，不改箭头 from/to，不覆盖输入文件。
@@ -20,17 +20,12 @@ import hashlib
 import json
 import math
 import re
-import shlex
-import shutil
-
-# 仅调用 argparse choices 限定的 Graphviz 可执行文件。
-import subprocess  # nosec B404
 import sys
 from collections.abc import Iterable
 from pathlib import Path
 
 from mdl_document import MdlDocument, atomic_write, preflight_outputs, separate_output
-from sketch_geometry import arrow_path, measure_view, quality_pass
+from sketch_geometry import arrow_path, measure_view, quality_pass, visible
 
 # 草图起始标记（.mdl 中写作 \\\---///）
 SKETCH_MARKER = r"\\\---///"
@@ -64,12 +59,6 @@ OBJECT_TYPES = {T_VARIABLE, T_VALVE, T_SOURCE_SINK, *T_OTHER}
 # field[7] = thick(线宽)。物理流率管道 thick=22，信息箭头 thick=0。
 # 官方格式中 thick 大于 20 才是双线；整数阈值从 21 开始。
 FLOW_THICK_THRESHOLD = 21
-MAX_GRAPHVIZ_NODES = 1_000
-MAX_GRAPHVIZ_EDGES = 5_000
-MAX_DOT_LABEL_CHARS = 256
-GRAPHVIZ_TIMEOUT_SECONDS = 20
-ALLOWED_RANKDIR = {"TB", "BT", "LR", "RL"}
-
 # shape 字段位标志：低 5 位为形状码；bit6(1<<5=32)=附着到阀门；bit7=形状由类型决定
 SHAPE_ATTACHED_TO_VALVE = 32
 SHAPE_MASK = 31
@@ -355,7 +344,7 @@ def load_mdl(path: Path) -> tuple[list[str], list[View]]:
 
 
 # ---------------------------------------------------------------------------
-# 节点选择与 Graphviz 布局
+# 节点选择
 # ---------------------------------------------------------------------------
 
 
@@ -389,122 +378,6 @@ def eligible_movable_nodes(view: View, config: dict) -> dict[int, Obj]:
     return selected
 
 
-def graph_nodes_for_layout(view: View, movable: dict[int, Obj]) -> dict[int, Obj]:
-    """参与 Graphviz 布局计算的节点：所有变量+阀门，边只用信息箭头。
-
-    物理流率管道会主导图结构并压扁辅助变量层级，因此布局只用信息箭头作为约束，
-    但阀门节点仍参与计算以便辅助变量相对阀门定位。
-    """
-    nodes: dict[int, Obj] = {}
-    for obj_id, obj in view.objects.items():
-        if obj.kind in (T_VARIABLE, T_VALVE):
-            nodes[obj_id] = obj
-    return nodes
-
-
-def _quote_dot(identifier: str) -> str:
-    escaped = (
-        identifier.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\r", " ")
-        .replace("\n", "\\n")
-        .replace("\t", " ")
-    )
-    return '"' + escaped + '"'
-
-
-def _dot_label(label: str) -> str:
-    cleaned = "".join(ch if ch >= " " else " " for ch in label)
-    if len(cleaned) > MAX_DOT_LABEL_CHARS:
-        cleaned = cleaned[:MAX_DOT_LABEL_CHARS] + "..."
-    return cleaned
-
-
-def graphviz_positions(
-    view: View,
-    movable: dict[int, Obj],
-    config: dict,
-    engine: str,
-) -> dict[int, tuple[float, float]]:
-    if engine not in {"dot", "neato", "fdp", "sfdp"}:
-        raise ValueError("不支持的 Graphviz 引擎")
-    if shutil.which(engine) is None:
-        raise RuntimeError(
-            f"Graphviz 可执行文件 '{engine}' 未找到。请安装 Graphviz 并将其加入 PATH。"
-        )
-
-    nodes = graph_nodes_for_layout(view, movable)
-    if not nodes:
-        return {}
-
-    rankdir = str(config.get("rankdir", "LR")).upper()
-    if rankdir not in ALLOWED_RANKDIR:
-        raise ValueError(f"rankdir 仅支持: {', '.join(sorted(ALLOWED_RANKDIR))}")
-    nodesep = float(config.get("nodesep", 0.65))
-    ranksep = float(config.get("ranksep", 1.05))
-    if len(nodes) > MAX_GRAPHVIZ_NODES:
-        raise RuntimeError(f"Graphviz 节点过多: {len(nodes)} > {MAX_GRAPHVIZ_NODES}")
-    edge_count = sum(
-        1
-        for arrow in view.arrows
-        if not arrow.is_physical_flow and arrow.from_id in nodes and arrow.to_id in nodes
-    )
-    if edge_count > MAX_GRAPHVIZ_EDGES:
-        raise RuntimeError(f"Graphviz 边过多: {edge_count} > {MAX_GRAPHVIZ_EDGES}")
-
-    dot_lines = [
-        "digraph G {",
-        f"graph [rankdir={rankdir}, nodesep={nodesep}, ranksep={ranksep}, "
-        "splines=true, overlap=false, start=42];",
-        "node [shape=box, width=1.1, height=0.4, fixedsize=false];",
-    ]
-    for obj_id, obj in nodes.items():
-        if obj.kind == T_VARIABLE:
-            label = _dot_label(obj.name) or f"var{obj_id}"
-        else:
-            label = f"valve_{obj_id}"
-        dot_lines.append(
-            f"{_quote_dot(f'n{obj_id}')} [label={_quote_dot(label)}, "
-            f"width={max(0.4, 2 * obj.w / 72):.3f}, height={max(0.3, 2 * obj.h / 72):.3f}];"
-        )
-
-    # 只用信息箭头作为布局约束，避免物理管道压扁层级
-    for arrow in view.arrows:
-        if arrow.is_physical_flow:
-            continue
-        if arrow.from_id in nodes and arrow.to_id in nodes:
-            dot_lines.append(
-                f"{_quote_dot(f'n{arrow.from_id}')} -> {_quote_dot(f'n{arrow.to_id}')} [weight=4];"
-            )
-    dot_lines.append("}")
-
-    # engine 由 argparse choices 限定为 dot/neato/fdp/sfdp，且 shell=False。
-    try:
-        result = subprocess.run(  # nosec B603
-            [engine, "-Tplain"],
-            input="\n".join(dot_lines),
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=GRAPHVIZ_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"Graphviz 运行超时: {GRAPHVIZ_TIMEOUT_SECONDS} 秒") from exc
-    if result.returncode != 0:
-        raise RuntimeError(f"Graphviz 运行失败: {result.stderr.strip()}")
-
-    positions: dict[int, tuple[float, float]] = {}
-    for line in result.stdout.splitlines():
-        if not line.startswith("node "):
-            continue
-        parts = shlex.split(line)
-        if len(parts) < 4 or not parts[1].startswith("n"):
-            continue
-        obj_id = _safe_int(parts[1][1:], -1)
-        positions[obj_id] = (_safe_float(parts[2]), _safe_float(parts[3]))
-    return positions
-
-
 # ---------------------------------------------------------------------------
 # 回写
 # ---------------------------------------------------------------------------
@@ -516,6 +389,64 @@ def update_obj_line(line: str, x: float, y: float) -> str:
     fields[3] = str(int(round(x)))
     fields[4] = str(int(round(y)))
     return ",".join(fields) + ending
+
+
+def update_obj_hidden_line(line: str, depth: int = 1) -> str:
+    """按 Vensim Hide Depth 字段隐藏一个草图对象。
+
+    隐藏只改变草图外观，绝不删除对象、改名或改动方程区；深度只会增加，
+    因而不会意外把用户已经隐藏到更深层的对象重新显示出来。
+    """
+    ending = _line_ending(line)
+    fields = re.split(r',(?=(?:[^"]*"[^"]*")*[^"]*$)', _line_body(line))
+    if len(fields) <= 9:
+        return line
+    fields[9] = str(max(depth, _safe_int(fields[9])))
+    return ",".join(fields) + ending
+
+
+def update_arrow_hidden_line(line: str, depth: int = 1) -> str:
+    """按 Vensim Hide Depth 字段隐藏一个箭头，保留其余字段逐字节语义。"""
+    ending = _line_ending(line)
+    try:
+        fields, tail = split_arrow_record(_line_body(line))
+    except ValueError:
+        return line
+    if len(fields) <= 5:
+        return line
+    fields[5] = str(max(depth, _safe_int(fields[5])))
+    return ",".join(fields) + "|" + tail + ending
+
+
+def apply_shadow_visibility(lines: list[str], view: View, policy: str) -> list[int]:
+    """依据官方 Hide/Unhide 语义隐藏影子实例，返回隐藏的对象 ID。
+
+    'orphan' 只隐藏没有任何可见入/出线的影子，适合清理跨视图重复文字；
+    'all' 是显式的强隐藏模式，会连同该影子的出入箭头一起隐藏；
+    'preserve' 完全保留原视图。合法影子不被删除，也不会被转换成 Defined。
+    """
+    if policy == "preserve":
+        return []
+    shadows = [obj for obj in view.objects.values() if obj.is_shadow and visible(obj)]
+    if not shadows:
+        return []
+    incident = {obj.obj_id: [] for obj in shadows}
+    for arrow in view.arrows:
+        if not visible(arrow):
+            continue
+        if arrow.from_id in incident:
+            incident[arrow.from_id].append(arrow)
+        if arrow.to_id in incident:
+            incident[arrow.to_id].append(arrow)
+    targets = [obj for obj in shadows if policy == "all" or not incident[obj.obj_id]]
+    hidden_ids = []
+    for obj in targets:
+        lines[obj.line_index] = update_obj_hidden_line(lines[obj.line_index])
+        hidden_ids.append(obj.obj_id)
+        if policy == "all":
+            for arrow in incident[obj.obj_id]:
+                lines[arrow.line_index] = update_arrow_hidden_line(lines[arrow.line_index])
+    return hidden_ids
 
 
 def restyle_arrow_line(line: str, config: dict) -> str:
@@ -711,22 +642,28 @@ def validate_config(config):
         "auto",
         "preserve",
         "refine",
+        # 旧配置兼容别名；实际使用 native-auto，不再调用 Graphviz。
         "graphviz",
         "circular",
     }:
-        raise ValueError("layout_mode 必须是 auto/preserve/refine/graphviz/circular")
+        raise ValueError("layout_mode 必须是 auto/preserve/refine/circular；graphviz 仅为迁移别名")
     if config.get("style", "preserve") not in {"academic", "monochrome", "native-blue", "preserve"}:
         raise ValueError("style 必须是 monochrome/native-blue/preserve")
+    shadow_visibility = config.get("shadow_visibility", "orphan")
+    if shadow_visibility not in {"preserve", "orphan", "all"}:
+        raise ValueError("shadow_visibility 必须是 preserve/orphan/all")
+    if {"graphviz_scale", "graphviz_max_span", "rankdir", "nodesep", "ranksep"}.intersection(
+        config
+    ):
+        raise ValueError(
+            "Graphviz 坐标参数已移除；请使用 native circular/refine 布局和 node_positions"
+        )
     for key in (
         "clearance",
         "node_spacing",
         "minimum_curve_pixels",
         "maximum_curve_pixels",
         "curve_strength",
-        "graphviz_scale",
-        "graphviz_max_span",
-        "nodesep",
-        "ranksep",
         "circular_gap",
         "circular_aspect",
     ):
@@ -775,7 +712,7 @@ def command_layout(
     path: Path,
     output: Path,
     config_path: Path | None = None,
-    engine: str = "dot",
+    _engine: str | None = None,
     route_information_arrows: bool = True,
     mode=None,
     style=None,
@@ -802,9 +739,7 @@ def command_layout(
     }
     if missing:
         raise ValueError("锚点变量未出现在所选视图: " + ", ".join(sorted(missing)))
-    if any(
-        len(v.objects) > MAX_GRAPHVIZ_NODES or len(v.arrows) > MAX_GRAPHVIZ_EDGES for v in selected
-    ):
+    if any(len(v.objects) > 2_000 or len(v.arrows) > 10_000 for v in selected):
         raise ValueError("草图超过布局规模上限，请先按子系统拆分视图")
     report_path = output.with_suffix(output.suffix + ".layout_report.json")
     preflight_outputs(
@@ -822,24 +757,46 @@ def command_layout(
         "output": str(output),
         "encoding": document.encoding,
         "equation_sha256": hashlib.sha256(document.equation_bytes).hexdigest(),
+        "shadow_visibility": config.get("shadow_visibility", "orphan"),
         "native_verified": False,
         "views": [],
     }
     for view in selected:
-        item = optimize_view(lines, view, config, engine, route_information_arrows)
+        item = optimize_view(lines, view, config, route_information_arrows)
         item["view"] = view.name
+        item["view_index"] = view.index
         item["pass"] = quality_pass(item["after"], config.get("max_allowed_crossings", 0))
         report["views"].append(item)
-    data = document.encode(lines)
+    hidden_by_view = {
+        view.index: apply_shadow_visibility(lines, view, config.get("shadow_visibility", "orphan"))
+        for view in selected
+    }
     updated = parse_views(lines, parse_stock_names(document.semantic_text))
+    for item in report["views"]:
+        new_view = updated[item["view_index"]]
+        item["after"] = measure_view(new_view, float(config.get("clearance", 6)))
+        item["pass"] = quality_pass(item["after"], config.get("max_allowed_crossings", 0))
+        item["hidden_shadow_ids"] = hidden_by_view.get(item["view_index"], [])
     for old, new in zip(views, updated, strict=False):
         if set(old.objects) != set(new.objects) or [
             (a.obj_id, a.from_id, a.to_id) for a in old.arrows
         ] != [(a.obj_id, a.from_id, a.to_id) for a in new.arrows]:
             raise ValueError("草图结构不变量校验失败，已拒绝写入")
+        for left, right in zip(old.objects.values(), new.objects.values(), strict=False):
+            if len(left.raw_fields) != len(right.raw_fields):
+                raise ValueError("草图对象字段数量改变，已拒绝写入")
+            if any(
+                left.raw_fields[index] != right.raw_fields[index]
+                for index in range(len(left.raw_fields))
+                if index not in (3, 4, 9)
+            ):
+                raise ValueError("草图对象语义字段改变，已拒绝写入")
         for left, right in zip(old.arrows, new.arrows, strict=False):
-            if any(left.fields[i] != right.fields[i] for i in (5, 6, 9, 12)):
+            if any(left.fields[i] != right.fields[i] for i in (6, 9, 12)):
                 raise ValueError("箭头极性、延迟、隐藏或字体改变，已拒绝写入")
+            if left.fields[5] != right.fields[5] and config.get("shadow_visibility") != "all":
+                raise ValueError("箭头隐藏层级改变，必须显式使用 shadow_visibility=all")
+    data = document.encode(lines)
     report["equations_preserved"] = True
     report["topology_preserved"] = True
     report["pass"] = all(item["pass"] for item in report["views"])
@@ -881,11 +838,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit = sub.add_parser("audit", help="审计箭头对象引用。")
     p_audit.add_argument("model", type=Path)
 
-    p_layout = sub.add_parser("layout", help="应用保守的 Graphviz 辅助布局与信息箭头弧线。")
+    p_layout = sub.add_parser("layout", help="应用骨架优先的本地布局与信息箭头弧线。")
     p_layout.add_argument("model", type=Path)
     p_layout.add_argument("--output", required=True, type=Path)
     p_layout.add_argument("--config", type=Path)
-    p_layout.add_argument("--engine", default="dot", choices=["dot", "neato", "fdp", "sfdp"])
     p_layout.add_argument(
         "--route-information-arrows",
         "--route",
@@ -932,7 +888,7 @@ def main() -> int:
             args.model,
             args.output,
             args.config,
-            args.engine,
+            None,
             args.route_information_arrows,
             args.mode,
             args.style,

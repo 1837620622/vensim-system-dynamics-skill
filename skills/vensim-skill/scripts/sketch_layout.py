@@ -158,8 +158,8 @@ def clear_positions(view, proposed, movable, config):
             if other in placed_positions
         ]
         if len(view.objects) >= 12 and known:
-            # Graphviz 或旧模型给出的远距离坐标只作为候选；大型视图额外
-            # 尝试围绕已落位的相邻骨架，避免辅助量被拉到画布另一端。
+            # 旧模型给出的远距离坐标只作为候选；大型视图额外尝试围绕
+            # 已落位的相邻骨架，避免辅助量被拉到画布另一端。
             center = (
                 sum(point[0] for point in known) / len(known),
                 sum(point[1] for point in known) / len(known),
@@ -193,54 +193,14 @@ def clear_positions(view, proposed, movable, config):
     return result
 
 
-def graphviz_proposal(view, movable, config, engine):
-    from vensim_autolayout import graphviz_positions
-
-    positions = graphviz_positions(view, movable, config, engine)
-    if not positions:
-        return {}
-    # Graphviz 按英寸输出。复杂依赖会产生几十英寸的 rank，若直接乘
-    # 72 写回 MDL 就会得到截图中的超长画布。先按视图规模压缩到有限
-    # 显示跨度，再把可移动节点的中心对齐到当前固定骨架中心；固定的
-    # 存量、阀门和流量文字不改坐标。
-    raw = list(positions.values())
-    raw_min_x, raw_min_y = min(x for x, _ in raw), min(y for _, y in raw)
-    raw_max_x, raw_max_y = max(x for x, _ in raw), max(y for _, y in raw)
-    raw_center = ((raw_min_x + raw_max_x) / 2, (raw_min_y + raw_max_y) / 2)
-    raw_span = max(raw_max_x - raw_min_x, raw_max_y - raw_min_y, 1.0)
-    max_span = float(config.get("graphviz_max_span", 1600))
-    scale = min(float(config.get("graphviz_scale", 72)), max_span / raw_span)
-    locked = [oid for oid in positions if oid not in movable and oid in view.objects]
-    if locked:
-        target_center = (
-            sum(view.objects[oid].x for oid in locked) / len(locked),
-            sum(view.objects[oid].y for oid in locked) / len(locked),
-        )
-    else:
-        target_nodes = [view.objects[oid] for oid in movable if oid in view.objects]
-        target_center = (
-            (
-                sum(obj.x for obj in target_nodes) / len(target_nodes),
-                sum(obj.y for obj in target_nodes) / len(target_nodes),
-            )
-            if target_nodes
-            else (100.0, 80.0)
-        )
-    return {
-        oid: (
-            round(target_center[0] + (x - raw_center[0]) * scale),
-            round(target_center[1] - (y - raw_center[1]) * scale),
-        )
-        for oid, (x, y) in positions.items()
-        if oid in movable
-    }
-
-
-def optimize_view(lines, view, config, engine, route=True):
+def optimize_view(lines, view, config, route=True):
     from vensim_autolayout import eligible_movable_nodes, parse_views, update_obj_line
 
     movable = eligible_movable_nodes(view, config)
-    mode = config.get("layout_mode", "refine")
+    requested_mode = config.get("layout_mode", "refine")
+    # 旧配置中的 graphviz 只保留为迁移别名；所有位置都由本地、可复现
+    # 的骨架/邻域算法生成，避免外部样条和节点尺度把 MDL 拉成超宽长图。
+    mode = "auto" if requested_mode == "graphviz" else requested_mode
     anchors = {}
     for name, point in config.get("node_positions", {}).items():
         matches = [oid for oid, obj in view.objects.items() if obj.name == name]
@@ -262,13 +222,21 @@ def optimize_view(lines, view, config, engine, route=True):
                 ("circular", clear_positions(working, proposed, free, config))
                 for proposed in circular_proposals(working, free, config)
             ]
-        if mode in ("auto", "graphviz") and free:
-            graph = graphviz_proposal(working, free, config, engine)
-            proposals.append(("graphviz", clear_positions(working, graph, free, config)))
+        if mode == "auto" and free:
+            from circular_layout import circular_proposals
+
+            proposals.extend(
+                (
+                    "native-circular",
+                    clear_positions(working, proposed, free, config),
+                )
+                for proposed in circular_proposals(working, free, config)
+            )
     if anchors:
         proposals = [(label, {**positions, **anchors}) for label, positions in proposals]
-    if mode == "graphviz" and free:
-        proposals = proposals[-1:]
+    if requested_mode == "graphviz" and free:
+        # 明确使用旧别名时仍只接受本地候选，不再尝试外部布局器。
+        proposals = [proposal for proposal in proposals if proposal[0] != "original"]
     evaluated = []
     stock_names = next(iter(view.objects.values())).stock_names if view.objects else set()
     # 原图也作为候选：在自动模式下不因美化而恶化碰撞指标。
@@ -297,7 +265,11 @@ def optimize_view(lines, view, config, engine, route=True):
             if not arrow.is_physical_flow:
                 lines[arrow.line_index] = restyle_arrow_line(lines[arrow.line_index], config)
     return {
-        "strategy": best[1],
+        "strategy": (
+            "native-auto"
+            if requested_mode == "graphviz" and best[1] == "native-circular"
+            else best[1]
+        ),
         "moved_auxiliary_nodes": sum(
             (view.objects[oid].x, view.objects[oid].y) != pos for oid, pos in best[3].items()
         ),

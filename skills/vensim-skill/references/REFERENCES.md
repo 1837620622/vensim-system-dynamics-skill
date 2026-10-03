@@ -40,11 +40,9 @@
 
 实现与统计边界见 [Python 高级分析](ADVANCED_ANALYSIS.md)。
 
-## Graphviz
+## 原生布局边界
 
-[属性参考](https://graphviz.org/doc/info/attrs.html) 和 [FAQ](https://graphviz.org/faq/) 说明坐标、pin 和布局后处理的边界。Graphviz 的位置单位需换算，固定节点仍可能受坐标变换影响。本工具只取节点位置建议，再依据原生圆弧路由；不直接写入 Graphviz 样条，不把 Graphviz 的图作为最终结构图。
-
-新建默认 circular 与已有图的局部 refine 都不依赖 Graphviz。[Graphviz circo](https://graphviz.org/docs/layouts/circo/) 可作为多循环结构的布局参考，`oneblock` 可以控制是否强制同圆；本项目的 circular 为独立标准库实现，保留 SFD 骨架并把外围参数放在作用对象附近，不调用 circo，也不宣称复现其算法。任何全局模式都不保证消除所有交叉。超复杂视图应拆分，工具报告不能替代原生视觉验收。
+本项目不再调用 Graphviz，也不把外部布局器的节点坐标或样条写回 MDL。原因是 Graphviz 不知道 Vensim 的存量、阀门、实体管道、附着流量文字、Hide Depth 与原生单控制点圆弧语义，容易产生超宽画布、长对角线和视觉上像云团的结果。`circular` 使用标准库实现的连接排序、存量—流量骨架、局部锚点和大型模块圆角边界；`refine` 使用同一套文字框、管道和圆弧碰撞门禁。复杂模型应拆分为多个 View；Vensim 官方也建议用 View 按子系统讲清楚模型，而不是把所有关系压进一张图。
 
 ## PySD 与 MCP
 

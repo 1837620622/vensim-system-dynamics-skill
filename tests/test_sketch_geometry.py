@@ -180,6 +180,43 @@ def test_shadow_of_stock_can_move_but_stock_stays_locked(tmp_path):
     assert objects[2].is_shadow
 
 
+def test_orphan_shadow_uses_native_hide_depth_without_changing_topology(tmp_path):
+    source, target = tmp_path / "shadow.mdl", tmp_path / "hidden.mdl"
+    source.write_text(
+        "A=1~Unit~|\n" + sketch([node(1, "A", 150, 150), node(2, "A", 300, 150, bits=2)], [])
+    )
+    command_layout(source, target, mode="preserve")
+    before = load_mdl(source)[1][0]
+    after = load_mdl(target)[1][0]
+    assert before.objects[2].is_shadow and after.objects[2].is_shadow
+    assert before.objects[2].raw_fields[9] == "0"
+    assert int(after.objects[2].raw_fields[9]) >= 1
+    metrics = measure_view(after)
+    assert metrics["shadow_objects"] == [{"id": 2, "variable": "A", "hidden": True}]
+    assert metrics["hidden_shadow_objects"] == [{"id": 2, "variable": "A"}]
+    assert [(a.from_id, a.to_id, a.fields[6], a.fields[9]) for a in before.arrows] == [
+        (a.from_id, a.to_id, a.fields[6], a.fields[9]) for a in after.arrows
+    ]
+
+
+def test_hiding_connected_shadows_requires_explicit_all_and_hides_incident_arrows(tmp_path):
+    source, target = tmp_path / "shadow.mdl", tmp_path / "hidden.mdl"
+    source.write_text(
+        "A=1~Unit~|\nB=A~Unit~|\n"
+        + sketch(
+            [node(1, "A", 150, 150), node(2, "A", 150, 150, bits=2), node(3, "B", 450, 150)],
+            [arrow(4, 2, 3)],
+        )
+    )
+    config = tmp_path / "layout.json"
+    config.write_text('{"layout_mode":"preserve","shadow_visibility":"all"}')
+    command_layout(source, target, config)
+    after = load_mdl(target)[1][0]
+    assert int(after.objects[2].raw_fields[9]) >= 1
+    assert int(after.arrows[0].fields[5]) >= 1
+    assert [(a.from_id, a.to_id) for a in after.arrows] == [(2, 3)]
+
+
 def test_style_defaults_and_pure_blue():
     from vensim_autolayout import split_arrow_record
 

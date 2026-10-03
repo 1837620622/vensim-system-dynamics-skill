@@ -64,9 +64,9 @@
 - `lock_object_ids` 适合同名影子实例，`lock_node_names` 适合锁定该名字的全部实例。
 - `node_positions` 只用于指定名字在选定 View 中唯一且可移动的实例。歧义必须明确，不能猜测用户希望移动哪个影子。
 - `move_shadows` 默认开启独立避让，不能改变影子身份；关闭时将冲突留给人工处理并报告。
-- `layout_mode` 取 `circular`、`refine`、`preserve`、`auto`、`graphviz`。对已有 MDL 默认 `refine`；新建 `build` 默认 `circular`。`style` 默认保留，黑色用 `monochrome`，纯蓝用 `native-blue`。
+- `layout_mode` 取 `circular`、`refine`、`preserve`、`auto`。对已有 MDL 默认 `refine`；新建 `build` 默认 `circular`。旧配置中的 `graphviz` 只作为迁移别名，不调用外部布局器。`style` 默认保留，黑色用 `monochrome`，纯蓝用 `native-blue`。
 - `circular_gap` 与 `circular_aspect` 分别调节环形留白和高宽比，默认值同建模 JSON；环的实际半径依据当前文字框和节点数计算。
-- `graphviz_scale` 与 `graphviz_max_span` 只控制 Graphviz 节点坐标映射到原生草图的显示尺度；复杂图会按上限压缩，Graphviz 边样条不会写回 MDL。它们不改变模型语义，也不代表业务空间尺度。
+- `shadow_visibility` 取 `preserve`、`orphan` 或 `all`。前两者不隐藏有合法出线的影子；`all` 只在用户明确要求减少当前 View 杂乱时使用，并按照 Vensim Hide Depth 同时隐藏该影子的出入箭头。隐藏不改变方程、变量身份或拓扑。
 - `clearance`、`node_spacing`、圆弧强度和上下限按字体、长变量名、反馈跨度调整，不是美观的固定公式。
 
 未知路由保持几何并报告；明确选择颜色时只改颜色字段。圆弧与原生文字边界之间仍可能存在渲染差异，最终以原生图面为准。

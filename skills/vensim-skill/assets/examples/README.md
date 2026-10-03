@@ -50,7 +50,6 @@ cp ../templates/layout_config_sfd.json my_layout.json
 python ../../scripts/vensim_autolayout.py layout <model.mdl> \
   --output <model>_autolayout.mdl \
   --config my_layout.json \
-  --engine dot \
   --route-information-arrows
 ```
 

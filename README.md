@@ -2,9 +2,9 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
-面向 Agent 的专业 Vensim 建模与仿真 Skill。直接处理可编辑的 `.mdl`，新建默认中文业务变量、中文视图和环形反馈布局，支持原生圆弧、影子变量避让、情景实验、参数校准、政策优化与 Python 论文图件。Windows、macOS、Linux 共用 Python 核心；MCP 是可选接入方式。
+面向 Agent 的专业 Vensim 建模与仿真 Skill。直接处理可编辑的 `.mdl`，新建默认中文业务变量、中文视图和骨架优先的自然反馈布局，支持原生圆弧、影子变量避让与 Hide Depth、情景实验、参数校准、政策优化与 Python 论文图件。Windows、macOS、Linux 共用 Python 核心；MCP 是可选接入方式。
 
-**最终模型结构图必须来自真实 MDL 在 Vensim 原生打开后的导出或截图。** Graphviz 只用于辅助定位；工具生成的几何预览不能代替原生图。项目为独立实现，与 Ventana Systems 无隶属或认证关系。
+**最终模型结构图必须来自真实 MDL 在 Vensim 原生打开后的导出或截图。** 几何预览只能用于定位问题；项目布局不调用 Graphviz，也不会把外部样条写回 MDL。项目为独立实现，与 Ventana Systems 无隶属或认证关系。
 
 **作者：传康KK（万能程序员） · 禁止商业使用。** 使用与分发须遵守 [非商业许可证](LICENSE)，保留作者及许可证信息；作者署名放在文档中，不叠加到模型图上。
 
@@ -39,7 +39,7 @@ vensim-system-dynamics-skill/
 
 ## 安装与运行
 
-需要 Python 3.10+。检查、局部布局、建模、内置仿真只依赖标准库。Graphviz、绘图、PySD 和 MCP 按需安装。
+需要 Python 3.10+。检查、局部布局、建模、内置仿真只依赖标准库。绘图、PySD、SciPy 和 MCP 按需安装；布局不需要 Graphviz。
 
 ```bash
 npx skills add 1837620622/vensim-system-dynamics-skill --skill vensim-skill
@@ -74,21 +74,20 @@ cd vensim-system-dynamics-skill\skills\vensim-skill
 | PySD 翻译与仿真 | pysd | `python -m pip install -r requirements/pysd.txt` |
 | 参数校准与政策优化 | scipy | `python -m pip install -r requirements/analysis.txt` |
 | 本地 stdio MCP | MCP Python SDK 1.x | `python -m pip install -r requirements/mcp.txt` |
-| 全局节点位置建议 | Graphviz | macOS：`brew install graphviz`；Windows：使用 [官方安装包](https://graphviz.org/download/)，将 `dot` 加入 PATH |
 
 安装 Vensim 请使用 [官方渠道](https://vensim.com/download/)，并遵守其独立许可。公开版本线为 Vensim 10.5，[官方会议资源](https://vensim.com/conference/) 注明 DSS 10.5.2；本机原生检查环境为 PLE 10.5.0。下载页与发布说明可能更新不同步，应核对实际产品通道与安装版本。平台自动化测试不等于每个版本的原生 UI 都已实测。
 
-可选依赖引用 `requirements/constraints.txt` 中的已知安全修复下限，不要求核心安装整套科学计算或 MCP 包。`doctor` 会报告解释器、Graphviz、可选包、原生 Vensim 与中文绘图字体。中文绘图前还会按实际文字检查字形覆盖。
+可选依赖引用 `requirements/constraints.txt` 中的已知安全修复下限，不要求核心安装整套科学计算或 MCP 包。`doctor` 会报告解释器、可选包、原生 Vensim 与中文绘图字体。中文绘图前还会按实际文字检查字形覆盖。
 
 ## 外观规则
 
-- **新建默认环形布局。** 反馈链按实际连接沿环展开，外围参数就近放置；不同模块独立组织，SFD 的存量、阀门与实体管道保留骨架。不为凑圆形增删关系或把全部变量塞进同一个圆。
+- **新建默认采用骨架优先的自然布局。** 小型反馈链可沿椭圆阅读；存量、阀门与实体管道始终是 SFD 骨架，较大的模块改用局部锚点或圆角边界。不为凑圆形增删关系或把全部变量塞进同一个云团。
 - 新图默认黑色信息箭头，纯蓝 `0-0-255` 为可选样式；去掉深蓝“学术配色”默认值。实体流量保持黑色双线与原生阀门。
 - 对照原生箭头的颜色继承、线宽、头部、极性和延迟设置；颜色配置不得覆盖所选黑色/纯蓝方案，不强行放大箭头或加粗全部连线。
 - 默认中文业务变量，用户指定英文时使用英文；既有模型保留原变量名。
 - 存量—流量是稳定骨架；参数靠近作用对象，初值靠近存量。先局部避让，不把图铺成机械网格，也不加入随机抖动。
 - 普通箭头按三点圆弧计算碰撞，避免把控制点错当 Bézier 手柄。双向关系分开走，优先无交叉、无穿字、无大跨度包围弧。
-- 按 View 和对象 ID 处理影子实例；可移动的影子独立避让，保持引用身份与出线。影子入线报错，不能靠隐藏全部影子或合并同名对象掩盖冲突。
+- 按 View 和对象 ID 处理影子实例；可移动的影子独立避让，保持引用身份与出线。无出线的重复影子默认按原生 Hide Depth 隐藏，有出线影子只有在 `shadow_visibility: all` 明确启用时才连同箭头隐藏。影子入线报错，不能靠合并同名对象掩盖冲突。
 - 不在图上新增调试编号、生成过程、无依据的回路符号、作者水印和大段注释。已有必要的因果极性与延迟标记保留。
 - 字体大小、文字边界、长变量名和影子括号一起检查；换字体后重新审图。布局按内容调整，不固定业务参数、不照搬示例坐标。
 
@@ -121,7 +120,7 @@ Vensim 原生导出的库存示例（对应 [MDL](skills/vensim-skill/assets/exa
 ./skill.sh layout existing.mdl --output work/circular.mdl --mode circular --style monochrome
 ```
 
-环形布局使用 Python 标准库，不要求 Graphviz。它是本 Skill 的显示默认，不代表 Vensim 官方要求所有模型都呈正圆，也不自动证明回路性质。
+布局使用 Python 标准库，不要求 Graphviz。`circular` 是本 Skill 的显示入口，但会根据规模在局部锚点、椭圆和圆角边界之间选择，不代表 Vensim 官方要求所有模型都呈正圆，也不自动证明回路性质。
 
 ## 从中文模型到实验结果
 
@@ -194,17 +193,17 @@ Vensim 原生导出的库存示例（对应 [MDL](skills/vensim-skill/assets/exa
 ./skill.sh visual work/reviewed.mdl --strict --max-crossings 0
 ```
 
-| 模式 | 行为 | Graphviz |
+| 模式 | 行为 | 外部依赖 |
 | --- | --- | --- |
 | `preserve` | 节点不动，整理支持的信息圆弧 | 不需要 |
 | `refine`（默认） | 就近避让辅助量和影子重叠，整理圆弧 | 不需要 |
 | `circular` | 按实际连接组织反馈环与外围参数，保留固定骨架 | 不需要 |
-| `auto` | 比较原图、局部方案和 Graphviz 位置建议 | 有可移动节点时需要 |
-| `graphviz` | 明确采用全局节点位置建议，再按原生圆弧路由 | 需要 |
+| `auto` | 比较原图、局部方案和本地骨架候选 | 不需要 |
+| `graphviz` | 旧配置迁移别名，等同本地 `auto` | 不调用 |
 
 默认样式 `preserve` 保留原颜色；统一黑色用 `monochrome`，纯蓝信息箭头用 `native-blue`。支持的单控制点信息线可重路由；未知、多点、正交等路由的端点保守锁定，另行原生核验。管道、阀门和附着流量文字默认不移动。
 
-使用 `--config` 读取 [SFD 配置](skills/vensim-skill/assets/templates/layout_config_sfd.json)。`lock_node_names`、`lock_object_ids` 保护人工位置；`move_shadows` 控制影子避让；`node_positions` 指定唯一可移动变量的坐标。
+使用 `--config` 读取 [SFD 配置](skills/vensim-skill/assets/templates/layout_config_sfd.json)。`lock_node_names`、`lock_object_ids` 保护人工位置；`move_shadows` 控制影子避让；`shadow_visibility` 取 `preserve`、`orphan`（默认）或显式的 `all`；`node_positions` 指定唯一可移动变量的坐标。旧 `graphviz_scale`、`graphviz_max_span`、`rankdir`、`nodesep`、`ranksep` 参数会被拒绝，避免继续产生外部布局结果。
 
 输出为新 MDL 和 `.mdl.layout_report.json`。报告包含方程哈希、编码、拓扑校验、前后碰撞、交叉、影子实例和未支持的形状。输入文件不覆盖，因此不会在原目录生成冗余 `.backup.mdl`。
 
@@ -314,6 +313,8 @@ Python 内置 Euler 是默认仿真通道，适合批量实验和发布结果；
 文献提供表达和验证依据；业务方程、参数、实验幅度仍从当前任务取得。数学符号、中文 MDL 名称、CSV 列和图例保持对应。代码不会为了拟合参考图的外形修改仿真数值；原生检查、跨后端数值比较与研究有效性分别报告。
 
 ## 兼容性与升级说明
+
+`v2.2.6` 移除 Graphviz 布局调用。`auto` 现在只比较确定性的本地候选：存量—流量骨架、局部锚点、实际文字框和原生单控制点圆弧；旧 `graphviz` 模式仅保留为迁移别名，不启动外部程序。大型连通模块使用局部排布或圆角边界，避免超宽长线、规则大圆和云团。影子处理遵循 Vensim Hide Depth：默认 `shadow_visibility: orphan` 只隐藏没有可见入/出线的重复影子，`all` 需显式选择并连同出入箭头隐藏，不改变方程、对象身份或端点。几何报告新增可见/隐藏影子区分，并加入外部布局独立性与隐藏拓扑回归。
 
 `v2.2.5` 修复大型中文模型的布局回归：新建多存量骨架不再使用固定超宽间隔，反馈存量组件按真实连接紧凑排列，流量文字沿管道外侧避让；大型固定骨架的辅助量按局部锚点就近排版，圆弧候选保留清晰直线，布局质量报告新增实际画布跨度。批量实验在每次后端返回后再次按实际保存点核对输出上限。新增不绑定业务名称的情景、策略、独立模块与耦合仿真规范，默认业务变量仍为中文，用户指定英文时才切换。
 

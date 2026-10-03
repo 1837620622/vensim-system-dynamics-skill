@@ -1,4 +1,4 @@
-"""直接从 MDL 几何生成可检查的 SVG，不把 Graphviz 图冒充原生草图。"""
+"""直接从 MDL 几何生成可检查的 SVG，不把调试预览冒充原生草图。"""
 
 from __future__ import annotations
 

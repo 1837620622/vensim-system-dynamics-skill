@@ -1,4 +1,4 @@
 interface:
   display_name: "Vensim 建模与仿真"
-  short_description: "中文 MDL 默认环形反馈布局、原生圆弧与影子修复、可复现仿真和论文图件"
-  default_prompt: "使用 $vensim-skill，根据当前资料建立中文 MDL，默认按真实反馈关系采用环形布局，参数就近放置且尊重指定坐标；核对箭头正负、回路 R/B 及原生符号位置、字体、连线与仿真，不套用旧案例数值，再输出无标题的彩色结果图。"
+  short_description: "中文 MDL 骨架优先自然布局、原生圆弧与影子处理、可复现仿真和论文图件"
+  default_prompt: "使用 $vensim-skill，根据当前资料建立中文 MDL，默认按真实存量—流量骨架和反馈关系自然排版；参数就近放置，影子按官方 Hide Depth 规则处理且不改方程；核对箭头正负、回路 R/B、字体、连线与仿真，不套用旧案例数值，再输出无标题的彩色结果图。"

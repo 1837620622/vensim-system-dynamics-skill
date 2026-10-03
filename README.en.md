@@ -2,9 +2,9 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
-A reusable Agent Skill for editable Vensim `.mdl` models, native sketch repair, reproducible simulation, calibration, policy optimization, and Python publication figures. New models use Chinese business variable names and circular feedback layouts by default. Windows, macOS, and Linux share the same Python implementation. MCP is optional.
+A reusable Agent Skill for editable Vensim `.mdl` models, native sketch repair, reproducible simulation, calibration, policy optimization, and Python publication figures. New models use Chinese business variable names and a skeleton-first natural feedback layout by default. Windows, macOS, and Linux share the same Python implementation. MCP is optional.
 
-**Final model structure figures must be exported or captured from the actual delivered MDL opened in native Vensim.** Graphviz may suggest node positions; a generated geometry preview does not qualify as a final model diagram. This project is independent of Ventana Systems and is not an official or certified Vensim product.
+**Final model structure figures must be exported or captured from the actual delivered MDL opened in native Vensim.** Geometry previews are for diagnostics only; this layout path does not call Graphviz or write external splines into MDL. This project is independent of Ventana Systems and is not an official or certified Vensim product.
 
 **Author: 传康KK（万能程序员）. Commercial use is prohibited.** Follow the [non-commercial license](LICENSE) and retain attribution and license notices when redistributing. Attribution belongs in documentation rather than over model figures.
 
@@ -75,21 +75,20 @@ All platforms may run `python scripts/skill_cli.py doctor`. Quote paths containi
 | PySD translation and simulation | PySD | `python -m pip install -r requirements/pysd.txt` |
 | Calibration and policy search | SciPy | `python -m pip install -r requirements/analysis.txt` |
 | Local stdio MCP | MCP Python SDK 1.x | `python -m pip install -r requirements/mcp.txt` |
-| Global position proposals | Graphviz | macOS: `brew install graphviz`; Windows: [official installation](https://graphviz.org/download/), with `dot` on PATH |
 
 Optional requirements reference `requirements/constraints.txt`, including lower bounds for known security fixes. The constraints file does not install packages by itself. An older MCP SDK is rejected at server startup.
 
 Install Vensim through its [official distribution](https://vensim.com/download/) and observe its separate license. Official materials describe the 10.5 release line, and the [conference resources](https://vensim.com/conference/) identify DSS 10.5.2 for the Agent workshop. Native example checks in this repository used macOS PLE 10.5.0. Download pages, release notes, and installed product channels may differ; inspect the actual environment before making compatibility claims.
 
-`doctor` reports Python, optional packages, Graphviz executables, detected native applications, and available plotting fonts. It also checks installed dependencies against `requirements/constraints.txt`, distinguishing missing packages, versions requiring upgrades, and version formats needing review. This is a local constraint check, not a live vulnerability database scan. Export checks the glyphs actually needed by a figure. Python font availability does not prove that native Vensim renders the same names correctly.
+`doctor` reports Python, optional packages, detected native applications, and available plotting fonts. It also checks installed dependencies against `requirements/constraints.txt`, distinguishing missing packages, versions requiring upgrades, and version formats needing review. This is a local constraint check, not a live vulnerability database scan. Export checks the glyphs actually needed by a figure. Python font availability does not prove that native Vensim renders the same names correctly.
 
 ## Native diagram rules
 
-- New models use circular feedback layouts by default. Arrange the actual main feedback chain around a ring, keep parameters near their targets, and organize separate modules independently. Keep stocks, valves, clouds, and physical flow pipes as a readable backbone. Do not add relationships to make a circle.
+- New models use a skeleton-first natural feedback layout by default. Small feedback chains may use an ellipse; stocks, valves, clouds, and physical flow pipes remain the SFD backbone, while larger modules use local anchors or a rounded perimeter. Do not add relationships to make a circle or pack every variable into one cloud.
 - New information arrows are black. Pure native blue `0-0-255` is an explicit alternative. Physical flow pipes remain black double lines with native valves. Preserve arrowhead, polarity, delay, hide, and font fields when changing appearance.
 - New business variables and view names default to Chinese. Use English when requested. Preserve names in existing models and their equation/CSV/script mappings.
-- Ordinary one-control-point arrows use native circular geometry. Graphviz splines must not be written as Vensim arcs. Keep unsupported and multi-point routes intact and report them for native review.
-- Track each shadow by `(View, object ID)`. Its name refers to a model variable; its coordinates belong to that particular sketch instance. Shadows may have outgoing arrows and must not receive incoming arrows.
+- Ordinary one-control-point arrows use native circular geometry. External layout splines are never written as Vensim arcs. Keep unsupported and multi-point routes intact and report them for native review.
+- Track each shadow by `(View, object ID)`. Its name refers to a model variable; its coordinates belong to that particular sketch instance. Shadows may have outgoing arrows and must not receive incoming arrows. Unused duplicate shadows may be hidden with Hide Depth; connected shadows require explicit policy.
 - Check text overlap, shadow brackets, line crossings, pipes through text, misplaced labels, and long names. Recheck geometry after font changes.
 - Keep necessary polarity and delay markings. Add no debug IDs, generation notes, decorative icons, unsupported loop symbols, author watermarks, or paragraphs of captions inside diagrams.
 
@@ -111,7 +110,7 @@ Native circular demonstration, exported from the corresponding real MDL:
 | Manual positions | Preserve explicit `position` | `node_positions` for unambiguous existing instances |
 | Remaining conflicts | Report object IDs and preserve model meaning | Native edits, separate views, or valid shadow references |
 
-Circular layout uses the standard library. It is this Skill's display default, not a requirement imposed by Vensim or a proof of feedback polarity. Conflicting manual anchors remain in place and produce a failed geometry report.
+Layout uses the standard library. `circular` is this Skill's display entry point, not a requirement imposed by Vensim or a proof of feedback polarity. Depending on scale it chooses local anchors, an ellipse, or a rounded perimeter. Conflicting manual anchors remain in place and produce a failed geometry report.
 
 ## Building and repairing models
 
@@ -128,13 +127,13 @@ The builder requires stock initial conditions and units, flow equations and stoc
 
 The builder targets simple scalar SFDs. It does not infer research mechanisms or parameter values, build arbitrary multi-view networks, or implement shared complex piping. Use an existing MDL and native editing for advanced structures. See [input specifications](skills/vensim-skill/references/SPECIFICATIONS.md).
 
-| Layout mode | Behavior | Graphviz required |
+| Layout mode | Behavior | External dependency |
 | --- | --- | --- |
 | `preserve` | Keep nodes; refine supported information arcs | No |
 | `refine` | Move local auxiliaries and shadows to nearby free space | No |
 | `circular` | Circular organization based on actual connections | No |
-| `auto` | Compare original, local, and global position candidates | When movable nodes need a global candidate |
-| `graphviz` | Explicit global positions followed by native routing | Yes |
+| `auto` | Compare original, local, and native skeleton candidates | No |
+| `graphviz` | Legacy migration alias for native `auto` | Never called |
 
 Existing-model style defaults to `preserve`; select `monochrome` for black or `native-blue` for blue information arrows. Layout writes a new MDL and `.mdl.layout_report.json`, preserving the equation bytes, encoding, topology, polarity, and shadow identity. No automatic backup copy is needed because inputs are not overwritten.
 
@@ -300,6 +299,8 @@ The built-in Python Euler engine is the default simulation path for reproducible
 The [academic presentation guide](skills/vensim-skill/references/ACADEMIC_PRESENTATION.md) connects diagram, equation, initial-condition, unit, experiment, and figure reporting to primary literature. References guide documentation and validation; they do not provide transferable business assumptions. Supporting manuals are primarily Chinese; both README versions describe the same implementation and limits.
 
 ## Upgrade notes
+
+**v2.2.6** removes Graphviz from the layout path. `auto` now compares deterministic native Python candidates built from the stock-flow backbone, local anchors, text boxes, and native single-control-point arcs; the old `graphviz` mode remains only as a migration alias and never starts an external executable. Large connected modules use local placement or a rounded perimeter instead of a rigid oversized ring. Shadow handling follows Vensim Hide Depth: `shadow_visibility: orphan` hides only unused shadow instances by default, while `all` is explicit and hides incident arrows without changing equations, object identity, or endpoints. Geometry reports now distinguish visible and hidden shadows, and the release adds regressions for topology-preserving shadow hiding and external-layout independence.
 
 **v2.2.5** repairs a large-model layout regression: new multi-stock backbones no longer use a fixed oversized horizontal spacing, feedback stock components are packed from their actual connections, flow labels are placed outside ring pipes, and large fixed skeletons place auxiliaries near local anchors. Straight arrows remain candidates when they are clearer than artificial arcs, and geometry reports record the visible canvas span. Batch experiments recheck the output cap against the saved points returned by each backend. The release adds a business-name-neutral guide for baseline, strategy, independent-module, and coupled simulations while keeping Chinese business variables as the default.
 

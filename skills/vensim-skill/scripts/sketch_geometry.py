@@ -242,6 +242,7 @@ def measure_view(view, clearance=6.0):
     shadow_inputs = [
         a.obj_id for a in information if a.to_id in view.objects and view.objects[a.to_id].is_shadow
     ]
+    all_shadows = [obj for obj in view.objects.values() if obj.kind == 10 and obj.is_shadow]
     shadow_ids = {obj.obj_id for obj in variables if obj.is_shadow}
     shadow_overlaps = [pair for pair in overlaps if shadow_ids.intersection(pair)]
     # 记录可见对象的实际包围盒。长度和交叉数相同的候选布局中，优先选择
@@ -280,7 +281,11 @@ def measure_view(view, clearance=6.0):
         "shadow_overlaps": shadow_overlaps,
         "duplicate_defined": duplicate_defined,
         "shadow_objects": [
-            {"id": obj.obj_id, "variable": obj.name} for obj in variables if obj.is_shadow
+            {"id": obj.obj_id, "variable": obj.name, "hidden": not visible(obj)}
+            for obj in all_shadows
+        ],
+        "hidden_shadow_objects": [
+            {"id": obj.obj_id, "variable": obj.name} for obj in all_shadows if not visible(obj)
         ],
         "total_information_length": round(
             sum(path_length(paths[a.obj_id]) for a in information), 2

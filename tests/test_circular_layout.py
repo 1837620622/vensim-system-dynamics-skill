@@ -8,7 +8,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "skills/vensim-skill/scripts"))
 
-import vensim_autolayout  # noqa: E402
 from model_builder import build_model, command_build  # noqa: E402
 from sketch_geometry import measure_view, quality_pass  # noqa: E402
 from vensim_autolayout import (  # noqa: E402
@@ -145,23 +144,26 @@ def test_large_chinese_stock_backbone_stays_compact_and_connected():
     assert metrics["layout_span"] < 1800
 
 
-def test_graphviz_mapping_has_a_finite_display_span(monkeypatch):
-    from sketch_layout import graphviz_proposal
-
-    view = parse_views(
+def test_auto_layout_has_a_finite_native_display_span(tmp_path, monkeypatch):
+    """auto 不再启动 Graphviz，仍能由本地候选给出有限画布。"""
+    monkeypatch.setenv("PATH", "")
+    source, target = tmp_path / "source.mdl", tmp_path / "target.mdl"
+    source.write_text(
         diagram(
-            [word(index, f"变量{index}", index * 100, 100) for index in range(1, 9)], []
-        ).splitlines(True)
-    )[0]
-    movable = dict(view.objects)
-
-    def fake_graphviz_positions(*args, **kwargs):
-        return {obj_id: (index * 0.1, index * 50.0) for index, obj_id in enumerate(view.objects)}
-
-    monkeypatch.setattr(vensim_autolayout, "graphviz_positions", fake_graphviz_positions)
-    positions = graphviz_proposal(view, movable, {"graphviz_max_span": 120}, "dot")
-    assert max(y for _, y in positions.values()) - min(y for _, y in positions.values()) <= 120
-    assert max(x for x, _ in positions.values()) - min(x for x, _ in positions.values()) <= 120
+            [word(index, f"变量{index}", index * 100, 100) for index in range(1, 9)],
+            [link(20 + index, index, index + 1) for index in range(1, 8)],
+        )
+    )
+    command_layout(source, target, mode="auto")
+    after = load_mdl(target)[1][0]
+    metrics = measure_view(after)
+    assert metrics["layout_span"] < 1800
+    assert all(
+        candidate["strategy"] != "graphviz"
+        for candidate in json.loads(target.with_suffix(".mdl.layout_report.json").read_text())[
+            "views"
+        ][0]["candidates"]
+    )
 
 
 def test_build_preserves_explicit_positions_even_when_they_overlap(tmp_path):
@@ -282,6 +284,7 @@ def test_native_example_is_reproducible_and_parameters_stay_near_targets():
         {"routing_passes": True},
         {"node_positions": {"A": [True, 200]}},
         {"move_stocks": "false"},
+        {"shadow_visibility": "always"},
         {"max_allowed_crossings": -1},
         {"max_allowed_crossings": False},
         {"circular_gap": math.inf},

@@ -183,6 +183,45 @@ def _local_anchor_positions(component, movable, nodes, neighbors, outgoing, gap,
     return positions
 
 
+def _perimeter_positions(order, nodes, center, gap):
+    """在圆角矩形的四条边上布置自由节点。
+
+    大型 CLD 如果把所有节点放在同一个椭圆上，长名称会挤成一团，
+    交叉边也会被迫绕过整张图。圆角矩形保留反馈的环绕阅读方向，
+    同时给上下游关系留出明确的水平和垂直通道；它只用于坐标提案，
+    不会写入 Graphviz 样条或增加模型关系。
+    """
+    if not order:
+        return {}
+    largest = max(
+        math.hypot(box(nodes[oid])[2] - box(nodes[oid])[0], 2 * abs(nodes[oid].h)) for oid in order
+    )
+    step = max(largest + gap, gap * 1.6)
+    # 四边的总长度按节点数和最大文字框确定，避免把短边压成一列。
+    half_width = max(step * 1.5, step * max(2.0, len(order) / 4.0))
+    half_height = max(step * 1.3, step * max(1.5, len(order) / 6.0))
+    cx, cy = center
+    perimeter = 4 * (half_width + half_height)
+
+    def point_at(distance):
+        distance %= perimeter
+        if distance <= 2 * half_width:
+            return cx - half_width + distance, cy - half_height
+        distance -= 2 * half_width
+        if distance <= 2 * half_height:
+            return cx + half_width, cy - half_height + distance
+        distance -= 2 * half_height
+        if distance <= 2 * half_width:
+            return cx + half_width - distance, cy + half_height
+        distance -= 2 * half_width
+        return cx - half_width, cy + half_height - distance
+
+    return {
+        oid: tuple(round(value) for value in point_at((index + 0.5) * perimeter / len(order)))
+        for index, oid in enumerate(order)
+    }
+
+
 def circular_proposals(view, movable, config):
     """CLD 使用闭环位置；有固定 SFD 骨架时使用其外侧的环形弧段。
 
@@ -226,9 +265,12 @@ def circular_proposals(view, movable, config):
         fixed_height = (
             max(box(obj)[3] for obj in fixed) - min(box(obj)[1] for obj in fixed) if fixed else 0
         )
-        # 大型或横向拉开的 SFD 使用局部锚点排版；小型旧图保留原有
-        # 环形提案，避免无意义地扰动已经人工审过的示例。
-        use_local = bool(fixed) and (len(component) > 8 or max(fixed_width, fixed_height) > 720)
+        # 有存量、阀门或流量标签时，骨架优先。只要自由节点已经达到
+        # 一个小模块的规模，就按相邻锚点逐个展开；这样不会把参数全
+        # 挤到骨架下方形成“云团”。小型旧示例仍保留原来的半环提案。
+        use_local = bool(fixed) and (
+            len(component) > 8 or max(fixed_width, fixed_height) > 720 or len(order) >= 5
+        )
         if use_local:
             local = _local_anchor_positions(
                 component,
@@ -252,7 +294,8 @@ def circular_proposals(view, movable, config):
             cx = max((left + right) / 2, rx + margin)
             angles = [math.pi * (i + 0.5) / len(order) for i in range(len(order))]
         else:
-            # 用相邻节点最大对角线约束最短弦长，长中文名和影子括号均计入。
+            # 小型 CLD 保留椭圆；节点较多时使用圆角矩形周边，避免
+            # 规则大圆造成“云团”与长对角线。两种方向仍交给质量评估器选择。
             rx = (largest + gap) / (2 * math.sin(math.pi / max(2, len(order))) * min(1, aspect))
             ry = rx * aspect
             cx, cy = cursor_x + rx, margin + ry + largest / 2
@@ -262,14 +305,17 @@ def circular_proposals(view, movable, config):
             positions = {
                 oid: (nodes[oid].x, nodes[oid].y) for oid in component if oid not in movable
             }
-            for oid, angle in zip(traversal, angles, strict=False):
-                if len(order) == 1 and not fixed:
-                    positions[oid] = (round(cx), round(cy))
-                else:
-                    positions[oid] = (
-                        round(cx + rx * math.cos(angle)),
-                        round(cy + ry * math.sin(angle)),
-                    )
+            if not fixed and len(order) >= 8:
+                positions.update(_perimeter_positions(traversal, nodes, (cx, cy), gap))
+            else:
+                for oid, angle in zip(traversal, angles, strict=False):
+                    if len(order) == 1 and not fixed:
+                        positions[oid] = (round(cx), round(cy))
+                    else:
+                        positions[oid] = (
+                            round(cx + rx * math.cos(angle)),
+                            round(cy + ry * math.sin(angle)),
+                        )
             place_branches(component, core, nodes, neighbors, positions, (cx, cy), gap)
             if not any(oid not in movable for oid in component):
                 shift = max(

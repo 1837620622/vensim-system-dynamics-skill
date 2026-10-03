@@ -49,9 +49,10 @@ def _model_text(spec):
         "circular_gap",
         "circular_aspect",
         "node_spacing",
+        "shadow_visibility",
     }:
         raise ValueError(
-            "sketch 只接受字体、layout_mode、circular_gap、circular_aspect、node_spacing"
+            "sketch 只接受字体、layout_mode、circular_gap、circular_aspect、node_spacing、shadow_visibility"
         )
     if sketch_options.get("layout_mode", "circular") not in {"circular", "refine", "preserve"}:
         raise ValueError("新建 sketch.layout_mode 必须是 circular/refine/preserve")
@@ -438,7 +439,7 @@ def _prepare_model(spec):
         **spec.get("sketch", {}),
         "lock_node_names": [item["name"] for item in spec["variables"] if "position" in item],
     }
-    report = optimize_view(lines, view, config, "dot")
+    report = optimize_view(lines, view, config)
     report["requested_mode"] = config["layout_mode"]
     report["fixed_positions"] = {
         item["name"]: item["position"] for item in spec["variables"] if "position" in item

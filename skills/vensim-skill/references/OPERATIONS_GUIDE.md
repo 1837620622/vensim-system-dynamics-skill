@@ -16,7 +16,7 @@
 
 `audit` 检查对象引用与模型依赖的明显不一致；`check` 检查内置解析器支持的方程、初值与时间设置。两者不能代替 Vensim 的完整语法/单位检查。CLD 没有方程时只做草图检查，不能把它当作可仿真的 SFD。
 
-默认 `refine` 就近移动可移动辅助量和影子，保留管道、阀门、附着文字、隐藏对象、未知路由端点与用户锁定对象。`preserve` 只路由圆弧；`auto` 和 `graphviz` 才需要系统 Graphviz。`style` 取 `preserve`、`monochrome` 或 `native-blue`。
+默认 `refine` 就近移动可移动辅助量和影子，保留管道、阀门、附着文字、隐藏对象、未知路由端点与用户锁定对象。`preserve` 只路由圆弧；`auto` 比较本地骨架候选，不需要外部布局器。旧配置中的 `graphviz` 仅作为迁移别名，映射到本地 `auto`。`style` 取 `preserve`、`monochrome` 或 `native-blue`。
 
 需要将已有图重排为环形时：
 
@@ -24,9 +24,9 @@
 ./skill.sh layout model.mdl --output work/model_circular.mdl --mode circular --style monochrome
 ```
 
-`circular` 不依赖 Graphviz，按真实连接和文字尺寸组织各模块，外围参数靠近作用对象；保留 SFD 骨架、影子身份和所有箭头端点。`circular_gap` 与 `circular_aspect` 可调留白和高宽比。自动排版后仍须逐项看碰撞报告，不能仅凭环形外观接受结果。
+`circular` 按真实连接和文字尺寸组织各模块，外围参数靠近作用对象；保留 SFD 骨架、影子身份和所有箭头端点。小型闭环使用椭圆，大型模块使用局部锚点或圆角边界，避免规则大圆和“云团”。`circular_gap` 与 `circular_aspect` 可调留白和高宽比。自动排版后仍须逐项看碰撞报告，不能仅凭外观接受结果。
 
-配置支持 `view`、`skip_views`、`lock_node_names`、`lock_object_ids`、`move_shadows`、`node_positions`、`clearance`、`node_spacing`、`curve_strength`、`minimum_curve_pixels`、`maximum_curve_pixels`、`routing_passes`、`graphviz_scale`、`graphviz_max_span` 和 `max_allowed_crossings`。通常先使用默认值；按 [图面规则](APPEARANCE.md) 处理具体冲突。锁定位置与无法自动消除的冲突会保留在报告中。
+配置支持 `view`、`skip_views`、`lock_node_names`、`lock_object_ids`、`move_shadows`、`shadow_visibility`、`node_positions`、`clearance`、`node_spacing`、`curve_strength`、`minimum_curve_pixels`、`maximum_curve_pixels`、`routing_passes` 和 `max_allowed_crossings`。`shadow_visibility` 取 `preserve`、`orphan`（默认）或显式的 `all`；通常先使用默认值。按 [图面规则](APPEARANCE.md) 处理具体冲突。锁定位置与无法自动消除的冲突会保留在报告中。
 
 布局输出保留源模型的编码、换行、方程字节和因果端点。源文件不可作为输出；符号链接、硬链接别名也会检查。不要用 `--move-stocks` 或手改管道字段绕过锁定；需要改结构时在原生 Vensim 中确认。
 

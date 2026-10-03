@@ -105,8 +105,8 @@ def create_server(workspace):
     def layout_model(
         model: str, output: str, mode: str = "refine", style: str = "preserve"
     ) -> dict:
-        """保护方程和拓扑；circular 按环形组织，preserve 只改圆弧。"""
-        if mode not in {"auto", "preserve", "refine", "graphviz", "circular"}:
+        """保护方程和拓扑；circular 按骨架与局部反馈组织，preserve 只改圆弧。"""
+        if mode not in {"auto", "preserve", "refine", "circular"}:
             raise ValueError("无效布局模式")
         if style not in {"preserve", "monochrome", "native-blue"}:
             raise ValueError("无效箭头样式")

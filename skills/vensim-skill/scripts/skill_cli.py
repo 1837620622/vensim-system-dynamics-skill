@@ -10,7 +10,6 @@ import json
 import os
 import plistlib
 import re
-import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -156,7 +155,7 @@ def doctor_report():
     return {
         "python": sys.version.split()[0],
         "executable": sys.executable,
-        "graphviz": {engine: shutil.which(engine) for engine in ("dot", "neato", "fdp", "sfdp")},
+        "layout_engine": "native-python (骨架优先、局部邻域与原生圆弧)",
         "optional_packages": packages,
         "dependency_constraints": dependency_constraints(),
         "native_vensim": native,
@@ -175,9 +174,6 @@ def _quick(args: list[str]) -> int:
         print("ERROR: 用法: skill.cmd quick <model.mdl>", file=sys.stderr)
         return 2
     model = args[0]
-    engine = "dot"
-    if len(args) >= 3 and args[1].lower() == "--engine":
-        engine = args[2]
     out = _default_output(model, "_autolayout.mdl")
     print("=== inspect ===")
     rc = _invoke_layout(["inspect", model])
@@ -194,8 +190,6 @@ def _quick(args: list[str]) -> int:
             model,
             "--output",
             out,
-            "--engine",
-            engine,
             "--route-information-arrows",
             "--preview",
             _default_output(model, "_layout.html"),
@@ -277,15 +271,15 @@ def _help() -> int:
     print("""Vensim System Dynamics Skill
 用法: ./skill.sh <命令> [参数]  /  skill.cmd <命令> [参数]
 
-  doctor                           检查 Python、Graphviz、可选包、原生 Vensim
+  doctor                           检查 Python、可选包、原生 Vensim 与字体
   build spec.json --output m.mdl    从明确的存量、流向和方程生成 MDL
   inspect model.mdl                列出对象与箭头
   audit model.mdl                  结构与语义预检
   check model.mdl                  方程、初值和时间设置预检
   feedback model.mdl [--spec model.json] [--strict] [--output feedback.json]
          核对箭头正负与指定回路的 R/B，复杂关系报告待核对
-  layout model.mdl --output out.mdl [--mode circular|auto|preserve|refine|graphviz]
-         [--engine dot|neato] [--style monochrome|native-blue|preserve]
+  layout model.mdl --output out.mdl [--mode circular|auto|preserve|refine]
+         [--style monochrome|native-blue|preserve]
          [--config layout.json] [--preview review.html]
   preview model.mdl --output sketch.html [--compare-with before.mdl]
   visual model.mdl [--strict] [--output geometry.json]

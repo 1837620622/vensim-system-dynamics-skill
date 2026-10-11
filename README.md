@@ -1,6 +1,5 @@
 # Vensim System Dynamics Skill
 
-[![Validate](https://github.com/1837620622/vensim-system-dynamics-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/1837620622/vensim-system-dynamics-skill/actions/workflows/validate.yml)
 ![Version](https://img.shields.io/badge/version-2.3.0-2f6f9f)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-non--commercial-8a8a8a)
@@ -153,7 +152,7 @@ python -m ruff check . && python -m ruff format --check .
 python -m bandit -r skills/vensim-skill/scripts -q
 ```
 
-CI 在 Ubuntu、macOS、Windows 和 Python 3.10–3.12 上运行全部检查，详见 [DEVELOPMENT.md](docs/DEVELOPMENT.md)。规则依据与已知边界见 [REFERENCES.md](skills/vensim-skill/references/REFERENCES.md)。
+CI 配置覆盖 Ubuntu、macOS、Windows 和 Python 3.10–3.12；本地在 macOS 上用 Python 3.12（装齐 PySD、matplotlib、SciPy）跑过全部测试，3.10 和 3.14 跑过不含可选依赖的核心测试。详见 [DEVELOPMENT.md](docs/DEVELOPMENT.md)。规则依据与已知边界见 [REFERENCES.md](skills/vensim-skill/references/REFERENCES.md)。
 
 ## 已知边界
 

@@ -1,6 +1,5 @@
 # Vensim System Dynamics Skill
 
-[![Validate](https://github.com/1837620622/vensim-system-dynamics-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/1837620622/vensim-system-dynamics-skill/actions/workflows/validate.yml)
 ![Version](https://img.shields.io/badge/version-2.3.0-2f6f9f)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-non--commercial-8a8a8a)
@@ -153,7 +152,7 @@ python -m ruff check . && python -m ruff format --check .
 python -m bandit -r skills/vensim-skill/scripts -q
 ```
 
-CI runs on Ubuntu, macOS and Windows with Python 3.10–3.12; see [DEVELOPMENT.md](docs/DEVELOPMENT.md). Sources and known limits are listed in [REFERENCES.md](skills/vensim-skill/references/REFERENCES.md).
+The CI configuration covers Ubuntu, macOS and Windows with Python 3.10–3.12; locally on macOS the full suite passes on Python 3.12 with PySD, matplotlib and SciPy installed, and the core suite (no optional packages) passes on 3.10 and 3.14. See [DEVELOPMENT.md](docs/DEVELOPMENT.md). Sources and known limits are listed in [REFERENCES.md](skills/vensim-skill/references/REFERENCES.md).
 
 ## Known limits
 

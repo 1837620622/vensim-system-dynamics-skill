@@ -1,4 +1,6 @@
 {
+  "name": "水量调节",
+  "language": "zh",
   "time": {
     "initial": 0,
     "final": 4,
@@ -44,6 +46,13 @@
       "kind": "constant",
       "equation": 2,
       "unit": "Hour"
+    }
+  ],
+  "feedback_loops": [
+    {
+      "name": "水量调节",
+      "variables": ["水量", "缺水量", "补水需求", "补水"],
+      "polarity": "B"
     }
   ]
 }

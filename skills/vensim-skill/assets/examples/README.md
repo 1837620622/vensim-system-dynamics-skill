@@ -1,9 +1,10 @@
 # 示例
 
-两个中文示例都由 `build` 从 `../templates/` 下的同名 JSON 生成，用当前代码重建会得到逐字节相同的文件。示例里的数值只用来演示命令，不代表任何研究的真实参数。
+三个中文示例都由 `build` 从 `../templates/` 下的同名 JSON 生成。方程部分用当前代码重建得到完全相同的文本；草图坐标由退火排版决定，不同平台上可能有几像素差别。示例里的数值只用来演示命令，不代表任何研究的真实参数。
 
 | 文件 | 结构 | 建模 JSON |
 | --- | --- | --- |
+| `ev_adoption_zh.mdl` | 新能源汽车推广：潜在购买者、汽车保有量、充电桩三个存量，口碑增强、市场饱和、充电桩补缺、基础设施四条回路；写新模型时照这个模板的写法起步 | [ev_adoption_zh.json](../templates/ev_adoption_zh.json) |
 | `inventory_zh.mdl` | 库存一条存量链：补货流入、销售流出，补货按目标库存缺口调整 | [inventory_zh.json](../templates/inventory_zh.json) |
 | `water_feedback_zh.mdl` | 水量的一阶负反馈：水量 → 缺水量 → 补水需求 → 补水 → 水量 | [water_feedback_zh.json](../templates/water_feedback_zh.json) |
 

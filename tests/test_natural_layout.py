@@ -16,6 +16,7 @@ sys.path.insert(0, str(TOOLS))
 from arc_routing import MAX_ARC_RATIO, arc_ratio  # noqa: E402
 from mdl_document import MdlDocument  # noqa: E402
 from model_builder import command_build  # noqa: E402
+from natural_layout import is_loop_marker  # noqa: E402
 from sketch_geometry import MIN_VISIBLE_ARROW, measure_view, quality_pass  # noqa: E402
 from vensim_autolayout import command_layout, load_mdl  # noqa: E402
 
@@ -446,7 +447,10 @@ def test_build_defaults_to_natural_with_native_clouds(tmp_path):
     report = json.loads(output.with_suffix(".mdl.build_report.json").read_text(encoding="utf-8"))
     assert report["requested_mode"] == "natural" and report["pass"]
     view = load_mdl(output)[1][0]
-    assert all(obj.raw_fields[2] == "48" for obj in view.objects.values() if obj.kind == 12)
+    # 12 类对象既有云也有回路标记；云的字段 2 固定为 48，标记数量等于模板声明的回路数
+    clouds = [obj for obj in view.objects.values() if obj.kind == 12 and not is_loop_marker(obj)]
+    assert len(clouds) == 2 and all(obj.raw_fields[2] == "48" for obj in clouds)
+    assert sum(is_loop_marker(obj) for obj in view.objects.values()) == 2
 
 
 # ---------------------------------------------------------------------------

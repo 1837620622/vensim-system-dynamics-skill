@@ -1,6 +1,6 @@
 # Vensim System Dynamics Skill
 
-![Version](https://img.shields.io/badge/version-2.3.1-2f6f9f)
+![Version](https://img.shields.io/badge/version-2.4.0-2f6f9f)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-non--commercial-8a8a8a)
 
@@ -26,11 +26,15 @@ A well-drawn original is not redrawn. Overshoot has two places where text touche
 
 ### Generating a model from JSON (Chinese variable names)
 
-| Inventory | Water level feedback |
+| Inventory (two balancing loops) | Water level feedback |
 | --- | --- |
 | ![Inventory example](docs/assets/inventory_zh.png) | ![Water example](docs/assets/water_feedback_zh.png) |
 
-Parameters sit next to the variable they act on, loops run around a ring, and nothing crosses. The model spec is [inventory_zh.json](skills/vensim-skill/assets/templates/inventory_zh.json).
+A larger complete template: electric vehicle adoption, with 3 stocks, 4 loops and 23 variables. One `build` produces it, and both the geometry check and `check --strict` pass.
+
+![Electric vehicle adoption](docs/assets/ev_adoption_zh.png)
+
+Parameters sit next to the variable they act on, R/B loop markers sit in the middle of their loops, and nothing crosses. The model spec is [ev_adoption_zh.json](skills/vensim-skill/assets/templates/ev_adoption_zh.json); start new models from its style.
 
 ### Result plots
 
@@ -46,8 +50,8 @@ Diagrams on this page are rendered from the MDL by the `preview` command; text w
 
 | Step | Commands | What it does |
 | --- | --- | --- |
-| Build | `build` `fix` | Generates an MDL from a JSON spec of stocks, flows, equations and units, then lays it out and checks polarity; splits views by subsystem with automatic shadow variables; `fix` fills units and drops broken arrows on explicit options |
-| Check | `inspect` `audit` `check` `units` | Sketch objects, broken references, undefined variables, initialisation loops, missing units |
+| Build | `build` `fix` | Generates an MDL from a JSON spec of stocks, flows, equations and units, then lays it out and checks polarity; draws R/B loop markers for the declared loops it can verify, or suggests pasteable loop entries when none are declared; splits views by subsystem with automatic shadow variables; `fix` fills units, drops broken arrows and marks unused outputs as Supplementary on explicit options |
+| Check | `inspect` `audit` `check` `units` | Sketch objects, broken references, undefined variables, initialisation loops, missing units; `check --strict` also requires no Vensim USE FLAG (variables nothing uses), so the model opens without notices |
 | Layout | `layout` `visual` `preview` | Four modes (below); `visual --strict` checks crossings, text overlap, too-short arrows and the `<Time>` slot; `preview` writes a sketch as HTML with estimated text widths, for locating problems only |
 | Feedback | `feedback` | Signs of partial derivatives from the equations, checked against arrow `+/-` and declared R/B loops |
 | Simulate | `simulate` `crosscheck` `convergence` | Built-in Euler engine; point-by-point comparison with PySD; dt, dt/2, dt/4 convergence |
@@ -92,6 +96,7 @@ Once installed, describe the task to your agent, e.g. "build an inventory model 
 ```bash
 ./skill.sh build assets/templates/inventory_zh.json --output work/inventory.mdl
 ./skill.sh visual work/inventory.mdl --strict
+./skill.sh check work/inventory.mdl --strict
 ./skill.sh simulate work/inventory.mdl --var 库存 --output results/base.csv
 ./skill.sh experiment work/inventory.mdl --spec assets/templates/inventory_scenarios.json \
   --output-dir results/scenarios --plot figures/scenarios.png
@@ -114,10 +119,11 @@ Commands refuse to overwrite existing outputs; use a new name when re-running.
 
 Main rules and their sources:
 
-- Stock boxes are at least 96×48 (median about 104×56 in Vensim's own examples) and long names wrap to two lines inside the box; cloud to valve is 80 px, valve to stock at least 120 px (medians of 76 px and 124 px in Vensim's own examples).
+- Stock boxes are at least 96×48 (median about 104×56 in Vensim's own examples) and Chinese names of up to ten characters stay on one row (longer ones wrap into two rows of similar length); cloud to valve is 80 px, valve to stock at least 120 px (medians of 76 px and 124 px in Vensim's own examples).
 - Information links are single-control-point arcs with a target bow (sagitta/chord) of 0.12 (median 0.14 in the official examples); straight lines only where an arc would cross or graze text.
 - Stock chains run horizontally with at least 200 px between rows (textbook median about 180 px). Flows that skip a stock become a detour branch or a right-angle bypass pipe, both taken from Duggan's diagrams.
-- R/B loop markers go back inside the loop they label; hidden variables are skipped together with their arrows (Vensim Hide/unhide).
+- R/B loop markers are placeholder nodes during layout: pulled to the centre of their own loop, kept inside it, with other variables arranged around them, and the circle turns the way the loop runs; hidden variables are skipped together with their arrows (Vensim Hide/unhide).
+- New models avoid the USE FLAG notice Vensim shows on opening: unused outputs are marked Supplementary and unused constants are rejected (per the Vensim documentation, unused variables are a notice that does not stop simulation, and marking them Supplementary clears it).
 - Zero crossings. Where the structure is non-planar (K3,3), a shadow variable carries the link, and each such split is listed in the report.
 - Large models are split into views by subsystem, with views linked by variables or shadow variables (Vensim, *How Views Work*). The 6–40 defined variables per view is this tool's design range, and fragment views are avoided.
 

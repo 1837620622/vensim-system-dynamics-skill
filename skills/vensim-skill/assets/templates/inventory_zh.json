@@ -73,5 +73,17 @@
       "to": "补货",
       "polarity": "+"
     }
+  ],
+  "feedback_loops": [
+    {
+      "name": "库存调整",
+      "variables": ["库存", "补货"],
+      "polarity": "B"
+    },
+    {
+      "name": "销售出库",
+      "variables": ["库存", "销售"],
+      "polarity": "B"
+    }
   ]
 }

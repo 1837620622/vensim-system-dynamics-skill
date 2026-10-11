@@ -1,4 +1,4 @@
 interface:
   display_name: "Vensim 建模与仿真"
   short_description: "生成和整理 Vensim MDL：按规则排版、核对极性与回路、仿真、实验与结果图"
-  default_prompt: "使用 $vensim-skill 处理当前的 Vensim 模型或建模资料：新模型用 build 生成中文 MDL，已有模型用 layout 整理到新文件，交付前 visual --strict 必须通过；按方程核对极性和回路；参数来自当前资料，不套用示例数值；结果图用 Python 出，默认无标题。"
+  default_prompt: "使用 $vensim-skill 处理当前的 Vensim 模型或建模资料：新模型照 ev_adoption_zh.json 的写法用 build 生成中文 MDL，已有模型用 layout 整理到新文件，交付前 visual --strict 和 check --strict 必须通过；按方程核对极性和回路；参数来自当前资料，不套用示例数值；结果图用 Python 出，默认无标题。"

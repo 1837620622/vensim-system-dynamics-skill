@@ -12,6 +12,7 @@
 | [Vensim Conventions](https://www.vensim.com/documentation/20390.html) | 存量画方框，流量画阀门，其余变量只写名字不加框 |
 | [Defined & Shadow Variables](https://www.vensim.com/documentation/22890.html)、[Existing Variable Class](https://www.vensim.com/documentation/22945.html) | 影子只引出连线，同一变量在一个视图里只定义一次 |
 | [Hide/unhide](https://vensim.com/documentation/22955.html) | 隐藏变量时，进出它的箭头一起隐藏；检查和排版按同样规则跳过这些箭头 |
+| [Supplementary Variables](https://www.vensim.com/documentation/22230.html)、[Uses 检查](https://vensim.com/documentation/22195.html) | 没有被使用的变量报 USE FLAG，标 Supplementary 可消除；`build` 与 `check` 按同样口径处理 |
 | [How Views Work](https://vensim.com/documentation/how_views_work.html) | 大模型按子系统分视图，视图之间用变量或影子连接 |
 | [物料与信息延迟](https://www.vensim.com/documentation/mgu09_material_and_information_delays.html)、[DELAY3](https://www.vensim.com/documentation/fn_delay3.html) | 物料延迟按阶段管道存量实现，与信息平滑分开 |
 | [Payoff Computation](https://www.vensim.com/documentation/payoffcomputation.html) | Vensim 的 payoff 按 TIME STEP 累积，本工具在保存点上用梯形法，两者不同 |

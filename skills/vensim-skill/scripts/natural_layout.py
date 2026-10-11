@@ -42,6 +42,7 @@ from sketch_geometry import (
     path_hits_box,
     pipe_endpoint_ids,
     quality_key,
+    segment_intersects,
     shown,
     text_width,
     time_label_box,
@@ -91,6 +92,12 @@ SHORT_LIMIT = PREFERRED_ARROW
 ARC_END_TURN = math.atan(4 * 0.12)
 SEED_ATTEMPTS = 3  # 仍有缺陷时换种子重跑的总次数
 LARGE_VIEW = 80  # 对象数超过此值的视图减少重跑、打磨与拆分试验，控制耗时
+W_MARKER = 3.0  # 回路标记偏离所属回路中心的代价（每像素）
+MARKER_SLACK = 24.0  # 离回路中心这么近不罚
+W_MARKER_OUT = 300.0  # 回路标记落在回路多边形之外的固定代价
+MARKER_REACH = 70.0  # 只有一两个节点的回路（存量与自己的流量）里，标记离管道中点的最大距离
+MARKER_HALF = 16  # 回路标记在场景里占的半边长，比圆圈略大，给文字和连线留余量
+MARKER_OUT_PENALTY = 300.0  # 候选方案里每个标记落在回路外的选择代价
 ROW_ORDER_PENALTY = 400.0  # 存量链上下顺序与原图相反时的代价，缺陷相同时保留作者的行序
 POLISH_ROUNDS = 4  # 收尾阶段温热退火的最多轮数
 # 影子拆分每轮的搜索预算：候选连线数、局部退火迭代、整体复核的试验数与迭代
@@ -135,6 +142,15 @@ def stock_half_size(name: str, font_size: int = 12, scale: float = 1.0) -> tuple
     pad = 8 * scale
     label = name.strip('"')
     half = STOCK_MIN_HALF[0] * scale
+    if " " not in label.strip():
+        # 中文没有空格，Vensim 按字折行会把词拆开（“新能源汽车保有量”折成“新能源汽车保 /
+        # 有量”）。10 个字以内把框加宽到一行写完；更长的按半长定宽，折成长度相近的两行
+        width = text_width(label, font_size)
+        if width > 10 * font_size:
+            width = text_width(label[: math.ceil(len(label) / 2)], font_size)
+        step = GRID / 2
+        half = max(half, math.ceil((width / 2 + pad) / step) * step)
+        return int(math.ceil(half)), int(STOCK_MIN_HALF[1] * scale)
     while True:
         rows = wrap_label(label, half - pad, font_size)
         if len(rows) <= 2 and max(text_width(r, font_size) for r in rows) <= 2 * (half - pad):
@@ -806,6 +822,9 @@ class Scene:
         self.align: dict[int, int] = {}
         self.bounds = None  # (x0, y0, x1, y1)：初始拓扑外扩后的软边界，防止节点漂散
         self.direction_weight = direction_weight
+        # 回路标记：(标记下标, [回路节点下标])；marker_of 把任一相关节点映射到标记序号
+        self.markers: list[tuple[int, list[int]]] = []
+        self.marker_of: dict[int, list[int]] = {}
         self.seg = [None] * len(self.info)
         self.visible_len = [0.0] * len(self.info)
         self.ang = [(0.0, 0.0)] * len(self.info)
@@ -902,6 +921,43 @@ class Scene:
     def restore(self, state):
         self.X, self.Y = list(state[0]), list(state[1])
         self.refresh_all()
+
+    # -- 回路标记 -------------------------------------------------------
+
+    def add_marker(self, marker, members):
+        """登记回路标记：标记要靠近并落在自己回路里，其他变量围绕它排布。"""
+        number = len(self.markers)
+        self.markers.append((marker, list(members)))
+        for node in {marker, *members}:
+            self.marker_of.setdefault(node, []).append(number)
+
+    def marker_center(self, number):
+        members = self.markers[number][1]
+        return (
+            sum(self.X[k] for k in members) / len(members),
+            sum(self.Y[k] for k in members) / len(members),
+        )
+
+    def marker_outside(self, number):
+        """标记是否离开了自己的回路：三个以上节点看是否在多边形里，否则看离管道中点的距离。"""
+        marker, members = self.markers[number]
+        point = (self.X[marker], self.Y[marker])
+        if len(members) > 2:
+            return not _contains(point, [(self.X[k], self.Y[k]) for k in members])
+        cx, cy = self.marker_center(number)
+        return math.hypot(point[0] - cx, point[1] - cy) > MARKER_REACH
+
+    def marker_cost(self, number):
+        marker, members = self.markers[number]
+        if not self.active[marker] or not all(self.active[k] for k in members):
+            return 0.0
+        cx, cy = self.marker_center(number)
+        cost = W_MARKER * max(
+            0.0, math.hypot(self.X[marker] - cx, self.Y[marker] - cy) - MARKER_SLACK
+        )
+        if len(members) > 2 and self.marker_outside(number):
+            cost += W_MARKER_OUT
+        return cost
 
     # -- 代价 ----------------------------------------------------------
 
@@ -1084,6 +1140,10 @@ class Scene:
             target = self.align.get(o)
             if target is not None and act[target]:
                 cost += 0.8 * abs(X[o] - X[target])
+        if self.markers:
+            # 标记项依赖回路节点和标记本身：其中任一个移动都要重算，每个标记只计一次
+            for number in {m for o in S for m in self.marker_of.get(o, ())}:
+                cost += self.marker_cost(number)
         cost += W_CROSS * cross + W_PIPE_CROSS * pipe_cross + W_HIT * hits
         if detail is not None:
             detail.update(
@@ -1316,6 +1376,33 @@ def pack_blocks(blocks, half, origin, max_width):
 # ---------------------------------------------------------------------------
 
 
+def _polish_markers(scene, radius=70):
+    """其他节点不动，回路标记在所属回路中心周围的网格点里取代价最低的位置。
+
+    退火的随机动作很少恰好落在最优点；收尾时把每个标记逐点试一遍，代价相同时
+    取离回路中心最近的点。
+    """
+    for number, (marker, _members) in enumerate(scene.markers):
+        if not scene.active[marker]:
+            continue
+        cx, cy = scene.marker_center(number)
+        gx, gy = snap(cx), snap(cy)
+        chosen = (scene.X[marker], scene.Y[marker])
+        scene.X[marker], scene.Y[marker] = chosen
+        best = (scene.partial({marker}), math.hypot(chosen[0] - cx, chosen[1] - cy), chosen)
+        for dx in range(-radius, radius + 1, GRID):
+            for dy in range(-radius, radius + 1, GRID):
+                if dx * dx + dy * dy > radius * radius:
+                    continue
+                scene.X[marker], scene.Y[marker] = gx + dx, gy + dy
+                scene.refresh(marker)
+                key = (scene.partial({marker}), math.hypot(gx + dx - cx, gy + dy - cy))
+                if key < best[:2]:
+                    best = (*key, (gx + dx, gy + dy))
+        scene.X[marker], scene.Y[marker] = best[2]
+        scene.refresh(marker)
+
+
 def anneal(
     scene, movable, groups, flips, neighbors, rng, iterations, t0=200.0, t1=1.0, step=50.0, axes=()
 ):
@@ -1327,7 +1414,7 @@ def anneal(
     """
     movable = [i for i in movable if scene.active[i]]
     movable_set = set(movable)
-    if not movable and not flips and not groups:
+    if not movable and not flips and not groups and not scene.markers:
         return scene.total()
     current = scene.total()
     best, best_state = current, scene.snapshot()
@@ -1335,7 +1422,22 @@ def anneal(
         temperature = t0 * (t1 / t0) ** (it / max(1, iterations))
         r = rng.random()
         saved = {}
-        if r < 0.10 and flips:
+        if scene.markers and rng.random() < 0.08:
+            # 回路标记回到所属回路中心附近重新找位置，或在原处小幅挪动
+            number = rng.randrange(len(scene.markers))
+            marker = scene.markers[number][0]
+            moved = {marker}
+            saved[marker] = (scene.X[marker], scene.Y[marker])
+            before = scene.partial(moved)
+            if rng.random() < 0.5:
+                cx, cy = scene.marker_center(number)
+                scene.X[marker] = snap(cx + rng.uniform(-50, 50))
+                scene.Y[marker] = snap(cy + rng.uniform(-50, 50))
+            else:
+                scene.X[marker] = snap(scene.X[marker] + rng.uniform(-30, 30))
+                scene.Y[marker] = snap(scene.Y[marker] + rng.uniform(-30, 30))
+            scene.refresh(marker)
+        elif r < 0.10 and flips:
             label = rng.choice(list(flips))
             valve, options, side = flips[label]
             moved = {label}
@@ -1447,6 +1549,7 @@ def anneal(
                     valve, options, side = flips[label]
                     flips[label] = (valve, options, (side - 1) % len(options))
     scene.restore(best_state)
+    _polish_markers(scene)
     # 恢复后按实际坐标重新识别流量名侧别。
     for label, (valve, options, _side) in list(flips.items()):
         ox, oy = scene.X[label] - scene.X[valve], scene.Y[label] - scene.Y[valve]
@@ -1664,6 +1767,26 @@ def _natural_plan_once(lines, view, config, exclude=frozenset()):
     flows = extract_flows(view, hidden_arrows)
     flows = {v: f for v, f in flows.items() if v in objects}
     label_half = {f.label: half[f.label] for f in flows.values() if f.label in half}
+    # 回路标记：新建模型由 build 直接给出所属回路，已有模型按“包住标记的最小回路”反推。
+    # 找得到回路的标记在场景里是带吸引项的移动节点（见 Scene.add_marker），其他变量
+    # 围绕它排布；找不到回路的标记仍按周围对象平移，收尾时再找空位
+    marker_cycles = loop_marker_cycles(
+        view,
+        objects,
+        flows,
+        [oid for oid, obj in objects.items() if is_loop_marker(obj) and oid not in locked_ids],
+    )
+    for oid, nodes in (config.get("_marker_loops") or {}).items():
+        if oid in objects and is_loop_marker(objects[oid]) and oid not in locked_ids:
+            if all(n in objects for n in nodes):
+                marker_cycles[oid] = tuple(nodes)
+    scene_markers = {
+        oid: cycle
+        for oid, cycle in marker_cycles.items()
+        if oid not in locked_ids and all(n in objects for n in cycle)
+    }
+    for oid in scene_markers:
+        half[oid] = (float(MARKER_HALF), float(MARKER_HALF))
     chain_config = dict(config)
     chain_config["_locked_ids"] = locked_ids
     skeleton_locked = bool(
@@ -1953,6 +2076,10 @@ def _natural_plan_once(lines, view, config, exclude=frozenset()):
         for i in range(len(sc.ids)):
             if not sc.active[i]:
                 sc.place(i, *original[sc.ids[i]])
+        for oid, cycle in scene_markers.items():
+            sc.add_marker(idx[oid], [idx[n] for n in cycle])
+            cx, cy = sc.marker_center(len(sc.markers) - 1)
+            sc.place(idx[oid], snap(cx), snap(cy))
         if locked_ids or anchors:
             # 存在锁定或锚点：新布局整体平移到原图坐标系，与固定对象保持相对关系。
             fixed = set(locked_ids) | set(anchors)
@@ -1994,15 +2121,9 @@ def _natural_plan_once(lines, view, config, exclude=frozenset()):
             )
             if ref is not None:
                 axis_nodes.append(idx[ref])
-    # 回路标记等注释不参与退火。收尾时回路标记放回所在回路的中间（见
-    # loop_marker_cycles），其余注释按周围对象的新位置映射（见 _follow_neighbors）
+    # 普通注释不参与退火，收尾时按周围对象的新位置映射（见 _follow_neighbors）；
+    # 没有进入场景的回路标记放回所在回路的中间（见 _loop_spot）
     valve_labels = {f.valve: f.label for f in flows.values() if f.label is not None}
-    marker_cycles = loop_marker_cycles(
-        view,
-        objects,
-        flows,
-        [oid for oid in free_kinds if is_loop_marker(objects[oid]) and oid not in locked_ids],
-    )
     movable_idx = [idx[oid] for oid in aux]
     fixed_refs = [oid for oid in objects if oid not in free_kinds]
     # 直接连到流量名的辅助变量（按场景下标）。
@@ -2024,7 +2145,7 @@ def _natural_plan_once(lines, view, config, exclude=frozenset()):
         }
         notes = {}
         for oid in free_kinds:
-            if oid not in locked_ids:
+            if oid not in locked_ids and oid not in scene_markers:
                 region = None
                 if oid in marker_cycles:
                     spot, region = _loop_spot(
@@ -2112,7 +2233,11 @@ def _natural_plan_once(lines, view, config, exclude=frozenset()):
             )
         # 生成阶段按更宽的净距与箭头长度验收，交付时再用标准检查复核
         metrics = measure_view(final_view, LAYOUT_CLEARANCE, PREFERRED_ARROW)
-        metrics["row_inversions"] = _row_inversions(chains, positions)
+        # 新建模型的初始行序只是生成器的排列，没有作者意图，行序由连线长短决定
+        metrics["marker_outside"] = sum(sc.marker_outside(n) for n in range(len(sc.markers)))
+        metrics["row_inversions"] = (
+            0 if config.get("_free_row_order") else _row_inversions(chains, positions)
+        )
         metrics["alignment_lines"] = alignment_lines(
             positions, [oid for oid in positions if oid in objects and objects[oid].kind == 10]
         )
@@ -2143,7 +2268,7 @@ def _natural_plan_once(lines, view, config, exclude=frozenset()):
             sc.init[i] = (sc.X[i], sc.Y[i])
             oid = sc.ids[i]
             if oid in free_kinds:
-                sc.drift_w[i] = 0.5
+                sc.drift_w[i] = 0.0 if oid in scene_markers else 0.5
             elif oid in skeleton:
                 sc.drift_w[i] = 0.1
             else:
@@ -2178,45 +2303,75 @@ def _natural_plan_once(lines, view, config, exclude=frozenset()):
     for kind, sc, flips, result in candidates:
         evaluated.append((selection_key(result[3]), kind, sc, flips, result))
     evaluated.sort(key=lambda row: row[0])
-    best_key, best_kind, best_scene, best_flips, best_result = evaluated[0]
 
-    # ---- 改进循环：仍有缺陷时交替进行“显式影子拆分”（若开启）与“温热打磨” ----
-    state = {
-        "scene": best_scene,
-        "flips": best_flips,
-        "result": best_result,
-        "objects": {},
-        "repoint": {},
-        "splits": [],
-        "movable": list(movable_idx),
-        "next_id": max([*view.objects, *(a.obj_id for a in view.arrows)]) + 1,
-    }
-    split_limit = int(config.get("max_shadow_splits", 6)) if split_enabled else 0
-    polish_left = POLISH_ROUNDS // 2 if big else POLISH_ROUNDS
-    polish_seed = 0
-    split_stale = False  # 上一轮拆分失败且状态未变：跳过，避免重复同样的试验
-    for _ in range(split_limit + polish_left + 8):
-        if selection_key(state["result"][3])[:2] == (0, 0):
-            break
-        improved = False
-        if len(state["splits"]) < split_limit and not split_stale:
-            improved = _split_round(view, lines, config, state, finish, groups_ids, axis_nodes)
-            split_stale = not improved
-        if not improved:
-            improved = _repair_round(state, finish)
-        if not improved:
-            if polish_left <= 0:
+    def improve(row):
+        """改进循环：仍有缺陷时交替进行“显式影子拆分”（若开启）与“温热打磨”，
+        最后做行间紧凑化与局部精修（只接受精确检查不变差的结果）。"""
+        _, _, start_scene, start_flips, start_result = row
+        state = {
+            "scene": start_scene,
+            "flips": start_flips,
+            "result": start_result,
+            "objects": {},
+            "repoint": {},
+            "splits": [],
+            "movable": list(movable_idx),
+            "next_id": max([*view.objects, *(a.obj_id for a in view.arrows)]) + 1,
+        }
+        split_limit = int(config.get("max_shadow_splits", 6)) if split_enabled else 0
+        polish_left = POLISH_ROUNDS // 2 if big else POLISH_ROUNDS
+        polish_seed = 0
+        split_stale = False  # 上一轮拆分失败且状态未变：跳过，避免重复同样的试验
+        for _ in range(split_limit + polish_left + 8):
+            if selection_key(state["result"][3])[:2] == (0, 0):
                 break
-            polish_left -= 1
-            polish_seed += 1
-            improved = _polish_round(
-                state, finish, groups_ids, axis_nodes, rng_seed * 15485863 + polish_seed, iterations
-            )
-        if improved:
-            split_stale = False
-    # ---- 收尾：行间紧凑化与局部精修（只接受精确检查不变差的结果） ----
-    _tidy(state, finish, groups_ids, neighbors_of=lambda sc: sc.neighbor_sets())
-    best_scene, best_flips, best_result = state["scene"], state["flips"], state["result"]
+            improved = False
+            if len(state["splits"]) < split_limit and not split_stale:
+                improved = _split_round(view, lines, config, state, finish, groups_ids, axis_nodes)
+                split_stale = not improved
+            if not improved:
+                improved = _repair_round(state, finish)
+            if not improved:
+                if polish_left <= 0:
+                    break
+                polish_left -= 1
+                polish_seed += 1
+                improved = _polish_round(
+                    state,
+                    finish,
+                    groups_ids,
+                    axis_nodes,
+                    rng_seed * 15485863 + polish_seed,
+                    iterations,
+                )
+            if improved:
+                split_stale = False
+        _tidy(state, finish, groups_ids, neighbors_of=lambda sc: sc.neighbor_sets())
+        if state["scene"].markers:
+            # 收尾移动过的变量会让标记偏离回路中心：标记再精修一遍，结果不变差才采用
+            scene_now = state["scene"]
+            snapshot = scene_now.snapshot()
+            before = selection_key(state["result"][3])
+            _polish_markers(scene_now)
+            result = finish(scene_now, state["flips"], state["objects"], state["repoint"])
+            if selection_key(result[3]) <= before:
+                state["result"] = result
+            else:
+                scene_now.restore(snapshot)
+        return state
+
+    # 新建模型的行序没有作者意图：另一种行序的最好起点也走完改进流程再比较。
+    # 退火很难整行互换，只比较初始结果会让“缺陷暂时多一处、修好后连线更短”的
+    # 行序没有机会胜出
+    finalists = [evaluated[0]]
+    if config.get("_free_row_order") and not big:
+        reversed_first = evaluated[0][1] == "greedy-rev"
+        other = next((row for row in evaluated if (row[1] == "greedy-rev") != reversed_first), None)
+        if other is not None:
+            finalists.append(other)
+    outcomes = [(row[1], improve(row)) for row in finalists]
+    best_kind, state = min(outcomes, key=lambda item: selection_key(item[1]["result"][3]))
+    best_scene, best_result = state["scene"], state["result"]
     splits = state["splits"]
     for item in splits:
         item["shadow_object"] = state["objects"][item["new_shadow_id"]]
@@ -2343,6 +2498,27 @@ def _contains(point, points):
     return inside
 
 
+def loop_marker_shape(view, cycle):
+    """回路标记的圈形：沿因果方向在屏幕上顺时针走的回路用 4，逆时针用 5。
+
+    对照参考模型中作者画的 11 个回路标记，形状与回路走向全部一致。两节点回路
+    （存量与自己的流量）只靠节点定不出方向，多边形里加上信息线的圆弧控制点。
+    """
+    _, merge = _feedback_cycles(view, view.objects, extract_flows(view), max_count=0)
+    coords = {oid: (obj.x, obj.y) for oid, obj in view.objects.items()}
+    controls = {}
+    for arrow in view.arrows:
+        if not arrow.is_physical_flow and len(arrow.points) == 1:
+            key = (merge.get(arrow.from_id, arrow.from_id), merge.get(arrow.to_id, arrow.to_id))
+            controls[key] = arrow.points[0]
+    points = _polygon(list(cycle), coords, controls)
+    signed = sum(
+        x1 * y2 - x2 * y1
+        for (x1, y1), (x2, y2) in zip(points, points[1:] + points[:1], strict=True)
+    )
+    return 4 if signed > 0 else 5
+
+
 def loop_marker_cycles(view, objects, flows, markers):
     """给每个回路标记找到它在原图中所在的回路：包住它的回路里面积最小的一条。
 
@@ -2466,6 +2642,9 @@ def _free_spot(oid, spot, positions, half, pipes=(), region=None):
         for a, b in pipes
         if a in positions and b in positions
     ]
+    pipe_lines = [
+        (positions[a], positions[b]) for a, b in pipes if a in positions and b in positions
+    ]
 
     def clear(x, y):
         return all(
@@ -2484,9 +2663,19 @@ def _free_spot(oid, spot, positions, half, pipes=(), region=None):
     ]
     for inside in [True, False] if region else [False]:
         for x, y in rings:
-            if (not inside or _contains((x, y), region)) and clear(x, y):
+            if (
+                (not inside or _contains((x, y), region))
+                and clear(x, y)
+                and not _across_pipe(spot, (x, y), pipe_lines)
+            ):
                 return x, y
     return spot
+
+
+def _across_pipe(spot, point, pipe_lines):
+    """注释的新位置与原定位置之间是否隔着管道：回路标记跑到管道另一侧就离开了
+    所标的回路，读图时会被当成另一条回路的标记。"""
+    return any(segment_intersects(spot, point, a, b) for a, b in pipe_lines)
 
 
 def _settle_notes(view, notes):
@@ -2495,6 +2684,13 @@ def _settle_notes(view, notes):
     if not notes:
         return {}
     paths = [arrow_path(view, a) for a in view.arrows if shown(view, a)]
+    pipe_lines = [
+        (path[i], path[i + 1])
+        for a in view.arrows
+        if a.is_physical_flow and shown(view, a)
+        for path in [arrow_path(view, a)]
+        for i in range(len(path) - 1)
+    ]
     blocked = [time_label_box(owner) for owner in time_label_owners(view)]
     moved = {}
     for oid, (spot, region) in notes.items():
@@ -2516,7 +2712,7 @@ def _settle_notes(view, notes):
                 path_hits_box(path, line_rect) for path in paths
             )
 
-        if clear(obj.x, obj.y):
+        if clear(obj.x, obj.y) and not _across_pipe(spot, (obj.x, obj.y), pipe_lines):
             continue
         rings = [spot] + [
             (
@@ -2528,7 +2724,13 @@ def _settle_notes(view, notes):
         ]
         for inside in [True, False] if region else [False]:
             found = next(
-                (p for p in rings if (not inside or _contains(p, region)) and clear(*p)),
+                (
+                    p
+                    for p in rings
+                    if (not inside or _contains(p, region))
+                    and clear(*p)
+                    and not _across_pipe(spot, p, pipe_lines)
+                ),
                 None,
             )
             if found is not None:
@@ -2580,7 +2782,8 @@ def selection_key(metrics):
             key[4]
             + 0.6 * key[5]
             + 6.0 * metrics.get("alignment_lines", 0)
-            + ROW_ORDER_PENALTY * metrics.get("row_inversions", 0),
+            + ROW_ORDER_PENALTY * metrics.get("row_inversions", 0)
+            + MARKER_OUT_PENALTY * metrics.get("marker_outside", 0),
             1,
         ),
     )

@@ -1,0 +1,42 @@
+{
+  "name": "新能源汽车推广",
+  "language": "zh",
+  "time": {
+    "initial": 0,
+    "final": 30,
+    "step": 0.25,
+    "saveper": 1,
+    "unit": "Year"
+  },
+  "variables": [
+    {"name": "潜在购买者", "kind": "stock", "initial": "1000000", "unit": "辆"},
+    {"name": "汽车保有量", "kind": "stock", "initial": "10000", "unit": "辆"},
+    {"name": "充电桩数量", "kind": "stock", "initial": "2000", "unit": "个"},
+    {"name": "新车购买", "kind": "flow", "from": "潜在购买者", "to": "汽车保有量", "equation": "潜在购买者 * 购买意愿", "unit": "辆/Year"},
+    {"name": "车辆报废", "kind": "flow", "from": "汽车保有量", "to": null, "equation": "汽车保有量 / 车辆寿命", "unit": "辆/Year"},
+    {"name": "充电桩建设", "kind": "flow", "from": null, "to": "充电桩数量", "equation": "充电桩缺口 / 建设周期", "unit": "个/Year"},
+    {"name": "充电桩淘汰", "kind": "flow", "from": "充电桩数量", "to": null, "equation": "充电桩数量 / 充电桩寿命", "unit": "个/Year"},
+    {"name": "购买意愿", "kind": "aux", "equation": "基础购买率 * 充电便利性 * (1 + 补贴效应) * 口碑效应", "unit": "1/Year"},
+    {"name": "口碑效应", "kind": "aux", "equation": "1 + 口碑系数 * 汽车保有量 / 市场规模", "unit": "Dmnl"},
+    {"name": "补贴效应", "kind": "aux", "equation": "购车补贴 / 车辆价格", "unit": "Dmnl"},
+    {"name": "充电便利性", "kind": "aux", "equation": "MIN(1, 充电桩数量 / 充电桩需求)", "unit": "Dmnl"},
+    {"name": "充电桩需求", "kind": "aux", "equation": "汽车保有量 / 车桩比", "unit": "个"},
+    {"name": "充电桩缺口", "kind": "aux", "equation": "MAX(0, 充电桩需求 - 充电桩数量)", "unit": "个"},
+    {"name": "市场渗透率", "kind": "aux", "equation": "汽车保有量 / 市场规模", "unit": "Dmnl"},
+    {"name": "基础购买率", "kind": "constant", "equation": "0.01", "unit": "1/Year"},
+    {"name": "口碑系数", "kind": "constant", "equation": "2", "unit": "Dmnl"},
+    {"name": "市场规模", "kind": "constant", "equation": "1010000", "unit": "辆"},
+    {"name": "购车补贴", "kind": "constant", "equation": "20000", "unit": "元/辆"},
+    {"name": "车辆价格", "kind": "constant", "equation": "150000", "unit": "元/辆"},
+    {"name": "车桩比", "kind": "constant", "equation": "3", "unit": "辆/个"},
+    {"name": "车辆寿命", "kind": "constant", "equation": "10", "unit": "Year"},
+    {"name": "建设周期", "kind": "constant", "equation": "2", "unit": "Year"},
+    {"name": "充电桩寿命", "kind": "constant", "equation": "8", "unit": "Year"}
+  ],
+  "feedback_loops": [
+    {"name": "口碑", "variables": ["汽车保有量", "口碑效应", "购买意愿", "新车购买"], "polarity": "R"},
+    {"name": "市场饱和", "variables": ["潜在购买者", "新车购买"], "polarity": "B"},
+    {"name": "充电桩补缺", "variables": ["充电桩数量", "充电桩缺口", "充电桩建设"], "polarity": "B"},
+    {"name": "基础设施", "variables": ["汽车保有量", "充电桩需求", "充电桩缺口", "充电桩建设", "充电桩数量", "充电便利性", "购买意愿", "新车购买"], "polarity": "R"}
+  ]
+}

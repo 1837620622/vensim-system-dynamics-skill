@@ -3,7 +3,7 @@ name: vensim-skill
 description: "Build, lay out, check and simulate Vensim system dynamics models (.mdl). Use when the user wants a stock-and-flow or causal loop diagram in Vensim, needs an existing MDL tidied (overlapping labels, crossing arrows, messy views), wants polarity and R/B loop checks, or needs reproducible simulation, scenario, sensitivity, calibration or policy runs with publication-quality Python plots. Chinese variable names by default; Windows, macOS and Linux."
 license: "Non-commercial only; commercial use, paid redistribution and commercial delivery are prohibited; see LICENSE"
 metadata:
-  version: "2.3.1"
+  version: "2.4.0"
 ---
 
 # Vensim 建模、排版与仿真
@@ -12,9 +12,9 @@ metadata:
 
 ## 硬性规则
 
-1. **坐标交给命令，不手写。** 新模型用 `build` 从 JSON 生成，已有模型用 `layout`。不要自己算坐标、改草图记录或画示意图代替 MDL。排版规则（间距、弧度、绕行支路、回路标记位置）已经写在代码里，依据见 [APPEARANCE.md](references/APPEARANCE.md)。
+1. **坐标交给命令，不手写。** 新模型用 `build` 从 JSON 生成，已有模型用 `layout`。不要自己算坐标、改草图记录或画示意图代替 MDL。排版规则（间距、弧度、绕行支路、回路标记位置）已经写在代码里，依据见 [APPEARANCE.md](references/APPEARANCE.md)。新模型的 JSON 从 [ev_adoption_zh.json](assets/templates/ev_adoption_zh.json) 复制起步，视图、links、feedback_loops 和命名都照它的写法。
 2. **已有模型默认 `auto`。** 作者的版面合格就不动；只有一两处压字时只挪那几个变量；问题多时才重建。用户明确要求重画时才用 `--mode natural`。
-3. **交付前 `visual --strict` 必须通过**：零交叉、不压字、文字不重叠、没有过短箭头、`<Time>` 预留区空着。报告里列出的对象 ID 要逐个处理，不能靠删线、隐藏或改方程过关。原图里保留、`auto` 也消不掉的问题（如 Overshoot 的 1 处穿字），要在交付说明里写明对象 ID，不能算通过。
+3. **交付前 `visual --strict` 和 `check --strict` 必须通过**：`visual` 管几何（零交叉、不压字、文字不重叠、没有过短箭头、`<Time>` 预留区空着），`check` 管 Vensim 打开时的提示（缺单位、没有被使用的变量）。报告里列出的对象 ID 要逐个处理，不能靠删线、隐藏或改方程过关。原图里保留、`auto` 也消不掉的问题（如 Overshoot 的 1 处穿字），要在交付说明里写明对象 ID，不能算通过。
 4. **排版不改模型。** 输出写新文件，方程区逐字节不变。唯一的结构改动是 natural 在不可平面处加的影子引用，报告里逐条列出，因果关系不变。
 5. **视图只做关键的。** 定义变量约 40 个以内用一个视图；更大的模型按子系统分，每个视图 6–40 个定义变量，对应一条主要存量链或一组紧密相关的机制；跨视图引用用影子变量。不做一个变量一个视图、两三个变量的碎视图，也不把上百个变量挤在一起。
 6. **图面朴素。** 存量画方框，流量画阀门和双线管道，其余变量只写名字。信息线统一黑色（`monochrome`），或 Vensim 传统纯蓝（`native-blue`）。图内只放变量、极性、延迟标记和核对过的 R/B，不加标题、水印、底色、说明框或装饰。
@@ -28,8 +28,8 @@ metadata:
 ## 工作顺序
 
 1. 读模型或资料：`doctor` 看环境，`inspect`、`audit`、`check` 看结构和方程。截图只用来定位问题，不能据此猜方程。
-2. 先修语义问题（未定义变量、断裂引用、缺初值、缺单位），再排版。
-3. 新模型：写建模 JSON（格式见 [SPECIFICATIONS.md](references/SPECIFICATIONS.md)），`build` 生成 MDL，排版和反馈核对一起完成。
+2. 先修语义问题（未定义变量、断裂引用、缺初值、缺单位、没有被使用的变量），再排版。
+3. 新模型：照模板写建模 JSON（格式见 [SPECIFICATIONS.md](references/SPECIFICATIONS.md)），`build` 生成 MDL，排版、极性和回路核对一起完成（二十几个变量约需 20 秒，不要中断）。输出里的每条“建议”都要处理：名字过长就精简，没声明的回路按给出的条目补进 `feedback_loops`，常量被移到别的视图就改 JSON；改完重新 `build`。
 4. 已有模型：`layout` 输出新文件，`visual --strict` 检查；不合格时按报告里的对象 ID 处理，必要时用 `node_positions` 固定个别变量后重跑。
 5. 在 Vensim 中打开每个视图，运行 Check Model 和 Units Check，导出结构图。
 6. 仿真和实验：`simulate`、`experiment`、`convergence`；装了 PySD 时用 `crosscheck` 对照。结果图用 `graph` 或 `plot-data`。
@@ -43,7 +43,8 @@ metadata:
 ./skill.sh doctor
 ./skill.sh build model.json --output work/model.mdl
 ./skill.sh audit work/model.mdl
-./skill.sh check work/model.mdl
+./skill.sh check work/model.mdl --strict                                 # 缺单位、没人用的变量也算失败
+./skill.sh fix work/model.mdl --output work/model_fixed.mdl --mark-supplementary  # 没人用的输出指标标 Supplementary
 ./skill.sh feedback work/model.mdl --spec model.json --strict
 ./skill.sh layout work/model.mdl --output work/model_layout.mdl          # 默认 auto
 ./skill.sh layout work/model.mdl --output work/redrawn.mdl --mode natural

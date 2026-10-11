@@ -22,7 +22,9 @@ from vensim_engine import (
 # ---------------------------------------------------------------------------
 
 
-FONT_KEYS = {"font_family", "font_size"}
+# 只在建模阶段使用、不传给排版配置的 sketch 键
+FONT_KEYS = {"font_family", "font_size", "polarity"}
+POLARITY_MODES = {"dynamic", "declared", "all"}
 
 
 def _field(value, label):
@@ -48,6 +50,15 @@ def _model_text(spec):
         ),
         "模型名",
     )
+    # 生成过程中做出的草图决定（常量换视图、画了哪些回路标记等），写进报告
+    notes = {
+        "moved_constants": [],
+        "supplementary": [],
+        "numeric_links": [],
+        "suggested_loops": [],
+        "loop_markers": [],
+        "unmarked_loops": [],
+    }
     sketch_options = spec.get("sketch", {})
     if not isinstance(sketch_options, dict) or set(sketch_options) - {
         "font_family",
@@ -57,11 +68,17 @@ def _model_text(spec):
         "shadow_visibility",
         "split_shadows",
         "seed",
+        "polarity",
     }:
         raise ValueError(
             "sketch 只接受 font_family、font_size、layout_mode、node_spacing、"
-            "shadow_visibility、split_shadows、seed"
+            "shadow_visibility、split_shadows、seed、polarity"
         )
+    # 箭头极性：dynamic 给变量之间能由方程推出符号的链接标 +/-，常量引出的链接不标；
+    # declared 只标 links 里写明的；all 连常量链接也标。links 里写明的总会标出
+    polarity_mode = sketch_options.get("polarity", "dynamic")
+    if polarity_mode not in POLARITY_MODES:
+        raise ValueError("sketch.polarity 只能是 dynamic、declared 或 all")
     if sketch_options.get("layout_mode", "natural") not in {"natural", "refine", "preserve"}:
         raise ValueError("新建 sketch.layout_mode 必须是 natural/refine/preserve")
     from vensim_autolayout import validate_config
@@ -143,7 +160,7 @@ def _model_text(spec):
         for value in values.values()
     ):
         raise ValueError("时间设置必须为有限数")
-    equations = ["{UTF-8}\n"]
+    rhs_of = {}
     for name, item in names.items():
         if item["kind"] == "stock":
             incoming = [flow for flow, definition in flows.items() if definition.get("to") == name]
@@ -166,7 +183,35 @@ def _model_text(spec):
                     ) from exc
                 if not math.isfinite(value):
                     raise ValueError(f"{name}: constant 必须是有限数值")
-        equations.append(f"{name} = {rhs}\n\t~ {item['unit']}\n\t~\n\t|\n")
+        rhs_of[name] = rhs
+    # 使用检查与 Vensim Check Model 同口径：没有被任何方程引用的变量会报 USE FLAG。
+    # 没人用的常量是多余参数，直接报错；没人用的辅助变量、存量是输出指标，
+    # 写上 :SUPPLEMENTARY 字段；标了 supplementary 却被引用的同样会报 USE FLAG
+    used = {
+        dep for name, rhs in rhs_of.items() for dep in extract_deps(rhs, set(names)) if dep != name
+    }
+    supplementary = set()
+    for name, item in names.items():
+        flagged = item.get("supplementary", False)
+        if not isinstance(flagged, bool):
+            raise ValueError(f"{name}: supplementary 必须是 true 或 false")
+        if flagged and name in used:
+            raise ValueError(
+                f"{name}: 被其他方程使用，不能标 supplementary（Vensim 会报 USE FLAG）"
+            )
+        if name in used:
+            continue
+        if item["kind"] == "constant":
+            raise ValueError(
+                f"常量「{name}」没有被任何方程使用：删掉它，或在需要它的方程里引用；"
+                "否则打开 Vensim 会报 USE FLAG"
+            )
+        supplementary.add(name)
+    notes["supplementary"] = sorted(supplementary)
+    equations = ["{UTF-8}\n"]
+    for name, item in names.items():
+        flag = "\t~\t:SUPPLEMENTARY\n" if name in supplementary else ""
+        equations.append(f"{name} = {rhs_of[name]}\n\t~ {item['unit']}\n\t~\n{flag}\t|\n")
     equations.extend(f"{name} = {value}\n\t~ {unit}\n\t~\n\t|\n" for name, value in values.items())
     equation_text = "\n".join(equations)
     parsed = parse_equations(equation_text)
@@ -413,6 +458,19 @@ def _model_text(spec):
                     "o",
                 }:
                     raise ValueError("polarity 仅支持 +、-、S、O；无依据时留空")
+                if (
+                    not polarity
+                    and name not in stocks
+                    and polarity_mode != "declared"
+                    and (polarity_mode == "all" or names[dep]["kind"] != "constant")
+                ):
+                    inferred = infer_polarity(expression, dep, originals)
+                    if inferred not in {"+", "-"}:
+                        # 方程推不出（如两个变量相乘）时用基准运行的数值偏导
+                        inferred = numeric.get((canonical_name(dep), canonical_name(name)), "")
+                        if inferred:
+                            notes["numeric_links"].append([dep, name, inferred])
+                    polarity = inferred
                 links.append(
                     (
                         ids.get(dep, shadows.get(dep)),
@@ -422,6 +480,22 @@ def _model_text(spec):
                         1 if annotation.get("delay") else 0,
                     )
                 )
+        # 回路标记：12 类注释，形状 5/4 是逆/顺时针回路圈，文字写在下一行。先放在回路
+        # 节点中间，排版时按回路归属放回回路内部，圈的走向在排版后按实际图形确定
+        for marker in notes["loop_markers"]:
+            if not set(marker["variables"]) <= members:
+                continue
+            points = [positions[ids[name]] for name in marker["variables"]]
+            x = round(sum(p[0] for p in points) / len(points))
+            y = round(sum(p[1] for p in points) / len(points))
+            size = round(12 * font_scale)
+            records.append(
+                f"12,{next_id},0,{x},{y},{size},{size},5,135,0,8,-1,0,0,0,"
+                f"-1--1--1,0-0-0,|{max(9, font_size - 2)}||0-0-0"
+            )
+            records.append(marker["label"])
+            positions[next_id] = (x, y)
+            next_id += 1
         for source, target, physical, polarity, delay in links:
             x = round((positions[source][0] + positions[target][0]) / 2)
             y = round((positions[source][1] + positions[target][1]) / 2)
@@ -451,6 +525,65 @@ def _model_text(spec):
     view_of = {name: str(item.get("view", title)).strip() for name, item in names.items()}
     if any(not view or any(c in view for c in ",|~\n\r") for view in view_of.values()):
         raise ValueError("view 名称不能为空，也不能包含逗号、| 或 ~")
+    consumers = {name: set() for name in names}
+    for target in names:
+        eq = originals[target]
+        # 存量通过净流率引用流量、通过初值引用参数，两处都算使用
+        expression = (
+            f"{eq.integ_flow or ''} {eq.integ_init_expr or ''}" if target in stocks else eq.rhs
+        )
+        for dep in extract_deps(expression, set(names)):
+            consumers[dep].add(target)
+    # 只被另一个视图使用的常量移到使用它的视图：Vensim 习惯把参数画在作用对象旁边，
+    # 留在原视图会多出一个影子，原视图里还剩一个没有连线的孤立变量
+    for name, item in names.items():
+        homes = {view_of[user] for user in consumers[name]}
+        if (
+            item["kind"] == "constant"
+            and "position" not in item
+            and len(homes) == 1
+            and view_of[name] not in homes
+        ):
+            notes["moved_constants"].append(
+                {"variable": name, "from": view_of[name], "to": next(iter(homes))}
+            )
+            view_of[name] = next(iter(homes))
+    # 回路标记只画核对一致、且整条回路在同一视图里的回路；编号按 R、B 分别递增
+    from feedback_audit import check_loops, infer_polarity, numeric_link_signs
+
+    numeric = numeric_link_signs(equation_text)
+
+    declared = {
+        (canonical_name(source), canonical_name(target)): link.get("polarity", "")
+        for (source, target), link in signed_links.items()
+    }
+    counters = {"R": 0, "B": 0}
+    for row in check_loops(originals, spec.get("feedback_loops", []), declared, numeric):
+        views_on_loop = {view_of[name] for name in row["variables"]}
+        if row["status"] in {"verified", "declared", "numeric"} and len(views_on_loop) == 1:
+            counters[row["expected"]] += 1
+            notes["loop_markers"].append(
+                {
+                    "label": f"{row['expected']}{counters[row['expected']]}",
+                    "loop": row["name"],
+                    "variables": row["variables"],
+                    "view": next(iter(views_on_loop)),
+                    "status": row["status"],
+                }
+            )
+        else:
+            notes["unmarked_loops"].append(
+                {
+                    "loop": row["name"],
+                    "status": row["status"],
+                    "unsigned_links": row["unsigned_links"],
+                    "views": sorted(views_on_loop),
+                }
+            )
+    if not spec.get("feedback_loops"):
+        notes["suggested_loops"] = _suggest_loops(
+            originals, names, stocks, view_of, declared, numeric
+        )
     for name, flow in flows.items():
         for end in (flow.get("from"), flow.get("to")):
             if end is not None and view_of[end] != view_of[name]:
@@ -466,7 +599,7 @@ def _model_text(spec):
             *_view_records(members),
         ]
     sketch_lines += ["///---" + chr(92) * 3, ""]
-    return equation_text + "\n" + "\n".join(sketch_lines)
+    return equation_text + "\n" + "\n".join(sketch_lines), notes
 
 
 # ---------------------------------------------------------------------------
@@ -476,11 +609,12 @@ def _model_text(spec):
 
 def _prepare_model(spec):
     from feedback_audit import audit_feedback
+    from natural_layout import _set_fields, loop_marker_shape, natural_view
     from sketch_geometry import measure_view, quality_pass
     from sketch_layout import optimize_view
-    from vensim_autolayout import parse_views, time_dependent_names
+    from vensim_autolayout import parse_views, time_dependent_names, view_advice
 
-    text = _model_text(spec)
+    text, notes = _model_text(spec)
     feedback = audit_feedback(text, spec.get("feedback_loops", []))
     if feedback["conflicts"]:
         raise ValueError(
@@ -495,12 +629,15 @@ def _prepare_model(spec):
         **sketch,
         "lock_node_names": [item["name"] for item in spec["variables"] if "position" in item],
     }
-    reports, insertions = [], []
+    reports, insertions, markers = [], [], {}
     for view in parse_views(lines, stock_names, time_names):
+        markers[view.name] = _marker_nodes(view, lines, notes["loop_markers"])
         if config["layout_mode"] == "natural":
-            from natural_layout import natural_view
-
-            item, extra = natural_view(lines, view, config)
+            item, extra = natural_view(
+                lines,
+                view,
+                {**config, "_marker_loops": markers[view.name], "_free_row_order": True},
+            )
             insertions.extend(extra)
         else:
             item = optimize_view(lines, view, config)
@@ -508,9 +645,18 @@ def _prepare_model(spec):
     # 新影子行按位置倒序插入，保证其余视图的行号不受影响
     for position, block in sorted(insertions, key=lambda row: row[0], reverse=True):
         lines[position:position] = block.splitlines(keepends=True)
-    for item, view in zip(reports, parse_views(lines, stock_names, time_names), strict=True):
+    views = parse_views(lines, stock_names, time_names)
+    for view in views:
+        for oid, nodes in markers.get(view.name, {}).items():
+            line_index = view.objects[oid].line_index
+            lines[line_index] = _set_fields(lines[line_index], {7: loop_marker_shape(view, nodes)})
+    views = parse_views(lines, stock_names, time_names)
+    marker_check = []
+    for item, view in zip(reports, views, strict=True):
         item["after"] = measure_view(view)
         item["pass"] = quality_pass(item["after"])
+        marker_check += _marker_check(view, lines, markers.get(view.name, {}))
+    notes["marker_check"] = marker_check
     report = {
         "requested_mode": config["layout_mode"],
         "pass": all(item["pass"] for item in reports),
@@ -519,8 +665,158 @@ def _prepare_model(spec):
             item["name"]: item["position"] for item in spec["variables"] if "position" in item
         },
         "feedback": feedback,
+        "sketch_decisions": notes,
+        "advice": _advice(spec, notes, views, view_advice),
     }
     return "".join(lines), report
+
+
+SUGGEST_LOOPS = 6  # 建议声明的回路最多几条
+LOOP_SEARCH_LIMIT = 200_000  # 找回路时最多展开的路径数，防止稠密模型耗时失控
+
+
+def _suggest_loops(originals, names, stocks, view_of, declared, numeric):
+    """未声明 feedback_loops 时，找出能被方程核对（含声明和数值偏导）的最短反馈回路。
+
+    只给建议，不替建模者画标记；回路必须经过存量，且整条回路在同一视图里。
+    返回可以直接粘进 feedback_loops 的条目。
+    """
+    from feedback_audit import check_loops
+
+    known = set(names)
+    graph = {name: [] for name in names}
+    for target, eq in originals.items():
+        expression = eq.integ_flow if target in stocks else eq.rhs
+        for dep in extract_deps(expression or "", known):
+            if dep != target:
+                graph[dep].append(target)
+    cycles, seen, steps = [], set(), 0
+    for start in sorted(names):
+        stack = [(start, (start,))]
+        while stack and steps < LOOP_SEARCH_LIMIT:
+            steps += 1
+            node, path = stack.pop()
+            for nxt in sorted(graph[node]):
+                if nxt == start:
+                    key = frozenset(zip(path, path[1:] + path[:1], strict=True))
+                    if key not in seen and any(n in stocks for n in path):
+                        seen.add(key)
+                        cycles.append((path, key))
+                elif nxt > start and nxt not in path and len(path) < 10:
+                    stack.append((nxt, (*path, nxt)))
+    suggestions, covered = [], set()
+    for cycle, key in sorted(cycles, key=lambda c: (len(c[0]), c[0])):
+        # 只推荐带来新连线的回路，短回路不会把长回路挤掉
+        if key <= covered or len({view_of[n] for n in cycle}) > 1:
+            continue
+        row = check_loops(originals, [{"variables": list(cycle)}], declared, numeric)[0]
+        if row["status"] in {"verified", "declared", "numeric"}:
+            covered |= key
+            suggestions.append(
+                {
+                    "name": f"回路{len(suggestions) + 1}",
+                    "variables": list(cycle),
+                    "polarity": row["expected"],
+                }
+            )
+        if len(suggestions) == SUGGEST_LOOPS:
+            break
+    return suggestions
+
+
+def _marker_check(view, lines, nodes_by_marker):
+    """每个回路标记是否落在自己的回路里：三个以上节点看是否在多边形内，两个节点看
+    离管道中点的距离。与排版时的口径一致，位置不对的写进报告和建议。"""
+    from natural_layout import MARKER_REACH, _contains
+
+    rows = []
+    for oid, nodes in nodes_by_marker.items():
+        marker = view.objects[oid]
+        points = [(view.objects[n].x, view.objects[n].y) for n in nodes]
+        if len(points) > 2:
+            inside = _contains((marker.x, marker.y), points)
+        else:
+            cx = sum(x for x, _ in points) / len(points)
+            cy = sum(y for _, y in points) / len(points)
+            inside = math.hypot(marker.x - cx, marker.y - cy) <= MARKER_REACH
+        rows.append({"label": lines[marker.line_index + 1].strip(), "inside": inside})
+    return rows
+
+
+def _marker_nodes(view, lines, loop_markers):
+    """回路标记与回路变量换成本视图的对象编号；流量用阀门，与回路识别的口径一致。"""
+    from natural_layout import extract_flows, is_loop_marker
+
+    valves = {f.label: f.valve for f in extract_flows(view).values() if f.label is not None}
+    defined = {
+        canonical_name(obj.name): oid
+        for oid, obj in view.objects.items()
+        if obj.kind == 10 and not obj.is_shadow
+    }
+    texts = {
+        lines[obj.line_index + 1].strip(): oid
+        for oid, obj in view.objects.items()
+        if is_loop_marker(obj) and obj.line_index + 1 < len(lines)
+    }
+    result = {}
+    for marker in loop_markers:
+        oid = texts.get(marker["label"])
+        nodes = [defined.get(canonical_name(name)) for name in marker["variables"]]
+        if oid is not None and None not in nodes:
+            result[oid] = tuple(valves.get(node, node) for node in nodes)
+    return result
+
+
+# 名字超过这个宽度时提示精简：存量 8 个汉字，其他变量 10 个汉字（按 12 号字估算）
+STOCK_NAME_ADVICE = 96
+NAME_ADVICE = 120
+
+
+def _advice(spec, notes, views, view_advice):
+    """把生成时的决定和可以改进的地方写成能直接照做的提示。"""
+    from sketch_geometry import text_width
+
+    advice = [
+        f"常量「{row['variable']}」只在视图「{row['to']}」中使用，已从「{row['from']}」移过去，"
+        "避免多出影子和孤立变量；以后请直接写在使用它的视图里"
+        for row in notes["moved_constants"]
+    ]
+    advice += [
+        f"「{name}」没有被其他方程使用，已标为 Supplementary（输出指标），打开 Vensim 不会报"
+        " USE FLAG；如果它本该影响模型，请检查引用它的方程"
+        for name in notes["supplementary"]
+    ]
+    advice += [
+        f"回路标记 {row['label']} 没能放进所属回路：回路周围太挤，试着删掉不必要的变量或把相关变量放进同一视图"
+        for row in notes.get("marker_check", [])
+        if not row["inside"]
+    ]
+    advice += [
+        "未声明 feedback_loops，可以核对的回路有：把这一条加进 feedback_loops，build 会画出 "
+        f"{row['polarity']} 标记 " + json.dumps(row, ensure_ascii=False)
+        for row in notes["suggested_loops"]
+    ]
+    if notes["numeric_links"]:
+        advice.append(
+            f"{len(notes['numeric_links'])} 条箭头的极性方程推不出（多为变量相乘），按基准运行"
+            "逐时刻数值求偏导确定，只在这次运行的取值范围内成立；需要时在 links 里写明"
+        )
+    for row in notes["unmarked_loops"]:
+        if len(row["views"]) > 1:
+            advice.append(f"回路「{row['loop']}」跨视图 {'、'.join(row['views'])}，不画 R/B 标记")
+        for source, target in row["unsigned_links"]:
+            advice.append(
+                f"回路「{row['loop']}」中 {source} → {target} 的符号无法从方程判断；在 links 里写 "
+                f'{{"from": "{source}", "to": "{target}", "polarity": "+ 或 -"}} 后会画出 R/B 标记'
+            )
+    for item in spec["variables"]:
+        limit = STOCK_NAME_ADVICE if item["kind"] == "stock" else NAME_ADVICE
+        if text_width(item["name"]) > limit:
+            advice.append(
+                f"名字「{item['name']}」偏长，建议精简到"
+                f"{limit // 12} 个字以内（去掉“的”等修饰），图上更紧凑"
+            )
+    return advice + view_advice(views)
 
 
 def build_model(spec):
@@ -549,6 +845,11 @@ def command_build(spec_path, output):
         print(f"排版仍有几何问题，详见 {report_path}")
     if report["feedback"]["status"] == "needs_review":
         print(f"部分已标极性或回路需要领域与取值范围核对，见 {report_path}")
+    drawn = report["sketch_decisions"]["loop_markers"]
+    if drawn:
+        print("回路标记: " + "，".join(f"{row['label']} {row['loop']}".strip() for row in drawn))
+    for index, line in enumerate(report["advice"], 1):
+        print(f"建议 {index}: {line}")
     return 0
 
 

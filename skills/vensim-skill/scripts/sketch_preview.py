@@ -31,10 +31,10 @@ def _color(value, default="#000000"):
     return default
 
 
-def _polarity_spot(path, boxes, back=16.0, offset=9.0):
+def _polarity_spot(path, boxes, back=16.0, offset=9.0, pipes=()):
     """极性符号的位置：从箭头末端沿线往回约 16px，再向一侧偏 9px。
 
-    两侧都试，选不压文字框的一侧；都压时取左侧。
+    两侧都试，选不压文字框、离管道至少 7px 的一侧；都不行时取左侧。
     """
     walked, i = 0.0, len(path) - 1
     while i > 0 and walked + math.dist(path[i], path[i - 1]) < back:
@@ -51,9 +51,19 @@ def _polarity_spot(path, boxes, back=16.0, offset=9.0):
     nx, ny = -(ey - ay) / length, (ex - ax) / length
     sides = [(ax + nx * offset, ay + ny * offset), (ax - nx * offset, ay - ny * offset)]
     for x, y in sides:
-        if not any(r[0] <= x <= r[2] and r[1] <= y <= r[3] for r in boxes):
+        if not any(r[0] <= x <= r[2] and r[1] <= y <= r[3] for r in boxes) and all(
+            _point_segment_distance((x, y), a, b) >= 7 for a, b in pipes
+        ):
             return x, y
     return sides[0]
+
+
+def _point_segment_distance(point, a, b):
+    (px, py), (ax, ay), (bx, by) = point, a, b
+    dx, dy = bx - ax, by - ay
+    t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy or 1.0)
+    t = max(0.0, min(1.0, t))
+    return math.hypot(px - ax - t * dx, py - ay - t * dy)
 
 
 def _cloud_points(x, y, w, h):
@@ -62,6 +72,20 @@ def _cloud_points(x, y, w, h):
         f"{x + max(w, 12) * (1 + 0.15 * math.sin(6 * t)) * math.cos(t):.2f},"
         f"{y + max(h, 9) * (1 + 0.15 * math.sin(6 * t)) * math.sin(t):.2f}"
         for t in [i * math.tau / 48 for i in range(49)]
+    )
+
+
+def _loop_symbol(x, y, radius, clockwise):
+    """Vensim 回路标记的圆形箭头：圆周留约 50° 缺口，箭头指向回路走向。"""
+    gap = math.radians(50)
+    start = -math.pi / 2 + (gap / 2 if clockwise else -gap / 2)
+    end = start + (math.tau - gap) * (1 if clockwise else -1)
+    sx, sy = x + radius * math.cos(start), y + radius * math.sin(start)
+    ex, ey = x + radius * math.cos(end), y + radius * math.sin(end)
+    return (
+        f'<path d="M{sx:.2f},{sy:.2f} A{radius:g},{radius:g} 0 1 {1 if clockwise else 0} '
+        f'{ex:.2f},{ey:.2f}" fill="none" stroke="#222" stroke-width="1.1" '
+        'marker-end="url(#head)"/>'
     )
 
 
@@ -106,6 +130,13 @@ def view_svg(view, lines, show_ids=False):
         parts.append(f'<path d="{data}" fill="none" stroke="white" stroke-width="2.4"/>')
     # ---- 信息箭头：原生单控制点圆弧 ----
     label_boxes = [box(obj, 2) for obj in view.objects.values() if visible(obj)]
+    pipe_segments = [
+        (path[i], path[i + 1])
+        for arrow in view.arrows
+        if arrow.is_physical_flow
+        for path in [paths.get(arrow.obj_id, [])]
+        for i in range(len(path) - 1)
+    ]
     for arrow in view.arrows:
         path = paths.get(arrow.obj_id, [])
         if not path or arrow.is_physical_flow:
@@ -117,7 +148,7 @@ def view_svg(view, lines, show_ids=False):
         )
         polarity = int(arrow.fields[6] or 0)
         if 32 <= polarity <= 126:
-            px, py = _polarity_spot(path, label_boxes)
+            px, py = _polarity_spot(path, label_boxes, pipes=pipe_segments)
             parts.append(
                 f'<text x="{px:.2f}" y="{py:.2f}" font-size="13" text-anchor="middle" dominant-baseline="central">{escape(chr(polarity))}</text>'
             )
@@ -162,12 +193,16 @@ def view_svg(view, lines, show_ids=False):
                 )
         elif obj.kind == 12 and obj.bits & 4:
             label = lines[obj.line_index + 1].strip() if obj.line_index + 1 < len(lines) else ""
+            if obj.shape & 31 in (4, 5):
+                parts.append(_loop_symbol(x, y, max(w, h, 10), obj.shape & 31 == 4))
         else:
             label = f"[object {obj.obj_id}]"
         if label:
             font = obj.font
-            # 影子的尖括号另占约 6px 半宽，与 sketch_geometry.box 的留白一致
-            wrap_width = w + (6 if obj.is_shadow else 0)
+            # 影子的尖括号另占约 6px 半宽，与 sketch_geometry.box 的留白一致；存量框内
+            # 左右各留 8px（按字号缩放），与排版时的存量尺寸口径一致
+            boxed = obj.kind == 10 and obj.shape & 31 == 3 and not obj.is_shadow
+            wrap_width = w + (6 if obj.is_shadow else 0) - (8 * font / 12 if boxed else 0)
             rows = wrap_label(
                 label, wrap_width if obj.kind == 10 and not obj.attached_to_valve else 0, font
             )

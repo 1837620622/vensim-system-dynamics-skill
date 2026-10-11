@@ -6,6 +6,7 @@ import argparse
 import ast
 import json
 import math
+import re
 from pathlib import Path
 
 from mdl_document import MdlDocument, atomic_write, preflight_outputs
@@ -123,14 +124,76 @@ def infer_polarity(expression, source, equations):
     return "unknown"
 
 
+NUMERIC_POINTS = 60  # 数值求偏导最多取的保存时刻数，均匀抽取
+
+
+def numeric_link_signs(text):
+    """方程推不出符号的链接，沿基准运行数值求偏导。
+
+    在均匀抽取的保存时刻，把来源变量加一个小增量、其他变量保持当时的取值，
+    重新计算目标方程；整个运行中差值始终不为负（且至少一次为正）记为 +，始终
+    不为正记为 -，否则不给结论。结论只在基准运行覆盖的取值范围内成立。
+    返回 {(来源规范名, 目标规范名): "+" 或 "-"}；模型无法用内置引擎运行时返回空。
+    """
+    from vensim_engine import LookupTable, evaluate, get_time_bounds, simulate
+
+    try:
+        expanded = parse_equations(text)
+        t0, tf, dt, saveper = get_time_bounds(expanded)
+        result = simulate(expanded, t0, tf, dt, saveper)
+    except (ValueError, RecursionError, ZeroDivisionError, OverflowError):
+        return {}
+    equations = parse_equations(text, expand=False)
+    names = set(equations)
+    name_map = {name: f"_v{i}" for i, name in enumerate(expanded)}
+    lookups = {name: LookupTable(eq.lookup_pairs) for name, eq in expanded.items() if eq.is_lookup}
+    step = max(1, math.ceil(len(result.times) / NUMERIC_POINTS))
+    samples = range(0, len(result.times), step)
+    signs = {}
+    for target, eq in equations.items():
+        if eq.integ_flow is not None or eq.is_lookup or eq.delay_fixed_args is not None:
+            continue
+        if re.search(r"\b(SMOOTH|DELAY)", eq.rhs, re.I):
+            continue
+        for source in extract_deps(eq.rhs, names):
+            if source == target or infer_polarity(eq.rhs, source, equations) in {"+", "-"}:
+                continue
+            seen = set()
+            try:
+                for index in samples:
+                    ctx = {name: values[index] for name, values in result.series.items()}
+                    ctx.update(Time=result.times[index], __time_step__=dt)
+                    base = evaluate(eq.rhs, ctx, lookups, name_map)
+                    value = ctx[source]
+                    ctx[source] = value + 1e-6 * max(1.0, abs(value))
+                    change = evaluate(eq.rhs, ctx, lookups, name_map) - base
+                    seen.add(0 if abs(change) <= 1e-12 * (1 + abs(base)) else (change > 0) * 2 - 1)
+            except (ValueError, KeyError, ZeroDivisionError, OverflowError):
+                continue
+            if seen in ({1}, {0, 1}):
+                signs[(canonical_name(source), canonical_name(target))] = "+"
+            elif seen in ({-1}, {0, -1}):
+                signs[(canonical_name(source), canonical_name(target))] = "-"
+    return signs
+
+
 # ---------------------------------------------------------------------------
 # 回路核对
 # ---------------------------------------------------------------------------
 
 
-def check_loops(equations, loops):
+def check_loops(equations, loops, declared_links=None, numeric_links=None):
+    """核对指定回路的 R/B。
+
+    方程推不出符号的链接（如两个变量相乘），先用建模者在 links 或图上标的极性，
+    回路状态记为 declared；仍没有的用基准运行的数值偏导（numeric_link_signs），
+    状态记为 numeric。完全由方程推出的记为 verified。两个字典的键都是
+    (来源, 目标) 的规范名。
+    """
     if not isinstance(loops, list):
         raise ValueError("feedback_loops 必须是列表")
+    declared_links = declared_links or {}
+    numeric_links = numeric_links or {}
     aliases = {canonical_name(name): name for name in equations}
     result = []
     for loop in loops:
@@ -160,7 +223,7 @@ def check_loops(equations, loops):
         declared = loop.get("polarity")
         if declared is not None and (not isinstance(declared, str) or declared not in {"R", "B"}):
             raise ValueError("回路 polarity 只能是 R 或 B")
-        signs = []
+        signs, missing, used_declared, used_numeric = [], [], False, False
         for source, target in zip(path, path[1:] + path[:1], strict=False):
             eq = equations[target]
             expression = (
@@ -174,7 +237,17 @@ def check_loops(equations, loops):
                 raise ValueError(
                     f"反馈路径不存在动态依赖: {source} → {target}；初值关系不构成动态回路"
                 )
-            signs.append(infer_polarity(expression, source, equations))
+            sign = infer_polarity(expression, source, equations)
+            if sign not in {"+", "-"}:
+                key = (canonical_name(source), canonical_name(target))
+                marked = declared_links.get(key)
+                if SIGNS.get(marked):
+                    sign, used_declared = "+" if SIGNS[marked] > 0 else "-", True
+                elif key in numeric_links:
+                    sign, used_numeric = numeric_links[key], True
+                else:
+                    missing.append([source, target])
+            signs.append(sign)
         expected = (
             ("B" if signs.count("-") % 2 else "R")
             if all(sign in {"+", "-"} for sign in signs)
@@ -191,7 +264,13 @@ def check_loops(equations, loops):
                 if expected == "unknown"
                 else "conflict"
                 if declared and declared != expected
+                else "numeric"
+                if used_numeric
+                else "declared"
+                if used_declared
                 else "verified",
+                # 方程推不出、也没有标注极性的链接，补上 links 后回路才能核对
+                "unsigned_links": missing,
                 "native_symbol_placement_verified": False,
             }
         )
@@ -213,6 +292,7 @@ def audit_feedback(text, loops=None):
         text.splitlines(True), {name for name, eq in equations.items() if eq.integ_flow is not None}
     )
     rows, unresolved = [], []
+    numeric = None  # 基准运行的数值偏导，第一次用到时才仿真
     for view in views:
         labels = {
             oid: aliases.get(canonical_name(obj.name), obj.name)
@@ -290,6 +370,13 @@ def audit_feedback(text, loops=None):
                 status = "needs_review"
             elif exists and sign and expected != "unknown":
                 status = "verified" if sign == SIGNS.get(expected) else "conflict"
+            elif exists and sign and kind == "information":
+                # 方程推不出：与基准运行的数值偏导一致记为 numeric，只在运行范围内成立
+                if numeric is None:
+                    numeric = numeric_link_signs(text)
+                found = numeric.get((canonical_name(source), canonical_name(target)))
+                if found and SIGNS[found] == sign:
+                    status = "numeric"
             rows.append(
                 {
                     "view": view.name,
@@ -303,7 +390,15 @@ def audit_feedback(text, loops=None):
                     "native_dtype": arrow.fields[9] if len(arrow.fields) > 9 else "",
                 }
             )
-    loop_rows = check_loops(equations, [] if loops is None else loops)
+    marked = {
+        (canonical_name(row["source"]), canonical_name(row["target"])): row["displayed"]
+        for row in rows
+        # 与数值偏导一致的符号不算建模者声明，回路由 numeric 字典给出依据
+        if row["kind"] != "flow" and row["displayed"] in SIGNS and row["status"] != "numeric"
+    }
+    if loops and numeric is None:
+        numeric = numeric_link_signs(text)
+    loop_rows = check_loops(equations, [] if loops is None else loops, marked, numeric)
     conflicts = [row for row in rows if row["status"] in {"conflict", "no_dependency"}]
     conflicts.extend(row for row in loop_rows if row["status"] == "conflict")
     needs_review = bool(unresolved) or any(

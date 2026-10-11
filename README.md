@@ -1,6 +1,6 @@
 # Vensim System Dynamics Skill
 
-![Version](https://img.shields.io/badge/version-2.3.1-2f6f9f)
+![Version](https://img.shields.io/badge/version-2.4.0-2f6f9f)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-non--commercial-8a8a8a)
 
@@ -26,11 +26,15 @@ Duggan 教材的 Student Flows 模型。原图有文字重叠、连线交叉和�
 
 ### 从 JSON 生成中文模型
 
-| 库存补货 | 水量负反馈 |
+| 库存补货（两个平衡回路） | 水量负反馈 |
 | --- | --- |
 | ![库存示例](docs/assets/inventory_zh.png) | ![补水示例](docs/assets/water_feedback_zh.png) |
 
-参数放在它直接影响的变量旁边，回路沿环形排布，零交叉。建模 JSON 见 [inventory_zh.json](skills/vensim-skill/assets/templates/inventory_zh.json)。
+更复杂的完整模板：新能源汽车推广，3 个存量、4 条回路、共 23 个变量，`build` 一次生成，几何检查、`check --strict` 都通过。
+
+![新能源汽车推广](docs/assets/ev_adoption_zh.png)
+
+参数放在它直接影响的变量旁边，R/B 回路标记落在各自回路中央，零交叉。建模 JSON 见 [ev_adoption_zh.json](skills/vensim-skill/assets/templates/ev_adoption_zh.json)，写新模型时照这个写法起步。
 
 ### 仿真结果图
 
@@ -46,8 +50,8 @@ Duggan 教材的 Student Flows 模型。原图有文字重叠、连线交叉和�
 
 | 环节 | 命令 | 说明 |
 | --- | --- | --- |
-| 建模 | `build` `fix` | 由 JSON 写明存量、流向、方程、单位，生成 MDL 并完成排版和极性核对；可按子系统分视图，跨视图自动生成影子变量；`fix` 按显式选项补单位、删除断裂的箭头 |
-| 检查 | `inspect` `audit` `check` `units` | 草图对象、断裂引用、未定义变量、初值循环、缺失单位 |
+| 建模 | `build` `fix` | 由 JSON 写明存量、流向、方程、单位，生成 MDL 并完成排版和极性核对；按 `feedback_loops` 画出核对过的 R/B 回路标记，没声明时给出可直接粘贴的回路建议；可按子系统分视图，跨视图自动生成影子变量；`fix` 按显式选项补单位、删除断裂的箭头、把没人用的输出指标标为 Supplementary |
+| 检查 | `inspect` `audit` `check` `units` | 草图对象、断裂引用、未定义变量、初值循环、缺失单位；`check --strict` 还要求没有 Vensim 的 USE FLAG（没有被使用的变量），打开模型时不再提示 |
 | 排版 | `layout` `visual` `preview` | 四种模式（见下文）；`visual --strict` 检查交叉、压字、重叠、过短箭头和 `<Time>` 预留区；`preview` 生成草图 HTML，字宽为估算值，只用于定位问题 |
 | 反馈 | `feedback` | 按方程求偏导符号，核对箭头 `+/-` 和指定回路的 R/B |
 | 仿真 | `simulate` `crosscheck` `convergence` | 内置 Euler 引擎；与 PySD 逐点对照；dt、dt/2、dt/4 步长收敛检查 |
@@ -92,6 +96,7 @@ cd vensim-system-dynamics-skill/skills/vensim-skill
 ```bash
 ./skill.sh build assets/templates/inventory_zh.json --output work/inventory.mdl
 ./skill.sh visual work/inventory.mdl --strict
+./skill.sh check work/inventory.mdl --strict
 ./skill.sh simulate work/inventory.mdl --var 库存 --output results/base.csv
 ./skill.sh experiment work/inventory.mdl --spec assets/templates/inventory_scenarios.json \
   --output-dir results/scenarios --plot figures/scenarios.png
@@ -114,10 +119,11 @@ cd vensim-system-dynamics-skill/skills/vensim-skill
 
 几条主要规则和依据：
 
-- 存量方框最小 96×48（官方示例中位数约 104×56），长名字在框内折成两行；云到阀门 80px，阀门到存量不少于 120px（官方示例中位数 76px、124px）。
+- 存量方框最小 96×48（官方示例中位数约 104×56），中文名 10 个字以内一行写完，更长的折成长度相近的两行；云到阀门 80px，阀门到存量不少于 120px（官方示例中位数 76px、124px）。
 - 信息线是单控制点圆弧，弧度（矢高/弦长）目标 0.12（官方示例中位数 0.14）；只在弧线会交叉或擦字时用直线。
 - 存量链水平排列，相邻两行中心至少隔 200px（教材模型中位数约 180px）。跳过中间存量的流量画成绕行支路或直角折线管道，两种画法都取自 Duggan 教材原图。
-- R/B 回路标记放回它所在回路的内部；隐藏的变量连同进出箭头一起不画（Vensim Hide/unhide 文档）。
+- R/B 回路标记在排版时是占位的节点：被所属回路的中心吸引、落在回路里面，其他变量围绕它排布，圈的方向按回路走向画；隐藏的变量连同进出箭头一起不画（Vensim Hide/unhide 文档）。
+- 新建模型自动避开 Vensim 打开时的 USE FLAG 提示：没人用的输出指标标 Supplementary，没人用的常量直接报错（Vensim 文档：未使用变量只是提示、不影响仿真，标 Supplementary 可消除）。
 - 零交叉。结构上不可平面时（如 K3,3）用影子变量引出连线，报告逐条列出。
 - 大模型按子系统分视图，视图之间用变量或影子变量连接（Vensim *How Views Work*）。每个视图 6–40 个定义变量是本工具的设计取值，不做碎视图。
 

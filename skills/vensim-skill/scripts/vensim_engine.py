@@ -76,6 +76,7 @@ class Equation:
     line_index: int = 0
     smooth_init_ref: str | None = None  # SMOOTH 隐式库存初值引用的输入变量名
     delay_fixed_args: list[str] | None = None  # 固定延迟有自己的状态队列
+    supplementary: bool = False  # 注释后的 ~ :SUP 字段：只作输出、不参与其他方程
 
 
 def canonical_name(name: str) -> str:
@@ -208,12 +209,17 @@ def parse_equations(mdl_text: str, expand: bool = True) -> OrderedDict[str, Equa
                 raise ValueError(f"变量重复定义: {name}")
             del equations[previous]
         defined.add(key)
+        # 注释之后可以再跟 ~ :SUP（或 :SUPPLEMENTARY）字段，把变量标为输出指标
+        extra = fields[2].split("~") if len(fields) > 2 else [""]
         eq = Equation(
             name=name,
             rhs=rhs,
             unit=fields[1].strip() if len(fields) > 1 else "",
-            comment=fields[2].strip() if len(fields) > 2 else "",
+            comment=extra[0].strip(),
             line_index=offset + block[: match.start()].count("\n"),
+            supplementary=any(
+                re.fullmatch(r":SUP(?:PLEMENTARY)?", part.strip(), re.I) for part in extra[1:]
+            ),
         )
         integ_args = _function_args(rhs, "INTEG")
         if integ_args is not None:
@@ -398,6 +404,34 @@ def extract_deps(rhs: str, known_names: set) -> list[str]:
             deps.append(name)
             remaining = re.sub(pattern, " ", remaining, flags=re.I)
     return deps
+
+
+def _is_number(text: str) -> bool:
+    try:
+        return math.isfinite(float(text))
+    except ValueError:
+        return False
+
+
+def use_flags(equations: OrderedDict[str, Equation]) -> tuple[list[str], list[str]]:
+    """按 Vensim Check Model 的使用检查找出两类变量（USE FLAG）。
+
+    一是没有被任何其他方程引用的变量（不在任何反馈回路上），二是标了
+    Supplementary 却被引用的变量。存量的 INTEG 写在等号右侧，流量和初值参数
+    都算被使用；时间控制变量由仿真器使用，不在此列。
+    """
+    names = set(equations)
+    used = set()
+    for name, eq in equations.items():
+        used.update(dep for dep in extract_deps(eq.rhs, names) if dep != name)
+    controls = {"INITIAL TIME", "FINAL TIME", "TIME STEP", "SAVEPER"}
+    not_used = [
+        name
+        for name, eq in equations.items()
+        if name not in used and name not in controls and not eq.supplementary
+    ]
+    misused = [name for name, eq in equations.items() if eq.supplementary and name in used]
+    return not_used, misused
 
 
 def topological_sort(equations: OrderedDict[str, Equation]) -> list[str]:
@@ -1266,7 +1300,7 @@ def command_units(path: Path) -> int:
 # ---------------------------------------------------------------------------
 
 
-def command_check(path: Path) -> int:
+def command_check(path: Path, strict: bool = False) -> int:
     text = load_mdl_text(path)
     equations = parse_equations(text)
     names = set(equations.keys())
@@ -1326,22 +1360,41 @@ def command_check(path: Path) -> int:
             errors += 1
             print(f"  ERROR: 缺失控制变量 {req}")
 
+    # 7. 使用检查：与 Vensim Check Model 的 USE FLAG 同口径，打开模型时就会看到
+    not_used, misused = use_flags(parse_equations(text, expand=False))
+    for name in not_used:
+        warnings += 1
+        print(
+            f"  WARNING {name}: 没有被任何方程使用（Vensim 报 USE FLAG）；"
+            "是输出指标就用 fix --mark-supplementary 标记，否则删掉"
+        )
+    for name in misused:
+        warnings += 1
+        print(f"  WARNING {name}: 标了 Supplementary 却被其他方程使用，请去掉该标记")
+
     if errors == 0:
         print("\nPASS: 未发现错误。")
     else:
         print(f"\nFAIL: {errors} 个错误。")
     print(f"Warnings: {warnings}")
-    return 1 if errors else 0
+    if strict and warnings:
+        print("FAIL(--strict): 警告也要清零（缺单位、USE FLAG），Vensim 打开时才不会提示。")
+    return 1 if errors or (strict and warnings) else 0
 
 
-def command_fix(path: Path, output: Path, units_map=None, drop_broken=False) -> int:
+def command_fix(
+    path: Path, output: Path, units_map=None, drop_broken=False, mark_supplementary=False
+) -> int:
     _ensure_output_separate(output, [path, *([units_map] if units_map else [])])
     document = MdlDocument.read(path)
     text = document.text
     equations = parse_equations(document.semantic_text, expand=False)
     fixes = []
-    if not units_map and not drop_broken:
-        raise ValueError("请指定 --units-map 或 --drop-broken-arrows；缺失的单位不会自动补成 Dmnl")
+    if not units_map and not drop_broken and not mark_supplementary:
+        raise ValueError(
+            "请指定 --units-map、--drop-broken-arrows 或 --mark-supplementary；"
+            "缺失的单位不会自动补成 Dmnl"
+        )
     if units_map:
         mapping = json.loads(units_map.read_text(encoding="utf-8-sig"))
         for name, unit in mapping.items():
@@ -1376,6 +1429,22 @@ def command_fix(path: Path, output: Path, units_map=None, drop_broken=False) -> 
         }
         text = "".join(line for index, line in enumerate(lines) if index not in broken)
         fixes.append(f"按显式选项删除 {len(broken)} 条断裂草图箭头")
+    if mark_supplementary:
+        # 没有被使用的输出指标加上 ~ :SUPPLEMENTARY 字段，打开 Vensim 不再报 USE FLAG。
+        # 没有被使用的常量多半是遗留参数，不替它掩盖，只列出来建议删除
+        not_used, _ = use_flags(equations)
+        constants = [name for name in not_used if _is_number(equations[name].rhs)]
+        for name in not_used:
+            if name in constants:
+                continue
+            start = re.search(rf'(?m)^[ \t]*"?{re.escape(name)}"?[ \t]*(?:=|\()', text)
+            end = text.find("|", start.end()) if start else -1
+            if start is None or end < 0:
+                raise ValueError(f"无法安全定位方程: {name}")
+            missing = max(0, 2 - text.count("~", start.end(), end))
+            text = text[:end] + "~\n\t" * missing + "~\t:SUPPLEMENTARY\n\t" + text[end:]
+            fixes.append(f"标为 Supplementary（输出指标）: {name}")
+        fixes.extend(f"常量 {name} 没有被任何方程使用，未标记，建议删除" for name in constants)
     atomic_write(output, text.encode(document.encoding, errors="surrogateescape"))
     print(json.dumps({"output": str(output), "fixes": fixes}, ensure_ascii=False, indent=2))
     return 0
@@ -1423,12 +1492,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_check = sub.add_parser("check", help="检查方程引用、时间设置与草图记录")
     p_check.add_argument("model", type=Path)
+    p_check.add_argument(
+        "--strict", action="store_true", help="警告（缺单位、未使用变量）也按失败处理"
+    )
 
     p_fix = sub.add_parser("fix", help="自动修复")
     p_fix.add_argument("model", type=Path)
     p_fix.add_argument("--output", required=True, type=Path)
     p_fix.add_argument("--units-map", type=Path)
     p_fix.add_argument("--drop-broken-arrows", action="store_true")
+    p_fix.add_argument(
+        "--mark-supplementary",
+        action="store_true",
+        help="把没有被使用的输出指标标为 Supplementary，消除 Vensim 的 USE FLAG",
+    )
 
     from result_plotting import plot_options
 
@@ -1485,9 +1562,15 @@ def main() -> int:
     if args.command == "units":
         return command_units(args.model)
     if args.command == "check":
-        return command_check(args.model)
+        return command_check(args.model, args.strict)
     if args.command == "fix":
-        return command_fix(args.model, args.output, args.units_map, args.drop_broken_arrows)
+        return command_fix(
+            args.model,
+            args.output,
+            args.units_map,
+            args.drop_broken_arrows,
+            args.mark_supplementary,
+        )
     return 2
 
 

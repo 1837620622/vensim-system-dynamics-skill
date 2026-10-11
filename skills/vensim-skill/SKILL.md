@@ -3,7 +3,7 @@ name: vensim-skill
 description: "Build, lay out, check and simulate Vensim system dynamics models (.mdl). Use when the user wants a stock-and-flow or causal loop diagram in Vensim, needs an existing MDL tidied (overlapping labels, crossing arrows, messy views), wants polarity and R/B loop checks, or needs reproducible simulation, scenario, sensitivity, calibration or policy runs with publication-quality Python plots. Chinese variable names by default; Windows, macOS and Linux."
 license: "Non-commercial only; commercial use, paid redistribution and commercial delivery are prohibited; see LICENSE"
 metadata:
-  version: "2.3.0"
+  version: "2.3.1"
 ---
 
 # Vensim 建模、排版与仿真
@@ -14,15 +14,15 @@ metadata:
 
 1. **坐标交给命令，不手写。** 新模型用 `build` 从 JSON 生成，已有模型用 `layout`。不要自己算坐标、改草图记录或画示意图代替 MDL。排版规则（间距、弧度、绕行支路、回路标记位置）已经写在代码里，依据见 [APPEARANCE.md](references/APPEARANCE.md)。
 2. **已有模型默认 `auto`。** 作者的版面合格就不动；只有一两处压字时只挪那几个变量；问题多时才重建。用户明确要求重画时才用 `--mode natural`。
-3. **交付前 `visual --strict` 必须通过**：零交叉、不压字、文字不重叠、没有过短箭头、`<Time>` 预留区空着。报告里列出的对象 ID 要逐个处理，不能靠删线、隐藏或改方程过关。
+3. **交付前 `visual --strict` 必须通过**：零交叉、不压字、文字不重叠、没有过短箭头、`<Time>` 预留区空着。报告里列出的对象 ID 要逐个处理，不能靠删线、隐藏或改方程过关。原图里保留、`auto` 也消不掉的问题（如 Overshoot 的 1 处穿字），要在交付说明里写明对象 ID，不能算通过。
 4. **排版不改模型。** 输出写新文件，方程区逐字节不变。唯一的结构改动是 natural 在不可平面处加的影子引用，报告里逐条列出，因果关系不变。
 5. **视图只做关键的。** 定义变量约 40 个以内用一个视图；更大的模型按子系统分，每个视图 6–40 个定义变量，对应一条主要存量链或一组紧密相关的机制；跨视图引用用影子变量。不做一个变量一个视图、两三个变量的碎视图，也不把上百个变量挤在一起。
 6. **图面朴素。** 存量画方框，流量画阀门和双线管道，其余变量只写名字。信息线统一黑色（`monochrome`），或 Vensim 传统纯蓝（`native-blue`）。图内只放变量、极性、延迟标记和核对过的 R/B，不加标题、水印、底色、说明框或装饰。
 7. **新模型默认中文变量名。** 用户要求英文时用英文；Vensim 函数和 `INITIAL TIME` 等控制变量保持英文。修改已有模型时不改变量名。
 8. **极性和回路按方程判断**，不按变量名或曲线涨跌猜。用 `feedback` 核对；非线性、查表关系说明适用范围，判断不了的标为待核对，不硬填符号。
 9. **参数来自当前资料。** 时间范围、初值、参数、情景幅度、抽样次数和种子都按当前任务确定；示例和参考模型里的数值不能拿来填空。缺资料时列出缺项。
-10. **结果图用 Python 出，默认无标题。** 坐标框细线、刻度朝内、无网格；颜色和线型同时区分曲线；8 条以上分组出图，蒙特卡洛画分位带；数据不平滑、不删点。样式依据见 [RESULT_PLOTS.md](references/RESULT_PLOTS.md)。
-11. **结构图从 Vensim 导出。** `preview` 用估算字宽画的 SVG 只用来定位问题。没有 Vensim 时交付 MDL 和检查报告，并写明“未在 Vensim 中核对”。
+10. **结果图用 Python 出，默认无标题。** 坐标框细线、刻度朝内、无网格；颜色和线型同时区分曲线；超过 8 条曲线分组出图（`max_lines`），蒙特卡洛画分位带；数据不平滑、不删点。样式依据见 [RESULT_PLOTS.md](references/RESULT_PLOTS.md)。
+11. **结构图从 Vensim 导出。** `preview` 生成的 HTML/SVG 用估算字宽，只用来定位问题。没有 Vensim 时交付 MDL 和检查报告，并写明“未在 Vensim 中核对”。
 12. **如实报告。** 几何检查通过（`pass`）和已在 Vensim 中核对是两回事；没做的检查不能写成通过。内置引擎或 PySD 的结果不能说成 Vensim 原生运行。
 
 ## 工作顺序

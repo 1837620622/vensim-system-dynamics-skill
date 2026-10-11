@@ -1,6 +1,6 @@
 [project]
 name = "vensim-system-dynamics-skill"
-version = "2.3.0"
+version = "2.3.1"
 description = "Vensim system dynamics skill for AI agents: MDL building, layout, checks, simulation and plots"
 requires-python = ">=3.10"
 readme = "README.md"

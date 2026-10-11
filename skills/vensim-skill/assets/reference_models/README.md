@@ -17,6 +17,6 @@
 | `student_flows.mdl` | SDMR | `archive 2015/04 Lecture/Vensim/Student Flows.mdl` | 四个年级的升级链，每段带留级存量 | 留级存量交替画在主干上方和下方，拐角阀门的名字放在夹角内侧；原图有隐藏变量 |
 | `health_model.mdl` | SDMR | `models/04 Chapter/Vensim/Health Model.mdl` | 人口年龄链、门诊需求、医生供给 | 按子系统分成 3 个视图，跨视图引用用影子变量 |
 
-内置引擎与 PySD 对这 7 个模型的全部变量逐点比较，按 `max(1, |值|)` 缩放后的最大差值不超过 1e-15（`crosscheck`）。
+内置引擎与 PySD 对这 7 个模型的全部标量变量逐点比较（图形函数不能单独导出，由调用它的变量间接检验），按 `max(1, |值|)` 缩放后的最大差值不超过 1e-15（`crosscheck`）。
 
 Vensim 官方示例（Ventana Systems 随软件发布）也用来统计过排版间距，但许可不允许再分发，所以没有收录。

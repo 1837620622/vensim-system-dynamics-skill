@@ -1,5 +1,5 @@
 @echo off
-REM Vensim System Dynamics Skill - Windows CMD 便捷封装
+REM Vensim System Dynamics Skill - Windows 命令行入口
 REM 复杂参数处理放在 Python wrapper 中，避免 CMD 字符串拼接与 delayed expansion 破坏路径。
 setlocal DisableDelayedExpansion
 set "PYTHONUTF8=1"

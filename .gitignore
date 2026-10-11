@@ -10,7 +10,6 @@ dist/
 # 自动排版生成的临时文件
 *.backup.mdl
 *.layout_report.json
-my_layout.json
 
 # Vensim 仿真输出与临时文件
 *.3vmfx
@@ -30,5 +29,4 @@ Thumbs.db
 # 编辑器
 .vscode/
 .idea/
-*.mdl.backup.mdl
 AGENTS.md

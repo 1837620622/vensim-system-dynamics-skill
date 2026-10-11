@@ -155,7 +155,6 @@ def font_settings(text, config=None):
             name
             for name in (
                 "SimSun",
-                "SimSong",
                 "Songti SC",
                 "Noto Serif CJK SC",
                 "Source Han Serif SC",

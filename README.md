@@ -1,6 +1,6 @@
 # Vensim System Dynamics Skill
 
-![Version](https://img.shields.io/badge/version-2.3.0-2f6f9f)
+![Version](https://img.shields.io/badge/version-2.3.1-2f6f9f)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-non--commercial-8a8a8a)
 
@@ -22,7 +22,7 @@ Duggan 教材的 Student Flows 模型。原图有文字重叠、连线交叉和�
 | --- | --- |
 | ![Student Flows 原图](docs/assets/student_flows_original.png) | ![Student Flows 排版后](docs/assets/student_flows_auto.png) |
 
-画得好的原图不会被重画。Overshoot 模型原图只有两处文字相压，`layout` 只挪开 2 个变量，其余坐标和弧线保持原样。
+画得好的原图不会被重画。Overshoot 模型原图有两处文字相压，另有两条箭头穿过变量名。`layout` 挪开 2 个变量后，文字相压全部消除，穿字只剩作者原来的一条弧线（报告中会列出），其余坐标和弧线保持原样。
 
 ### 从 JSON 生成中文模型
 
@@ -46,9 +46,9 @@ Duggan 教材的 Student Flows 模型。原图有文字重叠、连线交叉和�
 
 | 环节 | 命令 | 说明 |
 | --- | --- | --- |
-| 建模 | `build` | 由 JSON 写明存量、流向、方程、单位，生成 MDL 并完成排版和极性核对；可按子系统分视图，跨视图自动生成影子变量 |
+| 建模 | `build` `fix` | 由 JSON 写明存量、流向、方程、单位，生成 MDL 并完成排版和极性核对；可按子系统分视图，跨视图自动生成影子变量；`fix` 按显式选项补单位、删除断裂的箭头 |
 | 检查 | `inspect` `audit` `check` `units` | 草图对象、断裂引用、未定义变量、初值循环、缺失单位 |
-| 排版 | `layout` `visual` | 四种模式（见下文）；`visual --strict` 检查交叉、压字、重叠、过短箭头和 `<Time>` 预留区 |
+| 排版 | `layout` `visual` `preview` | 四种模式（见下文）；`visual --strict` 检查交叉、压字、重叠、过短箭头和 `<Time>` 预留区；`preview` 生成草图 HTML，字宽为估算值，只用于定位问题 |
 | 反馈 | `feedback` | 按方程求偏导符号，核对箭头 `+/-` 和指定回路的 R/B |
 | 仿真 | `simulate` `crosscheck` `convergence` | 内置 Euler 引擎；与 PySD 逐点对照；dt、dt/2、dt/4 步长收敛检查 |
 | 实验 | `experiment` | 命名情景、单因素扰动、网格、蒙特卡洛 |
@@ -114,18 +114,18 @@ cd vensim-system-dynamics-skill/skills/vensim-skill
 
 几条主要规则和依据：
 
-- 存量方框最小 96×48，长名字在框内折成两行；云到阀门 80px，阀门到存量不少于 120px（Vensim 官方示例中位数 76px、124px）。
+- 存量方框最小 96×48（官方示例中位数约 104×56），长名字在框内折成两行；云到阀门 80px，阀门到存量不少于 120px（官方示例中位数 76px、124px）。
 - 信息线是单控制点圆弧，弧度（矢高/弦长）目标 0.12（官方示例中位数 0.14）；只在弧线会交叉或擦字时用直线。
 - 存量链水平排列，相邻两行中心至少隔 200px（教材模型中位数约 180px）。跳过中间存量的流量画成绕行支路或直角折线管道，两种画法都取自 Duggan 教材原图。
 - R/B 回路标记放回它所在回路的内部；隐藏的变量连同进出箭头一起不画（Vensim Hide/unhide 文档）。
 - 零交叉。结构上不可平面时（如 K3,3）用影子变量引出连线，报告逐条列出。
-- 大模型按子系统分视图，每个视图 6–40 个定义变量，不做碎视图（Vensim *How Views Work*）。
+- 大模型按子系统分视图，视图之间用变量或影子变量连接（Vensim *How Views Work*）。每个视图 6–40 个定义变量是本工具的设计取值，不做碎视图。
 
 完整规则见 [APPEARANCE.md](skills/vensim-skill/references/APPEARANCE.md)。
 
 ## 参考模型
 
-[reference_models](skills/vensim-skill/assets/reference_models/README.md) 收录了 7 个真实教材模型（Duggan *System Dynamics Modeling with R* 5 个、SDXorg 测试模型 2 个，均为 MIT 许可，与上游逐字节一致），覆盖单链、老化链、绕行支路、多视图和影子变量。它们有两个用途：排版时参考作者的画法，测试时检查排版和仿真没有退化。内置引擎与 PySD 对这 7 个模型的全部变量逐点一致。
+[reference_models](skills/vensim-skill/assets/reference_models/README.md) 收录了 7 个真实教材模型（Duggan *System Dynamics Modeling with R* 5 个、SDXorg 测试模型 2 个，均为 MIT 许可，与上游逐字节一致），覆盖单链、老化链、绕行支路、多视图和影子变量。它们有两个用途：排版时参考作者的画法，测试时检查排版和仿真没有退化。内置引擎与 PySD 对这 7 个模型的全部标量变量逐点一致，缩放误差不超过 1e-15；图形函数不能单独导出，由调用它的变量间接检验。
 
 ## 目录
 

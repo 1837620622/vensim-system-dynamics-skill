@@ -1,6 +1,6 @@
 # Vensim System Dynamics Skill
 
-![Version](https://img.shields.io/badge/version-2.3.0-2f6f9f)
+![Version](https://img.shields.io/badge/version-2.3.1-2f6f9f)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-non--commercial-8a8a8a)
 
@@ -22,7 +22,7 @@ Student Flows from Duggan's textbook. The original has overlapping labels, a cro
 | --- | --- |
 | ![Student Flows original](docs/assets/student_flows_original.png) | ![Student Flows after layout](docs/assets/student_flows_auto.png) |
 
-A well-drawn original is not redrawn. Overshoot has only two places where text touches; `layout` moves two variables and leaves every other coordinate and arc alone.
+A well-drawn original is not redrawn. Overshoot has two places where text touches and two arrows that cross variable names; `layout` moves two variables, which clears every text clash and leaves one arrow crossing a name (listed in the report). Every other coordinate and arc stays as drawn.
 
 ### Generating a model from JSON (Chinese variable names)
 
@@ -46,9 +46,9 @@ Diagrams on this page are rendered from the MDL by the `preview` command; text w
 
 | Step | Commands | What it does |
 | --- | --- | --- |
-| Build | `build` | Generates an MDL from a JSON spec of stocks, flows, equations and units, then lays it out and checks polarity; splits views by subsystem with automatic shadow variables |
+| Build | `build` `fix` | Generates an MDL from a JSON spec of stocks, flows, equations and units, then lays it out and checks polarity; splits views by subsystem with automatic shadow variables; `fix` fills units and drops broken arrows on explicit options |
 | Check | `inspect` `audit` `check` `units` | Sketch objects, broken references, undefined variables, initialisation loops, missing units |
-| Layout | `layout` `visual` | Four modes (below); `visual --strict` checks crossings, text overlap, too-short arrows and the `<Time>` slot |
+| Layout | `layout` `visual` `preview` | Four modes (below); `visual --strict` checks crossings, text overlap, too-short arrows and the `<Time>` slot; `preview` writes a sketch as HTML with estimated text widths, for locating problems only |
 | Feedback | `feedback` | Signs of partial derivatives from the equations, checked against arrow `+/-` and declared R/B loops |
 | Simulate | `simulate` `crosscheck` `convergence` | Built-in Euler engine; point-by-point comparison with PySD; dt, dt/2, dt/4 convergence |
 | Experiments | `experiment` | Named scenarios, one-at-a-time perturbation, grid, Monte Carlo |
@@ -114,18 +114,18 @@ Commands refuse to overwrite existing outputs; use a new name when re-running.
 
 Main rules and their sources:
 
-- Stock boxes are at least 96×48 and long names wrap to two lines inside the box; cloud to valve is 80 px, valve to stock at least 120 px (medians of 76 px and 124 px in Vensim's own examples).
+- Stock boxes are at least 96×48 (median about 104×56 in Vensim's own examples) and long names wrap to two lines inside the box; cloud to valve is 80 px, valve to stock at least 120 px (medians of 76 px and 124 px in Vensim's own examples).
 - Information links are single-control-point arcs with a target bow (sagitta/chord) of 0.12 (median 0.14 in the official examples); straight lines only where an arc would cross or graze text.
 - Stock chains run horizontally with at least 200 px between rows (textbook median about 180 px). Flows that skip a stock become a detour branch or a right-angle bypass pipe, both taken from Duggan's diagrams.
 - R/B loop markers go back inside the loop they label; hidden variables are skipped together with their arrows (Vensim Hide/unhide).
 - Zero crossings. Where the structure is non-planar (K3,3), a shadow variable carries the link, and each such split is listed in the report.
-- Large models are split into views by subsystem, 6–40 defined variables each, with no fragment views (Vensim, *How Views Work*).
+- Large models are split into views by subsystem, with views linked by variables or shadow variables (Vensim, *How Views Work*). The 6–40 defined variables per view is this tool's design range, and fragment views are avoided.
 
 Full rules: [APPEARANCE.md](skills/vensim-skill/references/APPEARANCE.md) (Chinese).
 
 ## Reference models
 
-[reference_models](skills/vensim-skill/assets/reference_models/README.md) holds seven real textbook models: five from Duggan's *System Dynamics Modeling with R* and two from the SDXorg test suite, all MIT licensed and byte-identical to upstream. They cover single chains, aging chains, detours, multiple views and shadow variables, and serve two purposes: showing how the authors drew similar structures, and guarding layout and simulation against regressions. The built-in engine and PySD agree on every variable of all seven models.
+[reference_models](skills/vensim-skill/assets/reference_models/README.md) holds seven real textbook models: five from Duggan's *System Dynamics Modeling with R* and two from the SDXorg test suite, all MIT licensed and byte-identical to upstream. They cover single chains, aging chains, detours, multiple views and shadow variables, and serve two purposes: showing how the authors drew similar structures, and guarding layout and simulation against regressions. The built-in engine and PySD agree on every scalar variable of all seven models, with a scaled error below 1e-15; lookup functions cannot be exported on their own and are checked through the variables that call them.
 
 ## Layout of the repository
 

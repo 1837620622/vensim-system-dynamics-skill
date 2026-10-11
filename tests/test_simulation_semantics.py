@@ -111,6 +111,7 @@ def test_crosscheck_reports_pointwise_python_agreement(tmp_path):
     assert report["max_absolute_error"] == 0
 
 
+@pytest.mark.filterwarnings("ignore:_delayfixed_output:UserWarning")
 @pytest.mark.parametrize("duration", [0, 1, 1.5, 2.5])
 def test_fixed_delay_frozen_state_and_step_rounding_match_pysd(tmp_path, duration):
     model = model_file(

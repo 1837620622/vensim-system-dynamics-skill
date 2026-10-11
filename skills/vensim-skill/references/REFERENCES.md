@@ -19,15 +19,15 @@
 
 ## 系统动力学文献
 
-- Sterman, J. D. (2000). *Business Dynamics: Systems Thinking and Modeling for a Complex World*. McGraw-Hill. 存量—流量画法、回路极性判断、模型检验方法（第 21 章）。
-- Sterman, J. D. *Fine-Tuning Your Causal Loop Diagrams*, [Part I](https://thesystemsthinker.com/fine-tuning-your-causal-loop-diagrams-part-i/)、[Part II](https://thesystemsthinker.com/fine-tuning-your-causal-loop-diagrams-part-ii/). The Systems Thinker. 回路沿圆形路径走、减少交叉、R/B 标在回路内部、复杂图拆开画。
+- Sterman, J. D. (2000). *Business Dynamics: Systems Thinking and Modeling for a Complex World*. McGraw-Hill. 存量—流量画法、因果回路与极性；模型检验的测试清单见其中“验证与模型检验”部分。
+- Sterman, J. D. *Fine-Tuning Your Causal Loop Diagrams*, [Part I](https://thesystemsthinker.com/fine-tuning-your-causal-loop-diagrams-part-i/)、[Part II](https://thesystemsthinker.com/fine-tuning-your-causal-loop-diagrams-part-ii/). The Systems Thinker. 重要回路用圆形或椭圆路径、减少交叉、变量周围不加圆圈或六边形（Part II）；一次呈现复杂图会难以看清回路，应拆开画（Part II）。R/B 标在回路内部是本工具的排版约定。
 - Richardson, G. P. (1997). Problems in causal loop diagrams revisited. *System Dynamics Review*, 13(3), 247–252. 极性用 `+`/`-`，不用 `s`/`o`。
 - Rahmandad, H., & Sterman, J. D. (2012). Reporting guidelines for simulation-based research in social sciences. *System Dynamics Review*, 28(4), 396–411. 结果图的样式，以及研究报告要交代的方程、参数、积分方法和实验设置。
 - Martinez-Moyano, I. J. (2012). Documentation for model transparency. *System Dynamics Review*, 28(2), 199–208. 交付时附带模型、数据和运行记录，让结果能复现。
 
 ## 真实模型语料
 
-排版间距从 256 个公开 MDL 统计得出：Vensim 官方手册示例 25 个、Duggan 教材 59 个、SDXorg 测试模型 149 个、研究模型 23 个。其中可以再分发的 7 个收录在 [reference_models](../assets/reference_models/README.md)。
+排版间距从 256 个公开 MDL 统计得出：Vensim 官方手册示例 25 个、Duggan 教材 59 个、SDXorg 测试模型 149 个、研究模型 23 个。收录的是其中 7 个代表模型（SDMR 5 个、SDXorg 2 个，均为 MIT 许可），见 [reference_models](../assets/reference_models/README.md)；其余模型不收录，Vensim 官方示例只用于本地统计。
 
 - Duggan, J. (2016). *System Dynamics Modeling with R*. Springer. 配套仓库 [JimDuggan/SDMR](https://github.com/JimDuggan/SDMR)，MIT 许可。
 - [SDXorg/test-models](https://github.com/SDXorg/test-models)：PySD 等工具共用的测试模型库，MIT 许可。

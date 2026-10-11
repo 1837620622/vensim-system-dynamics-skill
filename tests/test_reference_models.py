@@ -93,7 +93,7 @@ def test_loop_markers_follow_their_loops(tmp_path):
         assert mine <= 120 and all(mine <= other for other in others)
 
 
-@pytest.mark.parametrize("name", ["teacup.mdl", "sir_aggregate.mdl"])
+@pytest.mark.parametrize("name", sorted(UPSTREAM_BLOBS))
 def test_builtin_engine_matches_pysd_on_reference_models(name):
     pytest.importorskip("pysd")
     from mdl_document import MdlDocument

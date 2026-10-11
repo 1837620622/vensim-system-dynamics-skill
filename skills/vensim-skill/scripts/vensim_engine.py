@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
-"""Vensim .mdl 纯 Python 仿真引擎与检查修复工具。
+"""Vensim .mdl 的纯 Python 仿真引擎，以及方程检查和修复命令。
 
-不依赖 Vensim 即可完成：
-  - parse:   解析方程区（INTEG / LOOKUP / SMOOTH / DELAY / IF THEN ELSE / WITH LOOKUP）
-  - simulate:Euler 积分仿真，导出 CSV
-  - graph:   matplotlib 折线图导出 PNG
-  - compare: 多场景对比图（净利润、植被盖度、耦合度等任意变量）
-  - units:   缺失单位预检，完整量纲检查仍需原生 Vensim
-  - check:   检测未定义变量 / 缺失单位 / 断裂引用 / 循环依赖
-  - fix:     按明确的单位映射或修复项输出新文件
+子命令：
+  - simulate：Euler 积分，导出 CSV（不写 --var 时导出全部变量）
+  - graph / compare：单模型或多情景的折线图
+  - units：列出缺失单位，完整量纲检查仍要在 Vensim 里做
+  - check：未定义变量、缺失单位、断裂引用、初值循环
+  - fix：按明确给出的单位映射或修复项输出新文件
 
-支持函数：INTEG, SMOOTH, SMOOTH3, DELAY1, DELAY3, DELAY FIXED,
-         IF THEN ELSE, WITH LOOKUP, LOOKUP, ABS, SQRT, EXP, LN, MIN, MAX, MODULO。
+支持的函数见 references/SIMULATION.md；遇到不支持的函数直接报错，不猜测语义。
+方程经受限的表达式树求值，不执行任意 Python 代码。
 """
 
 from __future__ import annotations
@@ -60,7 +58,7 @@ HELPER_TOKENS = {
 }
 
 # 方程块以 "变量名 = ..." 开头，后续 ~ 单位 ~ 注释 | 结束。
-# 变量名不能只按英文标识符识别；课程和论文模型常用中文变量名。
+# 变量名可以是中文、含空格或 $，不能只按英文标识符匹配
 _LOOKUP_DEF = re.compile(r"\[(.*?)\]\s*$")
 
 
@@ -77,7 +75,7 @@ class Equation:
     lookup_pairs: list[tuple[float, float]] = dataclasses.field(default_factory=list)
     line_index: int = 0
     smooth_init_ref: str | None = None  # SMOOTH 隐式库存初值引用的输入变量名
-    delay_fixed_args: list[str] | None = None  # 固定延迟是独立状态，不能按当前辅助量重算。
+    delay_fixed_args: list[str] | None = None  # 固定延迟有自己的状态队列
 
 
 def canonical_name(name: str) -> str:
@@ -169,6 +167,9 @@ def _function_args(text: str, function_name: str) -> list[str] | None:
     return _split_top_level_args(s[open_index + 1 : close_index])
 
 
+_PLACEHOLDER = re.compile(r"A\s+FUNCTION\s+OF\s*\(", re.I)
+
+
 def parse_equations(mdl_text: str, expand: bool = True) -> OrderedDict[str, Equation]:
     """按原生 ~ 和 | 分隔符解析方程，允许内联字段与跨行表达式。"""
     body = mdl_text.split(r"\\\---///", 1)[0].lstrip("\ufeff")
@@ -196,8 +197,16 @@ def parse_equations(mdl_text: str, expand: bool = True) -> OrderedDict[str, Equa
         }
         name = controls.get(key, name)
         rhs = " ".join(match.group(2).split())
+        # A FUNCTION OF(...) 是 Vensim 给未写方程的变量留的占位，同名有真实方程时以真实方程为准
+        placeholder = bool(_PLACEHOLDER.match(rhs))
         if key in defined:
-            raise ValueError(f"变量重复定义: {name}")
+            previous = next(n for n in equations if canonical_name(n) == key)
+            if placeholder:
+                offset += block.count("\n")
+                continue
+            if not _PLACEHOLDER.match(equations[previous].rhs):
+                raise ValueError(f"变量重复定义: {name}")
+            del equations[previous]
         defined.add(key)
         eq = Equation(
             name=name,
@@ -828,7 +837,7 @@ def evaluate(rhs: str, ctx: dict, lookups: dict, name_map: dict[str, str]) -> fl
         return value if t + dt / 2 > time else 0.0
 
     def _modulo(dividend, divisor):
-        # 官方 MODULO/QUANTUM 与 PySD 对非正除数的说明不同，未原生核对前不猜值。
+        # 非正除数时 Vensim 与 PySD 的定义不同，这里直接报错
         if divisor <= 0:
             raise ValueError("MODULO 的非正除数须在原生 Vensim 核对，内置后端仅支持正除数")
         # Python 的 % 随除数定号；C 余数随被除数定号，浮点输入也必须保留。
@@ -1302,7 +1311,7 @@ def command_check(path: Path) -> int:
                     errors += 1
                     print(f"  ERROR 草图 {view.name}: 箭头 {arrow.obj_id} 断裂引用")
 
-    # 5. 内置引擎预检初值与实际表达式，不能只在已知名称集合中寻找未知名称。
+    # 5. 用内置引擎实际求一次初值，暴露表达式里的未知名称和语法问题
     try:
         bounds = get_time_bounds(equations)
         _validate_time_settings(*bounds)
@@ -1332,9 +1341,7 @@ def command_fix(path: Path, output: Path, units_map=None, drop_broken=False) -> 
     equations = parse_equations(document.semantic_text, expand=False)
     fixes = []
     if not units_map and not drop_broken:
-        raise ValueError(
-            "需要显式指定 --units-map 或 --drop-broken-arrows；缺失单位不能自动猜成 Dmnl"
-        )
+        raise ValueError("请指定 --units-map 或 --drop-broken-arrows；缺失的单位不会自动补成 Dmnl")
     if units_map:
         mapping = json.loads(units_map.read_text(encoding="utf-8-sig"))
         for name, unit in mapping.items():
@@ -1346,7 +1353,7 @@ def command_fix(path: Path, output: Path, units_map=None, drop_broken=False) -> 
             ):
                 raise ValueError(f"无效单位映射: {name}")
             if equations[name].unit:
-                raise ValueError(f"{name} 已有单位，不能通过缺失单位修复覆盖")
+                raise ValueError(f"{name} 已有单位，units-map 只补缺失单位")
             pattern = rf'(?m)(^[ \t]*"?{re.escape(name)}"?\s*=[^~|]*~)[ \t\r\n]*(?=[~|])'
             text, count = re.subn(
                 pattern,
@@ -1386,7 +1393,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sim = sub.add_parser("simulate", help="纯 Python 仿真，导出 CSV")
     p_sim.add_argument("model", type=Path)
     p_sim.add_argument("--output", required=True, type=Path)
-    p_sim.add_argument("--var", action="append", default=[], help="要导出的变量(可多次)")
+    p_sim.add_argument("--var", action="append", help="要导出的变量，可多次；不写时导出全部")
     p_sim.add_argument("--plot", type=Path, default=None, help="同时导出折线图 PNG")
     p_sim.add_argument(
         "--keep-going", action="store_true", help="求值失败时继续输出，并把失败变量置零。"
@@ -1394,7 +1401,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_graph = sub.add_parser("graph", help="仿真并导出折线图 PNG")
     p_graph.add_argument("model", type=Path)
-    p_graph.add_argument("--var", action="append", default=[], help="绘图变量(可多次，缺省全部)")
+    p_graph.add_argument("--var", action="append", required=True, help="绘图变量，可多次")
     p_graph.add_argument("--output", required=True, type=Path)
     p_graph.add_argument("--title", default="")
     p_graph.add_argument(
@@ -1414,7 +1421,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_units = sub.add_parser("units", help="单位校验")
     p_units.add_argument("model", type=Path)
 
-    p_check = sub.add_parser("check", help="全面检查")
+    p_check = sub.add_parser("check", help="检查方程引用、时间设置与草图记录")
     p_check.add_argument("model", type=Path)
 
     p_fix = sub.add_parser("fix", help="自动修复")

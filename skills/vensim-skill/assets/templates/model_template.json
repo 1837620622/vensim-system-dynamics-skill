@@ -2,7 +2,7 @@
   "name": "填写中文模型名",
   "language": "zh",
   "sketch": {
-    "layout_mode": "circular"
+    "layout_mode": "natural"
   },
   "time": {
     "initial": null,

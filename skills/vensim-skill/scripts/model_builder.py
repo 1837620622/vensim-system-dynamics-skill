@@ -1,4 +1,4 @@
-"""由明确的方程、初值、单位和流向生成可编辑 MDL，不猜测研究关系。"""
+"""按 JSON 中给出的变量、方程、单位与流向生成 MDL，并做 natural 排版。"""
 
 from __future__ import annotations
 
@@ -17,10 +17,17 @@ from vensim_engine import (
     simulate,
 )
 
+# ---------------------------------------------------------------------------
+# 建模 JSON 校验与方程生成
+# ---------------------------------------------------------------------------
+
+
+FONT_KEYS = {"font_family", "font_size"}
+
 
 def _field(value, label):
     if value is None or isinstance(value, (bool, list, dict)):
-        raise ValueError(f"{label} 必须由建模资料明确提供，不能用空值占位")
+        raise ValueError(f"{label} 缺失")
     text = str(value).strip()
     if not text or any(c in text for c in "\n\r~|{}"):
         raise ValueError(f"{label} 不能为空或包含 MDL 字段分隔符")
@@ -46,19 +53,20 @@ def _model_text(spec):
         "font_family",
         "font_size",
         "layout_mode",
-        "circular_gap",
-        "circular_aspect",
         "node_spacing",
         "shadow_visibility",
+        "split_shadows",
+        "seed",
     }:
         raise ValueError(
-            "sketch 只接受字体、layout_mode、circular_gap、circular_aspect、node_spacing、shadow_visibility"
+            "sketch 只接受 font_family、font_size、layout_mode、node_spacing、"
+            "shadow_visibility、split_shadows、seed"
         )
-    if sketch_options.get("layout_mode", "circular") not in {"circular", "refine", "preserve"}:
-        raise ValueError("新建 sketch.layout_mode 必须是 circular/refine/preserve")
+    if sketch_options.get("layout_mode", "natural") not in {"natural", "refine", "preserve"}:
+        raise ValueError("新建 sketch.layout_mode 必须是 natural/refine/preserve")
     from vensim_autolayout import validate_config
 
-    validate_config(sketch_options)
+    validate_config({k: v for k, v in sketch_options.items() if k not in FONT_KEYS})
     font = _field(sketch_options.get("font_family", "Vensim Sans SC"), "MDL 字体")
     if "," in font:
         raise ValueError("MDL 字体名不能含逗号")
@@ -67,8 +75,8 @@ def _model_text(spec):
         raise ValueError("MDL font_size 必须是 8 到 24 的整数")
     font_scale = font_size / 12
     variables = spec.get("variables", [])
-    if not isinstance(variables, list) or not variables or len(variables) > 200:
-        raise ValueError("variables 必须包含 1 到 200 个变量；大型模型请拆分视图")
+    if not isinstance(variables, list) or not variables or len(variables) > 400:
+        raise ValueError("variables 必须包含 1 到 400 个变量")
     names = {}
     for variable in variables:
         if not isinstance(variable, dict):
@@ -122,7 +130,7 @@ def _model_text(spec):
     if not isinstance(controls, dict) or {"initial", "final", "step", "saveper", "unit"} - set(
         controls
     ):
-        raise ValueError("time 必须明确提供 initial、final、step、saveper、unit，不能套用示例参数")
+        raise ValueError("time 需要 initial、final、step、saveper、unit 五项")
     unit = _field(controls["unit"], "时间单位")
     values = {
         "INITIAL TIME": controls["initial"],
@@ -166,206 +174,264 @@ def _model_text(spec):
     t0, tf, dt, sp = get_time_bounds(parsed)
     _validate_time_settings(t0, tf, dt, sp)
     simulate(parsed, t0, t0, dt, sp)
-    records, links, ids, positions = [], [], {}, {}
-    next_id = 1
 
-    def object_record(kind, name, x, y, w, h, shape=8, tpos=0):
-        nonlocal next_id
-        oid = next_id
-        next_id += 1
-        bits = 131 if kind == 10 else 3  # 指定真实文字框，避免原生打开时恢复为统一大框。
-        records.append(
-            f"{kind},{oid},{name},{round(x)},{round(y)},{round(w)},{round(h)},{shape},{bits},0,0,{tpos},0,0,0,0,0,0,0,0,0"
-        )
-        positions[oid] = (round(x), round(y))
-        return oid
+    def _view_records(members):
+        """生成一个视图的对象与连线记录；其他视图的变量以影子引用出现。"""
+        view_stocks = {name: item for name, item in stocks.items() if name in members}
+        view_flows = {name: item for name, item in flows.items() if name in members}
+        records, links, ids, positions = [], [], {}, {}
+        next_id = 1
 
-    # 默认存量骨架使用有限宽度的横向分行布局。旧的固定 400 单位间隔
-    # 对多存量模型会制造超宽画布，随后所有辅助量只能在骨架下方拉成长线。
-    # 这里的数值只来自字体和排版留白，不代表任何业务数据；显式 position
-    # 仍完全由用户控制并保持不动。
-    stock_items = list(stocks.items())
-    stock_widths = {name: max(40, len(name) * 6 + 12) * font_scale for name, _ in stock_items}
-    layout_gap = max(96.0, float(sketch_options.get("node_spacing", 24)) * 4)
-    stock_neighbors = {name: set() for name in stocks}
-    stock_outgoing = {name: set() for name in stocks}
-    for flow in flows.values():
-        source, target = flow.get("from"), flow.get("to")
-        if source in stocks and target in stocks:
-            stock_neighbors[source].add(target)
-            stock_neighbors[target].add(source)
-            stock_outgoing[source].add(target)
-    remaining = set(stocks)
-    stock_components = []
-    while remaining:
-        start = min(remaining)
-        component, pending = set(), [start]
-        while pending:
-            name = pending.pop()
-            if name in component:
-                continue
-            component.add(name)
-            pending.extend(stock_neighbors[name] - component)
-        remaining -= component
-        stock_components.append(component)
-
-    def component_order(component):
-        """稳定地沿存量流向排列链或反馈环，避免按字典顺序打乱管道。"""
-        start = min(component, key=lambda name: (-len(stock_neighbors[name]), name))
-        order, seen, current, previous = [], set(), start, None
-        while current not in seen:
-            order.append(current)
-            seen.add(current)
-            options = stock_neighbors[current] - seen
-            if previous is not None and len(options) > 1:
-                options -= {previous}
-            if not options:
-                break
-            current = min(
-                options,
-                key=lambda name: (
-                    name not in stock_outgoing[current],
-                    -len(stock_neighbors[name]),
-                    name,
-                ),
+        def object_record(kind, name, x, y, w, h, shape=8, tpos=0, shadow=False):
+            nonlocal next_id
+            oid = next_id
+            next_id += 1
+            # 131 = 定义实例并指定文字框尺寸；130 = 影子引用（灰色 <名称>，只能引出连线）
+            bits = (130 if shadow else 131) if kind == 10 else 3
+            records.append(
+                f"{kind},{oid},{name},{round(x)},{round(y)},{round(w)},{round(h)},{shape},{bits},0,0,{tpos},0,0,0,0,0,0,0,0,0"
             )
-            previous = order[-1]
-        return order + sorted(component - seen)
+            positions[oid] = (round(x), round(y))
+            return oid
 
-    def contains_cycle(component):
-        """按有向存量流识别反馈环，覆盖两个存量互相作用的边界情况。"""
-        visiting, visited = set(), set()
+        # 初始坐标只是排版起点：存量按流向成行，参数围在作用对象旁边，
+        # 随后由 natural 排版整体重排；显式 position 的变量保持不动
+        stock_items = list(view_stocks.items())
+        stock_widths = {name: max(40, len(name) * 6 + 12) * font_scale for name, _ in stock_items}
+        layout_gap = max(96.0, float(sketch_options.get("node_spacing", 24)) * 4)
+        stock_neighbors = {name: set() for name in view_stocks}
+        stock_outgoing = {name: set() for name in view_stocks}
+        for flow in view_flows.values():
+            source, target = flow.get("from"), flow.get("to")
+            if source in view_stocks and target in view_stocks:
+                stock_neighbors[source].add(target)
+                stock_neighbors[target].add(source)
+                stock_outgoing[source].add(target)
+        remaining = set(view_stocks)
+        stock_components = []
+        while remaining:
+            start = min(remaining)
+            component, pending = set(), [start]
+            while pending:
+                name = pending.pop()
+                if name in component:
+                    continue
+                component.add(name)
+                pending.extend(stock_neighbors[name] - component)
+            remaining -= component
+            stock_components.append(component)
 
-        def visit(name):
-            if name in visiting:
-                return True
-            if name in visited:
-                return False
-            visiting.add(name)
-            if any(visit(target) for target in stock_outgoing[name] & component):
-                return True
-            visiting.remove(name)
-            visited.add(name)
-            return False
-
-        return any(visit(name) for name in component)
-
-    default_positions = {}
-    cursor_x, cursor_y = 340.0 - stock_widths[stock_items[0][0]] / 2, 220.0
-    for component in stock_components:
-        order = component_order(component)
-        widths = [stock_widths[name] for name in order]
-        has_cycle = len(component) > 1 and contains_cycle(component)
-        if has_cycle:
-            # 反馈环按实际存量连接围成紧凑椭圆；半径由文字框和环上留白决定。
-            circumference = sum(width + layout_gap for width in widths)
-            radius_x = max(
-                (max(widths) + layout_gap) / (2 * math.sin(math.pi / len(order))),
-                circumference / math.tau,
-            )
-            radius_y = max(radius_x * 0.8, max(widths) + layout_gap)
-            center_x, center_y = cursor_x + radius_x, cursor_y + radius_y
-            for index, name in enumerate(order):
-                angle = -math.pi / 2 + math.tau * index / len(order)
-                default_positions[name] = [
-                    round(center_x + radius_x * math.cos(angle)),
-                    round(center_y + radius_y * math.sin(angle)),
-                ]
-            cursor_x += 2 * radius_x + layout_gap
-        else:
-            # 无反馈环的存量链沿同一基线排列；组件之间只在需要时换行，
-            # 不把不相干的模块挤到同一条长对角线上。
-            x = cursor_x
-            for name, width in zip(order, widths, strict=False):
-                default_positions[name] = [round(x + width / 2), round(cursor_y)]
-                x += width + layout_gap
-            cursor_x = x + layout_gap
-        if cursor_x > 1600:
-            cursor_x = 340.0
-            cursor_y += max(widths, default=40) + layout_gap * 2
-    for name, item in stock_items:
-        x, y = item.get("position", default_positions[name])
-        ids[name] = object_record(
-            10, name, x, y, max(40, len(name) * 6 + 12) * font_scale, 22 * font_scale, 3
-        )
-    stock_center = (
-        sum(positions[ids[name]][0] for name in stocks) / len(stocks),
-        sum(positions[ids[name]][1] for name in stocks) / len(stocks),
-    )
-    for name, flow in flows.items():
-        source = ids.get(flow.get("from"))
-        target = ids.get(flow.get("to"))
-        if source is None:
-            tx, ty = positions[target]
-            source = object_record(12, "48", tx - 260, ty, 10, 8, 0, tpos=-1)
-        if target is None:
-            sx, sy = positions[source]
-            target = object_record(12, "48", sx + 260, sy, 10, 8, 0, tpos=-1)
-        sx, sy = positions[source]
-        tx, ty = positions[target]
-        x, y = (sx + tx) / 2, (sy + ty) / 2
-        valve = object_record(11, "0", x, y, 6, 8, 34, 1)
-        label_x, label_y = x, y + 30 * font_scale
-        if flow.get("from") in stocks and flow.get("to") in stocks:
-            # 环形存量骨架中，流量文字沿管道法向朝外放置，避免压住相邻
-            # 存量。边界源/汇保留原生示例的下方附着位置。
-            dx, dy = tx - sx, ty - sy
-            distance = math.hypot(dx, dy)
-            if distance > 1:
-                nx, ny = -dy / distance, dx / distance
-                radial = (x - stock_center[0], y - stock_center[1])
-                if nx * radial[0] + ny * radial[1] < 0:
-                    nx, ny = -nx, -ny
-                offset = max(30 * font_scale, layout_gap * 0.8)
-                label_x, label_y = x + nx * offset, y + ny * offset
-        ids[name] = object_record(
-            10,
-            name,
-            label_x,
-            label_y,
-            max(30, len(name) * 6) * font_scale,
-            12 * font_scale,
-            40,
-            -1,
-        )
-        # 原生流量的因果方向是阀门到存量；100 将管道画成反向的流出段。
-        # 若写成存量到阀门，Vensim 会额外补出流率文字到存量的错误视觉连接。
-        links.extend([(valve, source, 100, 0, 0), (valve, target, 4, 0, 0)])
-    auxiliary = [(name, item) for name, item in names.items() if name not in ids]
-    originals = parse_equations(equation_text, expand=False)
-    grouped = {}
-    for name, item in auxiliary:
-        # 参数围绕直接受影响的结构分组；显式 position 提供人工审图后的稳定锚点。
-        destinations = [
-            target for target in ids if name in extract_deps(originals[target].rhs, set(names))
-        ]
-        center = (
-            tuple(
-                round(
-                    sum(positions[ids[target]][axis] for target in destinations) / len(destinations)
+        def component_order(component):
+            """稳定地沿存量流向排列链或反馈环，避免按字典顺序打乱管道。"""
+            start = min(component, key=lambda name: (-len(stock_neighbors[name]), name))
+            order, seen, current, previous = [], set(), start, None
+            while current not in seen:
+                order.append(current)
+                seen.add(current)
+                options = stock_neighbors[current] - seen
+                if previous is not None and len(options) > 1:
+                    options -= {previous}
+                if not options:
+                    break
+                current = min(
+                    options,
+                    key=lambda name: (
+                        name not in stock_outgoing[current],
+                        -len(stock_neighbors[name]),
+                        name,
+                    ),
                 )
+                previous = order[-1]
+            return order + sorted(component - seen)
+
+        def contains_cycle(component):
+            """按有向存量流识别反馈环，覆盖两个存量互相作用的边界情况。"""
+            visiting, visited = set(), set()
+
+            def visit(name):
+                if name in visiting:
+                    return True
+                if name in visited:
+                    return False
+                visiting.add(name)
+                if any(visit(target) for target in stock_outgoing[name] & component):
+                    return True
+                visiting.remove(name)
+                visited.add(name)
+                return False
+
+            return any(visit(name) for name in component)
+
+        default_positions = {}
+        first_width = stock_widths[stock_items[0][0]] if stock_items else 0
+        cursor_x, cursor_y = 340.0 - first_width / 2, 220.0
+        for component in stock_components:
+            order = component_order(component)
+            widths = [stock_widths[name] for name in order]
+            has_cycle = len(component) > 1 and contains_cycle(component)
+            if has_cycle:
+                # 反馈环按实际存量连接围成紧凑椭圆；半径由文字框和环上留白决定。
+                circumference = sum(width + layout_gap for width in widths)
+                radius_x = max(
+                    (max(widths) + layout_gap) / (2 * math.sin(math.pi / len(order))),
+                    circumference / math.tau,
+                )
+                radius_y = max(radius_x * 0.8, max(widths) + layout_gap)
+                center_x, center_y = cursor_x + radius_x, cursor_y + radius_y
+                for index, name in enumerate(order):
+                    angle = -math.pi / 2 + math.tau * index / len(order)
+                    default_positions[name] = [
+                        round(center_x + radius_x * math.cos(angle)),
+                        round(center_y + radius_y * math.sin(angle)),
+                    ]
+                cursor_x += 2 * radius_x + layout_gap
+            else:
+                # 无反馈环的存量链沿同一基线排列；组件之间只在需要时换行，
+                # 不把不相干的模块挤到同一条长对角线上。
+                x = cursor_x
+                for name, width in zip(order, widths, strict=False):
+                    default_positions[name] = [round(x + width / 2), round(cursor_y)]
+                    x += width + layout_gap
+                cursor_x = x + layout_gap
+            if cursor_x > 1600:
+                cursor_x = 340.0
+                cursor_y += max(widths, default=40) + layout_gap * 2
+        for name, item in stock_items:
+            x, y = item.get("position", default_positions[name])
+            ids[name] = object_record(
+                10, name, x, y, max(40, len(name) * 6 + 12) * font_scale, 22 * font_scale, 3
+            )
+        stock_center = (
+            tuple(
+                sum(positions[ids[name]][axis] for name in view_stocks) / len(view_stocks)
                 for axis in (0, 1)
             )
-            if destinations
-            else (340, 220)
+            if view_stocks
+            else (340.0, 220.0)
         )
-        slot = grouped.get(center, 0)
-        grouped[center] = slot + 1
-        angle = math.radians(45 + (slot % 5) * 35)
-        radius = 150 + (slot // 5) * 110
-        default = [
-            max(70, round(center[0] + radius * math.cos(angle))),
-            round(center[1] + radius * math.sin(angle)),
-        ]
-        if any(
-            name in extract_deps(originals[target].integ_init_expr or "", set(names))
-            for target in stocks
-        ):
-            default = [center[0], max(50, center[1] - 125)]
-        x, y = item.get("position", default)
-        ids[name] = object_record(
-            10, name, x, y, max(32, len(name) * 6 + 6) * font_scale, 12 * font_scale
-        )
+        for name, flow in view_flows.items():
+            source = ids.get(flow.get("from"))
+            target = ids.get(flow.get("to"))
+            if source is None:
+                tx, ty = positions[target]
+                source = object_record(12, "48", tx - 260, ty, 10, 8, 0, tpos=-1)
+            if target is None:
+                sx, sy = positions[source]
+                target = object_record(12, "48", sx + 260, sy, 10, 8, 0, tpos=-1)
+            sx, sy = positions[source]
+            tx, ty = positions[target]
+            x, y = (sx + tx) / 2, (sy + ty) / 2
+            valve = object_record(11, "0", x, y, 6, 8, 34, 1)
+            label_x, label_y = x, y + 30 * font_scale
+            if flow.get("from") in view_stocks and flow.get("to") in view_stocks:
+                # 环形存量骨架中，流量文字沿管道法向朝外放置，避免压住相邻
+                # 存量。边界源/汇保留原生示例的下方附着位置。
+                dx, dy = tx - sx, ty - sy
+                distance = math.hypot(dx, dy)
+                if distance > 1:
+                    nx, ny = -dy / distance, dx / distance
+                    radial = (x - stock_center[0], y - stock_center[1])
+                    if nx * radial[0] + ny * radial[1] < 0:
+                        nx, ny = -nx, -ny
+                    offset = max(30 * font_scale, layout_gap * 0.8)
+                    label_x, label_y = x + nx * offset, y + ny * offset
+            ids[name] = object_record(
+                10,
+                name,
+                label_x,
+                label_y,
+                max(30, len(name) * 6) * font_scale,
+                12 * font_scale,
+                40,
+                -1,
+            )
+            # 原生流量的因果方向是阀门到存量；100 将管道画成反向的流出段。
+            # 若写成存量到阀门，Vensim 会额外补出流率文字到存量的错误视觉连接。
+            links.extend([(valve, source, 100, 0, 0), (valve, target, 4, 0, 0)])
+        auxiliary = [(name, names[name]) for name in names if name in members and name not in ids]
+        grouped = {}
+        for name, item in auxiliary:
+            # 参数围绕直接受影响的结构分组；显式 position 提供人工审图后的稳定锚点。
+            destinations = [
+                target for target in ids if name in extract_deps(originals[target].rhs, set(names))
+            ]
+            center = (
+                tuple(
+                    round(
+                        sum(positions[ids[target]][axis] for target in destinations)
+                        / len(destinations)
+                    )
+                    for axis in (0, 1)
+                )
+                if destinations
+                else (340, 220)
+            )
+            slot = grouped.get(center, 0)
+            grouped[center] = slot + 1
+            angle = math.radians(45 + (slot % 5) * 35)
+            radius = 150 + (slot // 5) * 110
+            default = [
+                max(70, round(center[0] + radius * math.cos(angle))),
+                round(center[1] + radius * math.sin(angle)),
+            ]
+            if any(
+                name in extract_deps(originals[target].integ_init_expr or "", set(names))
+                for target in view_stocks
+            ):
+                default = [center[0], max(50, center[1] - 125)]
+            x, y = item.get("position", default)
+            ids[name] = object_record(
+                10, name, x, y, max(32, len(name) * 6 + 6) * font_scale, 12 * font_scale
+            )
+        shadows = {}
+        for name, eq in originals.items():
+            if name not in members:
+                continue
+            expression = eq.integ_init_expr if name in stocks else eq.rhs
+            for dep in sorted(extract_deps(expression, set(names))):
+                if dep not in ids and dep not in shadows:
+                    # 其他视图定义的变量：在本视图放一个影子引用，靠近作用对象
+                    tx, ty = positions[ids[name]]
+                    shadows[dep] = object_record(
+                        10,
+                        dep,
+                        tx - 150,
+                        ty - 60,
+                        max(32, len(dep) * 6 + 6) * font_scale,
+                        12 * font_scale,
+                        shadow=True,
+                    )
+                annotation = signed_links.get((dep, name), {})
+                polarity = annotation.get("polarity", "")
+                if not isinstance(polarity, str) or polarity not in {
+                    "",
+                    "+",
+                    "-",
+                    "S",
+                    "O",
+                    "s",
+                    "o",
+                }:
+                    raise ValueError("polarity 仅支持 +、-、S、O；无依据时留空")
+                links.append(
+                    (
+                        ids.get(dep, shadows.get(dep)),
+                        ids[name],
+                        False,
+                        ord(polarity) if polarity else 0,
+                        1 if annotation.get("delay") else 0,
+                    )
+                )
+        for source, target, physical, polarity, delay in links:
+            x = round((positions[source][0] + positions[target][0]) / 2)
+            y = round((positions[source][1] + positions[target][1]) / 2)
+            records.append(
+                f"1,{next_id},{source},{target},{physical or 1},0,{polarity},{22 if physical else 0},1,{64 | delay},0,0-0-0,,1|({x},{y})|"
+            )
+            next_id += 1
+        return records
+
+    originals = parse_equations(equation_text, expand=False)
     signed_links = {}
     for link in spec.get("links", []):
         if not isinstance(link, dict) or any(
@@ -381,79 +447,89 @@ def _model_text(spec):
         if not isinstance(link.get("delay", False), bool):
             raise ValueError("delay 必须是布尔值")
         signed_links[key] = link
-    for name, eq in originals.items():
-        if name not in names:
-            continue
-        expression = eq.integ_init_expr if name in stocks else eq.rhs
-        for dep in sorted(extract_deps(expression, set(names))):
-            annotation = signed_links.get((dep, name), {})
-            polarity = annotation.get("polarity", "")
-            if not isinstance(polarity, str) or polarity not in {"", "+", "-", "S", "O", "s", "o"}:
-                raise ValueError("polarity 仅支持 +、-、S、O；无依据时留空")
-            links.append(
-                (
-                    ids[dep],
-                    ids[name],
-                    False,
-                    ord(polarity) if polarity else 0,
-                    1 if annotation.get("delay") else 0,
-                )
-            )
-    for source, target, physical, polarity, delay in links:
-        x = round((positions[source][0] + positions[target][0]) / 2)
-        y = round((positions[source][1] + positions[target][1]) / 2)
-        records.append(
-            f"1,{next_id},{source},{target},{physical or 1},0,{polarity},{22 if physical else 0},1,{64 | delay},0,0-0-0,,1|({x},{y})|"
-        )
-        next_id += 1
-    sketch = [
-        r"\\\---/// Sketch information - do not modify anything except names",
-        "V300  Do not put anything below this section - it will be ignored",
-        "*" + title,
-        f"$192-192-192,0,{font}|{font_size}||0-0-0|0-0-0|0-0-0|-1--1--1|-1--1--1|96,96,100,0",
-        *records,
-        "///---" + chr(92) * 3,
-        "",
-    ]
-    return equation_text + "\n" + "\n".join(sketch)
+    # 视图按变量的 view 字段划分；未写 view 的变量都在第一个视图
+    view_of = {name: str(item.get("view", title)).strip() for name, item in names.items()}
+    if any(not view or any(c in view for c in ",|~\n\r") for view in view_of.values()):
+        raise ValueError("view 名称不能为空，也不能包含逗号、| 或 ~")
+    for name, flow in flows.items():
+        for end in (flow.get("from"), flow.get("to")):
+            if end is not None and view_of[end] != view_of[name]:
+                raise ValueError(f"{name}: 流量与其两端存量必须在同一视图")
+    sketch_lines = []
+    for view_name in dict.fromkeys(view_of.values()):
+        members = {name for name in names if view_of[name] == view_name}
+        sketch_lines += [
+            r"\\\---/// Sketch information - do not modify anything except names",
+            "V300  Do not put anything below this section - it will be ignored",
+            "*" + view_name,
+            f"$192-192-192,0,{font}|{font_size}||0-0-0|0-0-0|0-0-0|-1--1--1|-1--1--1|96,96,100,0",
+            *_view_records(members),
+        ]
+    sketch_lines += ["///---" + chr(92) * 3, ""]
+    return equation_text + "\n" + "\n".join(sketch_lines)
+
+
+# ---------------------------------------------------------------------------
+# 草图生成、排版与反馈核对
+# ---------------------------------------------------------------------------
 
 
 def _prepare_model(spec):
+    from feedback_audit import audit_feedback
+    from sketch_geometry import measure_view, quality_pass
     from sketch_layout import optimize_view
-    from vensim_autolayout import parse_views
+    from vensim_autolayout import parse_views, time_dependent_names
 
     text = _model_text(spec)
-    from feedback_audit import audit_feedback
-
     feedback = audit_feedback(text, spec.get("feedback_loops", []))
     if feedback["conflicts"]:
         raise ValueError(
             "反馈极性与方程冲突: " + json.dumps(feedback["conflicts"], ensure_ascii=False)
         )
     lines = text.splitlines(keepends=True)
-    view = parse_views(
-        lines, {item["name"] for item in spec["variables"] if item["kind"] == "stock"}
-    )[0]
+    stock_names = {item["name"] for item in spec["variables"] if item["kind"] == "stock"}
+    time_names = time_dependent_names(text)
+    sketch = {k: v for k, v in spec.get("sketch", {}).items() if k not in FONT_KEYS}
     config = {
-        "layout_mode": "circular",
-        **spec.get("sketch", {}),
+        "layout_mode": "natural",
+        **sketch,
         "lock_node_names": [item["name"] for item in spec["variables"] if "position" in item],
     }
-    report = optimize_view(lines, view, config)
-    report["requested_mode"] = config["layout_mode"]
-    report["fixed_positions"] = {
-        item["name"]: item["position"] for item in spec["variables"] if "position" in item
-    }
-    from sketch_geometry import quality_pass
+    reports, insertions = [], []
+    for view in parse_views(lines, stock_names, time_names):
+        if config["layout_mode"] == "natural":
+            from natural_layout import natural_view
 
-    report["pass"] = quality_pass(report["after"])
-    report["native_verified"] = False
-    report["feedback"] = feedback
+            item, extra = natural_view(lines, view, config)
+            insertions.extend(extra)
+        else:
+            item = optimize_view(lines, view, config)
+        reports.append({"view": view.name, **item})
+    # 新影子行按位置倒序插入，保证其余视图的行号不受影响
+    for position, block in sorted(insertions, key=lambda row: row[0], reverse=True):
+        lines[position:position] = block.splitlines(keepends=True)
+    for item, view in zip(reports, parse_views(lines, stock_names, time_names), strict=True):
+        item["after"] = measure_view(view)
+        item["pass"] = quality_pass(item["after"])
+    report = {
+        "requested_mode": config["layout_mode"],
+        "pass": all(item["pass"] for item in reports),
+        "views": reports,
+        "fixed_positions": {
+            item["name"]: item["position"] for item in spec["variables"] if "position" in item
+        },
+        "feedback": feedback,
+    }
     return "".join(lines), report
 
 
 def build_model(spec):
     return _prepare_model(spec)[0]
+
+
+# ---------------------------------------------------------------------------
+# 命令行
+# ---------------------------------------------------------------------------
 
 
 def command_build(spec_path, output):
@@ -470,7 +546,7 @@ def command_build(spec_path, output):
     atomic_write(report_path, json.dumps(report, ensure_ascii=False, indent=2).encode())
     print(f"已生成: {output}；请在 Vensim 执行 Check Model 和 Units Check")
     if not report["pass"]:
-        print(f"几何预检尚有冲突或未覆盖对象，见 {report_path}；不能据此交付最终结构图")
+        print(f"排版仍有几何问题，详见 {report_path}")
     if report["feedback"]["status"] == "needs_review":
         print(f"部分已标极性或回路需要领域与取值范围核对，见 {report_path}")
     return 0

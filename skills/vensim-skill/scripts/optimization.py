@@ -15,11 +15,16 @@ from result_plotting import read_result_csv
 from simulation_runner import CONTROL_NAMES, run_model
 from vensim_engine import extract_deps, get_time_bounds, load_mdl_text, parse_equations
 
+# ---------------------------------------------------------------------------
+# 规范校验与模型身份
+# ---------------------------------------------------------------------------
+
+
 STATISTICS = {"initial", "final", "min", "max", "mean", "integral"}
 
 
 class ModelIdentityError(RuntimeError):
-    """搜索期间源模型或单次仿真身份不一致，必须中止而不能记为普通坏分数。"""
+    """搜索过程中模型文件被改动，需要中止整次搜索。"""
 
 
 def _check_model_identity(model, fingerprint, result=None):
@@ -61,7 +66,7 @@ def validate_spec(spec, model, mode):
         try:
             value = float(equations[name].rhs)
         except ValueError as exc:
-            raise ValueError(f"只能搜索数值常量，不能替换反馈方程: {name}") from exc
+            raise ValueError(f"只能搜索数值常量: {name}") from exc
         if not math.isfinite(value) or not isinstance(limits, list) or len(limits) != 2:
             raise ValueError(f"{name}: 需要有限常量和两个边界")
         low, high = (number(v, name) for v in limits)
@@ -152,6 +157,11 @@ def validate_spec(spec, model, mode):
     return bounds, initial, fields, constraints
 
 
+# ---------------------------------------------------------------------------
+# 目标统计量与观测对齐
+# ---------------------------------------------------------------------------
+
+
 def statistic(result, variable, method):
     times, values = result.times, result.series[variable]
     if method in {"final", "mean", "integral"} and not math.isclose(
@@ -189,6 +199,11 @@ def observation_indices(times, observed_times):
             )
         indices.append(nearest)
     return indices
+
+
+# ---------------------------------------------------------------------------
+# 差分进化搜索
+# ---------------------------------------------------------------------------
 
 
 class EvaluationBudgetReached(Exception):
@@ -252,7 +267,7 @@ def run_search(
             data, variables, time_unit=spec["time_unit"], encoding=encoding
         )
         if len(dataset) != 1:
-            raise ValueError("校准只接受一组观测序列，不能混合多个情景")
+            raise ValueError("校准数据只能包含一组观测序列")
         observed = dataset[0][1]
         if len(observed.times) < 2:
             raise ValueError("校准至少需要两个观测时刻")
@@ -374,8 +389,6 @@ def run_search(
         "solver_success": solver_success,
         "message": message,
         "feasible_solution_found": best is not None,
-        "global_optimum_proven": False,
-        "native_verified": False,
         "baseline": {
             "parameters": dict(zip(names, initial, strict=False)),
             "score": base_score,
@@ -447,6 +460,11 @@ def run_search(
         files[0], json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False).encode()
     )
     return report
+
+
+# ---------------------------------------------------------------------------
+# 命令行
+# ---------------------------------------------------------------------------
 
 
 def main(argv=None):

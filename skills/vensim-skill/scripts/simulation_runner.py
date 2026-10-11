@@ -19,6 +19,11 @@ from vensim_engine import (
     simulate,
 )
 
+# ---------------------------------------------------------------------------
+# 时间设置校验
+# ---------------------------------------------------------------------------
+
+
 CONTROL_NAMES = {"INITIAL TIME", "FINAL TIME", "TIME STEP", "SAVEPER"}
 TIME_OPTION_NAMES = {
     "time_step": "TIME STEP",
@@ -28,7 +33,7 @@ TIME_OPTION_NAMES = {
 
 
 def validate_parameter_time_dependencies(equations, params, overridden=()):
-    """拒绝通过业务参数偷偷改变仿真时间控制。
+    """检查参数覆盖是否会间接改变 FINAL TIME、TIME STEP 等时间控制。
 
     直接覆盖控制变量本来就会被 ``run_model`` 拒绝，但 ``FINAL TIME = 周期``
     这类间接依赖同样会改变输出规模和比较口径。只检查本次没有显式覆盖的
@@ -85,6 +90,11 @@ def _expected_saved_times(t0, tf, saveper):
     return [t0 + index * saveper for index in range(count)]
 
 
+# ---------------------------------------------------------------------------
+# 内置 Euler 与 PySD 对照
+# ---------------------------------------------------------------------------
+
+
 def compare_backends(
     path: Path,
     variables,
@@ -96,9 +106,10 @@ def compare_backends(
 ):
     """用同一 MDL、参数和保存网格逐点比较内置 Euler 与 PySD。
 
-    这是 Python 后端的交叉检查，不把两套实现的一致性冒充原生 Vensim
-    证明。时间网格不一致或差值超过容差时返回失败报告，调用方可据此阻止
-    发布结果。
+    两个 Python 实现互相印证，不代表与原生 Vensim 逐点一致。时间网格不一致
+    或差值超过容差时报告 pass=False。差值按 max(1, |取值|) 缩放后与容差比较：
+    取值小于 1 时相当于绝对误差，大于 1 时相当于相对误差，人口、资金这类
+    大数值变量的浮点舍入不会被误判为不一致。
     """
     if isinstance(tolerance, bool) or not isinstance(tolerance, (int, float)):
         raise ValueError("tolerance 必须是有限非负数")
@@ -120,18 +131,22 @@ def compare_backends(
         not math.isclose(left, right, rel_tol=0, abs_tol=tolerance)
         for left, right in zip(builtin.times, pysd.times, strict=False)
     ):
-        raise ValueError("内置 Euler 与 PySD 的保存时刻不一致，不能进行逐点比较")
-    differences = {}
+        raise ValueError("内置 Euler 与 PySD 的保存时刻不一致，无法逐点比较")
+    differences, scaled = {}, {}
     for name in variables:
-        differences[name] = max(
-            abs(left - right)
-            for left, right in zip(builtin.series[name], pysd.series[name], strict=False)
+        pairs = list(zip(builtin.series[name], pysd.series[name], strict=False))
+        differences[name] = max((abs(left - right) for left, right in pairs), default=0.0)
+        scaled[name] = max(
+            (abs(left - right) / max(1.0, abs(left), abs(right)) for left, right in pairs),
+            default=0.0,
         )
     maximum = max(differences.values(), default=0.0)
+    worst = max(scaled.values(), default=0.0)
     return {
-        "pass": maximum <= tolerance,
+        "pass": worst <= tolerance,
         "tolerance": tolerance,
         "max_absolute_error": maximum,
+        "max_scaled_error": worst,
         "differences": differences,
         "variables": list(variables),
         "saved_points": len(builtin.times),
@@ -139,9 +154,12 @@ def compare_backends(
         "model_sha256": builtin.metadata["model_sha256"],
         "builtin": builtin.metadata,
         "pysd": pysd.metadata,
-        "native_verified": False,
-        "scope": "仅比较当前 MDL 支持子集的 Python 内置 Euler 与 PySD；不等同于原生 Vensim 逐点证明",
     }
+
+
+# ---------------------------------------------------------------------------
+# 参数覆盖与统一运行入口
+# ---------------------------------------------------------------------------
 
 
 def parse_overrides(items):
@@ -185,7 +203,7 @@ def run_model(
         try:
             float(originals[name].rhs)
         except ValueError as exc:
-            raise ValueError(f"{name}: 只能覆盖数值常量参数，不能替换反馈方程或延迟状态") from exc
+            raise ValueError(f"{name}: 只能覆盖数值常量") from exc
         if (
             isinstance(value, bool)
             or not isinstance(value, (int, float))
@@ -263,7 +281,7 @@ def run_model(
             import pysd
         except ImportError as exc:
             raise RuntimeError("需要可选依赖 pysd；或改用 --backend builtin") from exc
-        # 只翻译自包含模型，避免悄悄改变外部数据文件的相对路径。
+        # 只翻译不引用外部数据文件的模型，临时目录里找不到相对路径的数据
         if re.search(
             r"\b(GET (?:XLS|DIRECT|VDF|123)|GET DATA|FILE|TABBED ARRAY)\b",
             text.split(r"\\\---///", 1)[0],
@@ -276,9 +294,18 @@ def run_model(
             copied = Path(folder) / "model.mdl"
             copied.write_text(text, encoding="utf-8")
             model = pysd.read_vensim(str(copied))
+            # PySD 保留名字两侧的引号（如 "Population Aged 0-14"），按 Vensim 名称规则对应
+            native = {canonical_name(key): key for key in model.namespace}
+
+            def pysd_name(name):
+                if canonical_name(name) not in native:
+                    raise ValueError(f"PySD 翻译结果中找不到变量: {name}")
+                return native[canonical_name(name)]
+
+            columns = [pysd_name(name) for name in selected]
             frame = model.run(
-                params=params,
-                return_columns=selected,
+                params={pysd_name(name): value for name, value in params.items()},
+                return_columns=columns,
                 initial_condition="original",
                 time_step=dt,
                 final_time=tf,
@@ -286,7 +313,10 @@ def run_model(
             )
             result = SimResult(
                 frame.index.astype(float).tolist(),
-                {name: frame[name].astype(float).tolist() for name in selected},
+                {
+                    name: frame[column].astype(float).tolist()
+                    for name, column in zip(selected, columns, strict=True)
+                },
             )
         if not result.times or any(
             not math.isfinite(value) for values in result.series.values() for value in values
@@ -313,7 +343,6 @@ def run_model(
         "saveper": sp,
         "saved_points": len(result.times),
         "actual_last_time": result.times[-1] if result.times else None,
-        "native_verified": False,
         "variables": selected,
         "variable_units": {name: originals[name].unit for name in selected},
         "numerical_method": "Euler",

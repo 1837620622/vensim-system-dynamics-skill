@@ -1,8 +1,6 @@
-import asyncio
 import hashlib
 import json
 import math
-import os
 import sys
 from pathlib import Path
 
@@ -73,10 +71,11 @@ def test_builder_has_native_causal_flow_direction_and_initial_link(inventory):
     assert all(view.objects[a.from_id].kind == 11 for a in incoming)
     assert all(a.fields[11] == "0-0-0" for a in view.arrows)
     report = json.loads(inventory.with_suffix(".mdl.build_report.json").read_text())
-    assert not report["after"]["node_overlaps"]
-    assert not report["after"]["arrow_node_collisions"]
-    assert not report["after"]["arrow_crossings"]
-    assert not report["after"]["flow_crossings"]
+    after = report["views"][0]["after"]
+    assert not after["node_overlaps"]
+    assert not after["arrow_node_collisions"]
+    assert not after["arrow_crossings"]
+    assert not after["flow_crossings"]
 
 
 def test_overrides_are_independent_and_record_effective_time(inventory):
@@ -184,7 +183,7 @@ def test_invalid_model_spec_fails_before_writing(tmp_path):
         build_model(spec)
     spec = json.loads(TEMPLATE.read_text())
     del spec["time"]
-    with pytest.raises(ValueError, match="明确提供"):
+    with pytest.raises(ValueError, match="五项"):
         build_model(spec)
     spec = json.loads(TEMPLATE.read_text())
     spec["time"]["final"] = -1
@@ -202,71 +201,3 @@ def test_builtin_matches_pysd_inventory(inventory):
     for name in variables:
         assert left.series[name] == pytest.approx(right.series[name], rel=1e-10, abs=1e-10)
     assert not inventory.with_suffix(".py").exists()
-
-
-def test_mcp_protocol_and_workspace_boundary(inventory, tmp_path):
-    pytest.importorskip("mcp")
-    from mcp import ClientSession, StdioServerParameters
-    from mcp.client.stdio import stdio_client
-
-    async def exercise():
-        params = StdioServerParameters(
-            command=sys.executable,
-            args=[str(TOOLS / "skill_cli.py"), "mcp", "--workspace", str(tmp_path)],
-            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
-        )
-        async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                listed = await session.list_tools()
-                assert len(listed.tools) == 13
-                result = await session.call_tool(
-                    "inspect_model", {"model": str(inventory.relative_to(tmp_path))}
-                )
-                assert not result.isError
-                arranged = await session.call_tool(
-                    "layout_model",
-                    {"model": str(inventory), "output": "circular.mdl", "mode": "circular"},
-                )
-                assert not arranged.isError
-                feedback = await session.call_tool("check_feedback", {"model": str(inventory)})
-                assert not feedback.isError
-                escaped = await session.call_tool("inspect_model", {"model": "../outside.mdl"})
-                assert escaped.isError
-                overwrite = await session.call_tool(
-                    "layout_model", {"model": str(inventory), "output": str(inventory)}
-                )
-                assert overwrite.isError
-                simulated = await session.call_tool(
-                    "simulate_model",
-                    {"model": str(inventory), "output": "mcp.csv", "variables": ["库存"]},
-                )
-                assert not simulated.isError
-                empty = await session.call_tool(
-                    "simulate_model",
-                    {"model": str(inventory), "output": "empty.csv", "variables": []},
-                )
-                assert empty.isError and not (tmp_path / "empty.csv").exists()
-                protected = tmp_path / "protected.csv.run.json"
-                protected.write_bytes(b"keep")
-                blocked = await session.call_tool(
-                    "simulate_model",
-                    {"model": str(inventory), "output": "protected.csv", "variables": ["库存"]},
-                )
-                assert blocked.isError and protected.read_bytes() == b"keep"
-                assert not (tmp_path / "protected.csv").exists()
-                link = tmp_path / "dangling.csv"
-                target = tmp_path / "missing.csv"
-                try:
-                    link.symlink_to(target)
-                except OSError:
-                    pass  # Windows 未授予符号链接权限时，其他边界检查仍然运行。
-                else:
-                    blocked_link = await session.call_tool(
-                        "simulate_model",
-                        {"model": str(inventory), "output": "dangling.csv", "variables": ["库存"]},
-                    )
-                    assert blocked_link.isError and link.is_symlink() and not target.exists()
-        assert (tmp_path / "mcp.csv").is_file()
-
-    asyncio.run(exercise())

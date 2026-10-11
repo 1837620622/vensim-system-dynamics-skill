@@ -1,55 +1,47 @@
-# 实现依据与已知边界
+# 依据与边界
 
-## 结果图与出版要求
+本 Skill 的规则来自下列资料，代码常量旁的注释写明了具体出处。具体坐标、权重和退火参数是工程实现，不是 Ventana 的官方算法。
 
-- [Vensim Number lines](https://www.vensim.com/documentation/20736.html)：编号是沿曲线放置的字符，PLE 可开关；不是 DSS 独有的出图能力。
-- [Vensim Graph 工具](https://www.vensim.com/documentation/ref_graph_tool.html)：图例、字体、标记与数据集比较；曲线太多时需要重组。
-- [Matplotlib savefig](https://matplotlib.org/stable/api/_as_gen/matplotlib.figure.Figure.savefig.html)：位图 DPI、矢量格式与元数据接口。
-- [Nature 最终图件要求](https://www.nature.com/nature/for-authors/final-submission)：优先矢量线稿、统一字体；这是该出版物要求，不当作所有中文论文的统一规则。
+## Vensim 官方文档
 
-本项目采用可配置的经典结果图样式；参考图只决定外观，不提供可挪用的仿真数据。
+| 资料 | 用在哪里 |
+| --- | --- |
+| [MDL 文件](https://www.vensim.com/documentation/_mdl_model_files.html)、[Sketch Format](https://www.vensim.com/documentation/ref_sketch_format.html) | 方程区和草图区分开处理，排版只改草图 |
+| [Sketch Object Detail](https://www.vensim.com/documentation/24305.html) | 坐标是中心点，尺寸是半宽半高；字段 9 是隐藏层级；字体字段“字体名\|字号\|样式\|颜色” |
+| [Arrow Class](https://www.vensim.com/documentation/22925.html) | 普通箭头的中间点在圆弧上，排版只改这个控制点，不改端点 |
+| [Vensim Conventions](https://www.vensim.com/documentation/20390.html) | 存量画方框，流量画阀门，其余变量只写名字不加框 |
+| [Defined & Shadow Variables](https://www.vensim.com/documentation/22890.html)、[Existing Variable Class](https://www.vensim.com/documentation/22945.html) | 影子只引出连线，同一变量在一个视图里只定义一次 |
+| [Hide/unhide](https://vensim.com/documentation/22955.html) | 隐藏变量时，进出它的箭头一起隐藏；检查和排版按同样规则跳过这些箭头 |
+| [How Views Work](https://vensim.com/documentation/how_views_work.html) | 大模型按子系统分视图，视图之间用变量或影子连接 |
+| [物料与信息延迟](https://www.vensim.com/documentation/mgu09_material_and_information_delays.html)、[DELAY3](https://www.vensim.com/documentation/fn_delay3.html) | 物料延迟按阶段管道存量实现，与信息平滑分开 |
+| [Payoff Computation](https://www.vensim.com/documentation/payoffcomputation.html) | Vensim 的 payoff 按 TIME STEP 累积，本工具在保存点上用梯形法，两者不同 |
+| [Number lines](https://www.vensim.com/documentation/20736.html) | 结果图的数字编号曲线样式 |
 
-优先使用官方文档与原始实现。公开版本线为 Vensim 10.5，官方会议资源注明 DSS 10.5.2；本机原生验收使用 PLE 10.5.0。不同页面可能更新不同步，不能把旧下载页或单一版本号当作所有产品通道的最新状态。具体版本、权限与 MCP 工具以实际安装环境为准。
+## 系统动力学文献
 
-## Vensim
+- Sterman, J. D. (2000). *Business Dynamics: Systems Thinking and Modeling for a Complex World*. McGraw-Hill. 存量—流量画法、回路极性判断、模型检验方法（第 21 章）。
+- Sterman, J. D. *Fine-Tuning Your Causal Loop Diagrams*, [Part I](https://thesystemsthinker.com/fine-tuning-your-causal-loop-diagrams-part-i/)、[Part II](https://thesystemsthinker.com/fine-tuning-your-causal-loop-diagrams-part-ii/). The Systems Thinker. 回路沿圆形路径走、减少交叉、R/B 标在回路内部、复杂图拆开画。
+- Richardson, G. P. (1997). Problems in causal loop diagrams revisited. *System Dynamics Review*, 13(3), 247–252. 极性用 `+`/`-`，不用 `s`/`o`。
+- Rahmandad, H., & Sterman, J. D. (2012). Reporting guidelines for simulation-based research in social sciences. *System Dynamics Review*, 28(4), 396–411. 结果图的样式，以及研究报告要交代的方程、参数、积分方法和实验设置。
+- Martinez-Moyano, I. J. (2012). Documentation for model transparency. *System Dynamics Review*, 28(2), 199–208. 交付时附带模型、数据和运行记录，让结果能复现。
 
-- [产品版本及 DSS MCP 说明](https://vensim.com/2026/06/vensim-ventity-news-june-2026/)：桌面 DSS MCP 需要取得官方组件；不能假设任意 PLE 安装都有 MCP。
-- [官方会议资源](https://vensim.com/conference/)：DSS 10.5.2 工作坊与 VenAgent/VensimMCP/VentityMCP 的 Windows、Mac 分发入口；已核对入口，未安装或实测官方服务器。
-- [原生版本说明](https://www.vensim.com/documentation/vensim-10_4_x.html)：核对 10.4–10.5 系列的实际功能变化，不能仅根据页面 URL 判断版本。
-- [MDL 文件](https://www.vensim.com/documentation/_mdl_model_files.html) 与 [Sketch Format](https://www.vensim.com/documentation/ref_sketch_format.html)：方程、草图与设置是不同区段，布局不改方程。
-- [Sketch Object Detail](https://www.vensim.com/documentation/24305.html)：坐标为中心，尺寸为半宽/半高；对象 ID 在各 View 内解释。颜色是否生效由 hasf 决定，极性、延迟、隐藏字段不能清零；字体内部可能含 `|`。bits 的第七位是 64，第八位是 128，不能混淆位序和数值。注释、IO 和图片对象可能有续行。
-- [Arrow Class](https://www.vensim.com/documentation/22925.html)：普通 Arrow 的中间点位于圆弧上；Polyline、Perpendicular、Spline 不能统一当作单圆弧。改变几何不应改变因果端点。
-- [Defined & Shadow Variables](https://www.vensim.com/documentation/22890.html) 与 [Existing Variable Class](https://www.vensim.com/documentation/22945.html)：影子允许多实例、只能出线。Defined 的原因会由软件补齐，缺少可见输入可能造成自动补影子。影子本身不是方程错误。
-- [视图菜单](https://www.vensim.com/documentation/viewmenu.html)：初始原因箭头、影子及字体显示有独立设置；不应靠全局隐藏掩盖结构问题。
-- [DELAY3](https://www.vensim.com/documentation/fn_delay3.html) 与 [物料和信息延迟](https://www.vensim.com/documentation/mgu09_material_and_information_delays.html)：物料延迟使用管道存量和阶段流出，信息平滑使用信息状态，两者不能混用。
-- [模型语法与单位检查](https://www.vensim.com/documentation/20405.html)：完整验证回到原生 Check Model 和 Units Check。
+## 真实模型语料
 
-## 官方示例与视觉方法
+排版间距从 256 个公开 MDL 统计得出：Vensim 官方手册示例 25 个、Duggan 教材 59 个、SDXorg 测试模型 149 个、研究模型 23 个。其中可以再分发的 7 个收录在 [reference_models](../assets/reference_models/README.md)。
 
-- John Sterman：[Fine-Tuning Your Causal Loop Diagrams, Part II](https://thesystemsthinker.com/fine-tuning-your-causal-loop-diagrams-part-ii/)：圆弧、反馈环的可读形状、减少交叉、拆分复杂图、保留有意义延迟。这里据此使用局部位置和短圆弧，不把规则简化为统一网格或统一大弯。
-- MIT：[Business Dynamics](https://mitmgmtfaculty.mit.edu/jsterman/business-dynamics/)：动态假设、结构、边界与行为验证应早于研究结论。
-- SDXorg 原生模型样本：[teacup.mdl](https://github.com/SDXorg/test-models/blob/master/samples/teacup/teacup.mdl)：用于交叉核对流量阀门与存量连接的记录形态。构造流出管道时，因果记录仍从阀门到来源存量，`shape=100` 表达反向的管道图形；这不是将普通信息箭头反向。该样本属于 SDXorg 测试材料，不冒称 Ventana 官方发布。
+- Duggan, J. (2016). *System Dynamics Modeling with R*. Springer. 配套仓库 [JimDuggan/SDMR](https://github.com/JimDuggan/SDMR)，MIT 许可。
+- [SDXorg/test-models](https://github.com/SDXorg/test-models)：PySD 等工具共用的测试模型库，MIT 许可。
+- Vensim 官方示例随软件发布，只用于本地统计，不收录。
 
-官方教程决定基本语义；本项目的具体位置、启发式权重和样式选择是工程实现，不是官方推荐算法或视觉认证。库存示例为本项目构造，并在原生 Vensim 核对，不是临摹图代替模型。
+## Python 工具
 
-## 参数校准与政策搜索
+- [PySD](https://github.com/SDXorg/pysd)（[运行 API](https://pysd.readthedocs.io/en/master/python_api/model.html)）：第二个仿真后端，用于和内置 Euler 逐点对照。PySD 解析不了部分老版本官方示例（语法报错）和带数组的模型，这时只能用内置引擎或 Vensim。
+- [SciPy differential_evolution](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.differential_evolution.html)：参数校准和政策搜索。本工具另外限制实际仿真次数。
+- [Matplotlib savefig](https://matplotlib.org/stable/api/_as_gen/matplotlib.figure.Figure.savefig.html)：结果图的 DPI、矢量格式和去掉生成时间的元数据。
 
-- [Vensim 优化功能](https://www.vensim.com/documentation/usr18.html) 与 [Optimization](https://www.vensim.com/documentation/ref_optimization.html)：区分数据校准、政策搜索、常量参数与目标。
-- [Payoff Computation](https://www.vensim.com/documentation/payoffcomputation.html)：原生政策 payoff 按 TIME STEP 累积，不能将保存点上的梯形统计声称为相同分数。
-- [SciPy differential_evolution](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.differential_evolution.html)：有界差分进化、`rng`、种群乘数与非线性约束。本工具另加实际仿真次数上限，不直接把 SciPy 代数当作运行次数。
+## 已知边界
 
-实现与统计边界见 [Python 高级分析](ADVANCED_ANALYSIS.md)。
-
-## 原生布局边界
-
-本项目不再调用 Graphviz，也不把外部布局器的节点坐标或样条写回 MDL。原因是 Graphviz 不知道 Vensim 的存量、阀门、实体管道、附着流量文字、Hide Depth 与原生单控制点圆弧语义，容易产生超宽画布、长对角线和视觉上像云团的结果。`circular` 使用标准库实现的连接排序、存量—流量骨架、局部锚点和大型模块圆角边界；`refine` 使用同一套文字框、管道和圆弧碰撞门禁。复杂模型应拆分为多个 View；Vensim 官方也建议用 View 按子系统讲清楚模型，而不是把所有关系压进一张图。
-
-## PySD 与 MCP
-
-函数参数、名称等价、Lookup 数据点、离散延迟与数据清单的具体实现依据见 [仿真语义边界](SIMULATION_SEMANTICS.md)。
-
-- [PySD 源码](https://github.com/SDXorg/pysd) 和 [运行 API](https://pysd.readthedocs.io/en/master/python_api/model.html)：模型参数覆盖、原始初值与时间设置。对照实现必须使用相同方程、参数、初值与保存时间点。
-- [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)：本项目使用 1.x FastMCP 的 stdio 传输、工具注解和客户端集成测试。SDK 主分支文档可能先于稳定版变化，因此依赖显式限制 `<2`。
-- [MCP 安全实践](https://modelcontextprotocol.io/docs/draft/tutorials/security/security_best_practices)：本地服务器与 stdio 进程的信任边界；应用路径检查不能代替操作系统沙箱。
-
-PySD 翻译成功不证明与所有 Vensim 函数语义一致。本封装只承诺已测试的自包含标量路径。独立 MCP 适配器不能冒充官方 DSS MCP，且本地目录限制不能替代操作系统沙箱。
+- 内置引擎只覆盖常见标量函数（见 [SIMULATION.md](SIMULATION.md)）；数组、宏、外部数据交给 PySD 或 Vensim。
+- 两个 Python 后端一致，不代表与 Vensim 逐点相同。
+- 字宽、折行和箭头端点是估算值，最终结构图要在 Vensim 里打开核对后导出。
+- 排版不调用 Graphviz 等外部布局器：它们不认识存量、阀门、附着流量名和单控制点圆弧，生成的坐标不能直接写回 MDL。

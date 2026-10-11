@@ -109,7 +109,6 @@ def test_crosscheck_reports_pointwise_python_agreement(tmp_path):
     report = compare_backends(model, ["Output"])
     assert report["pass"]
     assert report["max_absolute_error"] == 0
-    assert report["native_verified"] is False
 
 
 @pytest.mark.parametrize("duration", [0, 1, 1.5, 2.5])
@@ -229,7 +228,7 @@ def test_experiment_rejects_parameter_horizon_and_unsaved_final(tmp_path):
             tmp_path / "large",
         )
     fixed = model_file(tmp_path, "Output=1~Dmnl~|")
-    with pytest.raises(ValueError, match="保存 FINAL TIME"):
+    with pytest.raises(ValueError, match="FINAL TIME 上"):
         execute_experiment(
             fixed,
             {

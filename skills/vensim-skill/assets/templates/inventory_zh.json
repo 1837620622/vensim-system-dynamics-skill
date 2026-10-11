@@ -13,11 +13,7 @@
       "name": "库存",
       "kind": "stock",
       "initial": "初始库存",
-      "unit": "件",
-      "position": [
-        400,
-        220
-      ]
+      "unit": "件"
     },
     {
       "name": "补货",
@@ -39,51 +35,31 @@
       "name": "需求",
       "kind": "constant",
       "equation": "20",
-      "unit": "件/Month",
-      "position": [
-        430,
-        430
-      ]
+      "unit": "件/Month"
     },
     {
       "name": "目标库存",
       "kind": "constant",
       "equation": "200",
-      "unit": "件",
-      "position": [
-        105,
-        355
-      ]
+      "unit": "件"
     },
     {
       "name": "调整时间",
       "kind": "constant",
       "equation": "4",
-      "unit": "Month",
-      "position": [
-        260,
-        435
-      ]
+      "unit": "Month"
     },
     {
       "name": "发货时间",
       "kind": "constant",
       "equation": "1",
-      "unit": "Month",
-      "position": [
-        665,
-        360
-      ]
+      "unit": "Month"
     },
     {
       "name": "初始库存",
       "kind": "constant",
       "equation": "100",
-      "unit": "件",
-      "position": [
-        400,
-        95
-      ]
+      "unit": "件"
     }
   ],
   "links": [

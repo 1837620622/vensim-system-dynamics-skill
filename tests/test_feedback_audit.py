@@ -69,7 +69,7 @@ def test_loop_parity_uses_dynamic_equations_and_rejects_initial_only_edges():
 
 def test_build_rejects_wrong_sign_before_creating_outputs(tmp_path):
     spec = json.loads(
-        (ROOT / "skills/vensim-skill/assets/templates/circular_feedback_zh.json").read_text()
+        (ROOT / "skills/vensim-skill/assets/templates/water_feedback_zh.json").read_text()
     )
     spec["links"] = [{"from": "水量", "to": "缺水量", "polarity": "+"}]
     source, output = tmp_path / "spec.json", tmp_path / "model.mdl"
@@ -97,7 +97,7 @@ def test_blank_template_and_missing_business_input_never_use_demo_data(tmp_path)
         "time": {},
         "variables": [{"name": "自定状态", "kind": "stock", "initial": 7, "unit": "Item"}],
     }
-    with pytest.raises(ValueError, match="不能套用示例参数"):
+    with pytest.raises(ValueError, match="五项"):
         build_model(spec)
     spec["time"] = {"initial": 2, "final": 3, "step": 0.5, "saveper": 0.5, "unit": "Week"}
     text = build_model(spec)
@@ -108,12 +108,11 @@ def test_blank_template_and_missing_business_input_never_use_demo_data(tmp_path)
 
 
 def test_feedback_cli_preserves_existing_output(tmp_path, capsys):
-    model = ROOT / "skills/vensim-skill/assets/examples/circular_feedback_zh.mdl"
+    model = ROOT / "skills/vensim-skill/assets/examples/water_feedback_zh.mdl"
     output = tmp_path / "review.json"
     assert main([str(model), "--output", str(output)]) == 0
     report = json.loads(capsys.readouterr().out)
-    assert report["symbol_placement_requires_native_review"]
-    assert not report["native_verified"]
+    assert report["status"] in {"checked_subset", "needs_review"}
     original = output.read_bytes()
     with pytest.raises(ValueError):
         main([str(model), "--output", str(output)])

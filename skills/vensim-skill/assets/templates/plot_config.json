@@ -1,0 +1,19 @@
+{
+  "width_inches": 6.3,
+  "height_inches": 3.8,
+  "font_family": [],
+  "font_size": 10.5,
+  "legend_font_size": 9,
+  "line_width": 1.3,
+  "line_styles": ["-", "--", "-.", ":"],
+  "colors": ["#0072B2", "#D55E00", "#009E73", "#E69F00", "#CC79A7", "#56B4E9"],
+  "max_lines": 8,
+  "number_lines": false,
+  "marker_size": 7,
+  "marker_repeats": 6,
+  "show_grid": false,
+  "grid_color": "#e3e3e3",
+  "border_color": "#333333",
+  "band_outer_alpha": 0.18,
+  "band_inner_alpha": 0.38
+}

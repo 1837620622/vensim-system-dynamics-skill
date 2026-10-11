@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Vensim .mdl 草图检查、审计与保守自动排版工具。
+"""Vensim .mdl 草图的检查、审计与排版入口（inspect / audit / layout / visual / preview）。
 
-依据 Vensim 官方 Sketch Format / Sketch Object Detail / Arrow Class 文档实现：
-  - 解析草图对象(10 变量 / 11 阀门 / 12 源汇云图注释 / 1 箭头)的真实字段；
-  - 按 thick 区分物理流率管道与信息箭头，不把接入阀门的信息线错判为管道；
-  - 默认局部避让辅助量和影子，库存/阀门/云/流率标签锁定；
-  - 只为信息箭头生成单个中间控制点，使普通 Arrow 显示为平滑圆弧；
-  - 按真实圆弧检查穿字与交叉，优先局部调整与短路径；
-  - 不改方程区，不新建/删除对象，不改箭头 from/to，不覆盖输入文件。
+依据 Vensim 官方 Sketch Format、Sketch Object Detail、Arrow Class 文档：
+  - 按真实字段解析草图对象（10 变量、11 阀门、12 云与注释、1 箭头）；
+  - 按 thick 区分实体管道和信息线，接到阀门上的信息线不算管道；
+  - 排版模式 auto / natural / refine / preserve 的取舍见 command_layout；
+  - 信息线只改单个中间控制点，原生显示为圆弧；
+  - 方程区逐字节保留，不覆盖输入文件。只有 natural 的影子拆分会新增影子
+    对象并把箭头起点改到影子上，报告里逐条列出，因果关系不变。
 
-输出必须在 Vensim 中重新打开并运行 Check Model 与 Units Check 后方可使用。
+输出要在 Vensim 中重新打开，运行 Check Model 和 Units Check 后再使用。
 """
 
 from __future__ import annotations
@@ -25,7 +25,15 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from mdl_document import MdlDocument, atomic_write, preflight_outputs, separate_output
-from sketch_geometry import arrow_path, measure_view, quality_pass, visible
+from sketch_geometry import (  # noqa: F401
+    CHECK_CLEARANCE,
+    arrow_path,
+    measure_view,
+    quality_key,
+    quality_pass,
+    shown,
+    visible,
+)
 
 # 草图起始标记（.mdl 中写作 \\\---///）
 SKETCH_MARKER = r"\\\---///"
@@ -44,6 +52,27 @@ def parse_stock_names(mdl_text: str) -> set:
     for match in re.finditer(r"(?m)^\s*([^=~|\\\n]+?)\s*=\s*INTEG\s*\(", body, re.I):
         stocks.add(match.group(1).strip().strip('"'))
     return stocks
+
+
+def time_dependent_names(mdl_text: str) -> frozenset:
+    """返回方程直接引用 Time 的变量（canonical_name）。
+
+    依据：原生 Vensim 会为这类定义实例在其正下方自动绘制灰色 "<Time>"，
+    布局与几何检查需要为它预留位置。按“长名优先”的依赖提取识别 Time，
+    因而 TIME STEP、INITIAL TIME、含 Time 字样的业务变量名不会误判。
+    """
+    from vensim_engine import canonical_name, extract_deps, parse_equations
+
+    try:
+        equations = parse_equations(mdl_text, expand=False)
+    except ValueError:
+        return frozenset()
+    names = set(equations) | {"Time"}
+    found = set()
+    for name, equation in equations.items():
+        if "Time" in extract_deps(equation.rhs, names):
+            found.add(canonical_name(name))
+    return frozenset(found)
 
 
 # 对象类型码
@@ -89,6 +118,7 @@ class Obj:
     bits: int
     raw_fields: list[str]
     stock_names: set = dataclasses.field(default_factory=set)
+    font: int = 12  # 字号：记录末尾“字体名|字号|样式|颜色”字段，没有时取视图默认
 
     @property
     def attached_to_valve(self) -> bool:
@@ -142,6 +172,8 @@ class View:
     end: int
     objects: dict[int, Obj]
     arrows: list[Arrow]
+    # 方程直接引用 Time 的变量（canonical_name），用于原生自动 <Time> 预留区。
+    time_dependents: frozenset = frozenset()
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +240,9 @@ def format_points(points: Iterable[tuple[float, float]]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def parse_views(lines: list[str], stock_names: set | None = None) -> list[View]:
+def parse_views(
+    lines: list[str], stock_names: set | None = None, time_dependents: frozenset | None = None
+) -> list[View]:
     marker_positions = [
         i for i, line in enumerate(lines) if _line_body(line).startswith(SKETCH_MARKER)
     ]
@@ -216,6 +250,10 @@ def parse_views(lines: list[str], stock_names: set | None = None) -> list[View]:
         raise ValueError(r"No Vensim Sketch Information marker found. Expected \\---///.")
     if stock_names is None:
         stock_names = set()
+    if time_dependents is None:
+        # 调用方未提供时从同一份文本的方程区提取，保证几何检查口径一致。
+        joined = "".join(lines[: marker_positions[0]])
+        time_dependents = time_dependent_names(re.sub(r"\\\r?\n[ \t]*", "", joined))
 
     views: list[View] = []
     for view_index, marker in enumerate(marker_positions):
@@ -235,8 +273,12 @@ def parse_views(lines: list[str], stock_names: set | None = None) -> list[View]:
         arrows: list[Arrow] = []
         seen_ids = set()
         continuation = False
+        view_font = 12
         for line_index in range(marker + 1, end):
             body = _line_body(lines[line_index])
+            if body.startswith("$") and view_font == 12:
+                # 视图头 $背景色,0,字体名|字号|样式|...，给出本视图的默认字号
+                view_font = _font_size(body.split(",", 2)[-1], 12)
             if continuation:
                 continuation = False
                 continue
@@ -293,10 +335,21 @@ def parse_views(lines: list[str], stock_names: set | None = None) -> list[View]:
                     bits=_safe_int(fields[8]),
                     raw_fields=fields,
                     stock_names=stock_names,
+                    font=next(
+                        (_font_size(f, 0) for f in fields[15:] if _font_size(f, 0)), view_font
+                    ),
                 )
                 continuation = bool(_safe_int(fields[8]) & (4 | 8)) or kind in T_OTHER
-        views.append(View(view_index, name, marker, end, objects, arrows))
+        views.append(
+            View(view_index, name, marker, end, objects, arrows, frozenset(time_dependents))
+        )
     return views
+
+
+def _font_size(field: str, default: int) -> int:
+    """从“字体名|字号|样式|颜色”格式的字段取字号，取不到时返回 default。"""
+    match = re.match(r"[^|,]*\|(\d+)\|", field)
+    return int(match.group(1)) if match and 4 <= int(match.group(1)) <= 72 else default
 
 
 def _has_cjk(text: str) -> bool:
@@ -340,7 +393,11 @@ def load_mdl(path: Path) -> tuple[list[str], list[View]]:
     document = MdlDocument.read(path)
     lines = document.text.splitlines(keepends=True)
     stock_names = parse_stock_names(document.semantic_text)
-    return lines, parse_views(lines, stock_names=stock_names)
+    return lines, parse_views(
+        lines,
+        stock_names=stock_names,
+        time_dependents=time_dependent_names(document.semantic_text),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -427,12 +484,17 @@ def apply_shadow_visibility(lines: list[str], view: View, policy: str) -> list[i
     """
     if policy == "preserve":
         return []
-    shadows = [obj for obj in view.objects.values() if obj.is_shadow and visible(obj)]
+    # 附着在阀门上的影子是流量名的显示实例，即使没有信息线也不是“孤立重复”。
+    shadows = [
+        obj
+        for obj in view.objects.values()
+        if obj.is_shadow and visible(obj) and not obj.attached_to_valve
+    ]
     if not shadows:
         return []
     incident = {obj.obj_id: [] for obj in shadows}
     for arrow in view.arrows:
-        if not visible(arrow):
+        if not shown(view, arrow):
             continue
         if arrow.from_id in incident:
             incident[arrow.from_id].append(arrow)
@@ -457,9 +519,7 @@ def restyle_arrow_line(line: str, config: dict) -> str:
     if len(fields) < 14:
         return line
     fields[8] = str(_safe_int(fields[8]) | 1)
-    fields[11] = config.get(
-        "information_arrow_color", "0-0-255" if config.get("style") == "native-blue" else "0-0-0"
-    )
+    fields[11] = "0-0-255" if config.get("style") == "native-blue" else "0-0-0"
     return ",".join(fields) + "|" + tail + _line_ending(line)
 
 
@@ -481,10 +541,7 @@ def update_arrow_line(
     # 官方字段：shape,hid,pol,thick,hasf,dtype,res,color,font,np。
     fields[4] = "1"  # 普通 Arrow + 控制点 = 原生圆弧
     preset = (config or {}).get("style", "preserve")
-    # academic 保留为旧配置的兼容别名，新方案统一使用黑色。
-    arrow_color = (config or {}).get(
-        "information_arrow_color", "0-0-255" if preset == "native-blue" else "0-0-0"
-    )
+    arrow_color = "0-0-255" if preset == "native-blue" else "0-0-0"
     if preset != "preserve":
         fields[8] = str(_safe_int(fields[8]) | 1)  # 官方 hasf 第一位启用箭头自定义颜色。
         fields[11] = str(arrow_color)
@@ -582,6 +639,45 @@ def command_inspect(path: Path) -> int:
     return 0
 
 
+VIEW_MIN_VARIABLES = 6  # 少于此数的视图通常应并入相关子系统
+VIEW_MAX_VARIABLES = 40  # 多于此数的视图难以排得清楚，应按子系统拆分
+VARIABLES_PER_VIEW = 10  # 估算合理视图数时每个视图的变量数
+
+
+def view_advice(views) -> list[str]:
+    """按定义变量数判断视图是否过碎或过挤，只给建议，不改模型。"""
+    counts = [
+        (
+            view.name,
+            sum(
+                1
+                for obj in view.objects.values()
+                if obj.kind == T_VARIABLE and not obj.is_shadow and visible(obj)
+            ),
+        )
+        for view in views
+    ]
+    total = sum(n for _, n in counts)
+    advice = []
+    if len(views) > 1:
+        advice += [
+            f"视图「{name}」只有 {n} 个定义变量，建议并入相关子系统视图"
+            for name, n in counts
+            if n < VIEW_MIN_VARIABLES
+        ]
+    advice += [
+        f"视图「{name}」有 {n} 个定义变量，建议按子系统拆分"
+        for name, n in counts
+        if n > VIEW_MAX_VARIABLES
+    ]
+    suggested = max(1, math.ceil(total / VARIABLES_PER_VIEW))
+    if len(views) > suggested + 1:
+        advice.append(
+            f"共 {len(views)} 个视图、{total} 个定义变量，视图偏多，建议按子系统合并为约 {suggested} 个"
+        )
+    return advice
+
+
 def command_audit(path: Path) -> int:
     from vensim_engine import extract_deps, parse_equations
 
@@ -626,97 +722,179 @@ def command_audit(path: Path) -> int:
             )
         for item in metrics["duplicate_defined"]:
             print(f"  ERROR 同一 View 重复 Defined: {item['variable']}，对象 {item['ids']}")
-    print(
-        "FAIL: 草图结构错误"
-        if errors
-        else "PASS: 已解析草图引用；几何警告请用 visual --strict 复核"
-    )
-    print("布局只整理图形，因果边的增删与正负极性需要方程或领域依据。")
+    for line in view_advice(views):
+        print(f"  ADVICE {line}")
+    print("FAIL: 草图结构错误" if errors else "PASS: 草图引用完整，几何问题用 visual --strict 检查")
     return 1 if errors else 0
+
+
+# ---------------------------------------------------------------------------
+# 布局配置
+# ---------------------------------------------------------------------------
+
+LAYOUT_MODES = ("auto", "natural", "refine", "preserve")
+# 已删除的旧模式：报错并提示替代方案，旧配置不会被悄悄当成默认值执行
+REMOVED_MODES = {
+    "graphviz": "graphviz 已删除，布局不调用外部程序，请改用 --mode natural",
+    "circular": "circular 环形模式已删除，整体重排请用 --mode natural",
+}
+CONFIG_KEYS = {
+    "view",
+    "skip_views",
+    "layout_mode",
+    "style",
+    "shadow_visibility",
+    "lock_node_names",
+    "lock_object_ids",
+    "node_positions",
+    "move_stocks",
+    "move_shadows",
+    "split_shadows",
+    "max_shadow_splits",
+    "seed",
+    "stock_size",
+    "repair_clouds",
+    "clearance",
+    "node_spacing",
+    "routing_passes",
+    "max_allowed_crossings",
+}
+
+
+def _check_int(config, key, low, high):
+    if key in config and (type(config[key]) is not int or not low <= config[key] <= high):
+        raise ValueError(f"{key} 必须是 {low} 到 {high} 的整数")
 
 
 def validate_config(config):
     if not isinstance(config, dict):
         raise ValueError("布局配置必须是 JSON 对象")
-    if config.get("layout_mode", "refine") not in {
-        "auto",
-        "preserve",
-        "refine",
-        # 旧配置兼容别名；实际使用 native-auto，不再调用 Graphviz。
-        "graphviz",
-        "circular",
-    }:
-        raise ValueError("layout_mode 必须是 auto/preserve/refine/circular；graphviz 仅为迁移别名")
-    if config.get("style", "preserve") not in {"academic", "monochrome", "native-blue", "preserve"}:
-        raise ValueError("style 必须是 monochrome/native-blue/preserve")
-    shadow_visibility = config.get("shadow_visibility", "orphan")
-    if shadow_visibility not in {"preserve", "orphan", "all"}:
-        raise ValueError("shadow_visibility 必须是 preserve/orphan/all")
-    if {"graphviz_scale", "graphviz_max_span", "rankdir", "nodesep", "ranksep"}.intersection(
-        config
-    ):
-        raise ValueError(
-            "Graphviz 坐标参数已移除；请使用 native circular/refine 布局和 node_positions"
-        )
-    for key in (
-        "clearance",
-        "node_spacing",
-        "minimum_curve_pixels",
-        "maximum_curve_pixels",
-        "curve_strength",
-        "circular_gap",
-        "circular_aspect",
-    ):
-        if key in config and (
-            isinstance(config[key], bool)
-            or not isinstance(config[key], (int, float))
-            or not math.isfinite(config[key])
-            or config[key] <= 0
-        ):
+    mode = config.get("layout_mode", "auto")
+    if mode in REMOVED_MODES:
+        raise ValueError(REMOVED_MODES[mode])
+    unknown = set(config) - CONFIG_KEYS
+    if unknown:
+        raise ValueError("未知的布局配置项: " + ", ".join(sorted(unknown)))
+    if mode not in LAYOUT_MODES:
+        raise ValueError("layout_mode 必须是 auto/natural/refine/preserve")
+    choices = {
+        "style": ("preserve", {"monochrome", "native-blue", "preserve"}),
+        "shadow_visibility": ("orphan", {"preserve", "orphan", "all"}),
+        "stock_size": ("normalize", {"normalize", "preserve"}),
+    }
+    for key, (default, allowed) in choices.items():
+        if config.get(key, default) not in allowed:
+            raise ValueError(f"{key} 只能取 {'/'.join(sorted(allowed))}")
+    for key in ("clearance", "node_spacing"):
+        value = config.get(key, 1)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"{key} 必须是有限正数")
-    if type(config.get("routing_passes", 2)) is not int or config.get(
-        "routing_passes", 2
-    ) not in range(1, 6):
-        raise ValueError("routing_passes 必须为 1 到 5")
-    for key in ("move_stocks", "move_shadows"):
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{key} 必须是有限正数")
+    _check_int(config, "routing_passes", 1, 5)
+    _check_int(config, "seed", 0, 2**31 - 1)
+    _check_int(config, "max_shadow_splits", 0, 20)
+    _check_int(config, "max_allowed_crossings", 0, 10_000)
+    for key in ("move_stocks", "move_shadows", "split_shadows", "repair_clouds"):
         if key in config and not isinstance(config[key], bool):
             raise ValueError(f"{key} 必须是布尔值")
-    if (
-        type(config.get("max_allowed_crossings", 0)) is not int
-        or config.get("max_allowed_crossings", 0) < 0
-    ):
-        raise ValueError("max_allowed_crossings 必须是非负整数")
+    for key in ("lock_node_names", "lock_object_ids", "skip_views"):
+        if key in config and not isinstance(config[key], list):
+            raise ValueError(f"{key} 必须是列表")
     anchors = config.get("node_positions", {})
-    if not isinstance(anchors, dict) or any(
-        not isinstance(p, list)
-        or len(p) != 2
-        or any(
-            isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0
-            for v in p
-        )
-        for p in anchors.values()
-    ):
-        raise ValueError("node_positions 必须为变量名到 [x, y] 非负有限坐标的映射")
-    if "information_arrow_color" in config:
-        expected = {"monochrome": "0-0-0", "academic": "0-0-0", "native-blue": "0-0-255"}.get(
-            config.get("style")
-        )
-        if expected is None or config["information_arrow_color"] != expected:
-            raise ValueError(
-                "信息箭头颜色必须与明确的黑色/纯蓝 style 一致；preserve 保留原生设置，不接收颜色覆盖"
+
+    def valid_point(point):
+        return (
+            isinstance(point, list)
+            and len(point) == 2
+            and all(
+                not isinstance(v, bool)
+                and isinstance(v, (int, float))
+                and math.isfinite(v)
+                and v >= 0
+                for v in point
             )
+        )
+
+    if not isinstance(anchors, dict) or not all(valid_point(p) for p in anchors.values()):
+        raise ValueError("node_positions 必须是 变量名 → [x, y] 的映射，坐标为非负有限数")
     return config
+
+
+def repair_clouds(lines, view):
+    """把管道端点上写成非 48 的源汇改为原生云（12,id,48,...,10,8,...）。"""
+    from natural_layout import CLOUD_HALF, _set_fields
+    from sketch_geometry import NATIVE_CLOUD_CODE, is_cloud_candidate, pipe_endpoint_ids
+
+    ends = pipe_endpoint_ids(view)
+    repaired = []
+    for obj in view.objects.values():
+        if is_cloud_candidate(obj, ends) and obj.name.strip() != NATIVE_CLOUD_CODE:
+            lines[obj.line_index] = _set_fields(
+                lines[obj.line_index], {2: NATIVE_CLOUD_CODE, 5: CLOUD_HALF[0], 6: CLOUD_HALF[1]}
+            )
+            repaired.append(obj.obj_id)
+    return repaired
+
+
+def verify_invariants(old_views, new_views, config, allowed):
+    """输出前的拓扑与语义不变量检查。
+
+    allowed 记录本次显式允许的变化：{"cloud": ids, "stock": ids, "shadows": {新影子ID: 原对象},
+    "repoint": {箭头ID: 新起点}}。除坐标、隐藏层级、这些显式变化外，其余字段必须逐字节一致。
+    """
+    from vensim_engine import canonical_name
+
+    for old, new in zip(old_views, new_views, strict=True):
+        shadows = allowed.get("shadows", {}).get(old.index, {})
+        repoint = allowed.get("repoint", {}).get(old.index, {})
+        if set(new.objects) != set(old.objects) | set(shadows):
+            raise ValueError("草图结构不变量校验失败（对象集合改变），已拒绝写入")
+        if [a.obj_id for a in old.arrows] != [a.obj_id for a in new.arrows]:
+            raise ValueError("草图结构不变量校验失败（箭头集合改变），已拒绝写入")
+        for left, right in zip(old.arrows, new.arrows, strict=True):
+            expected_from = repoint.get(left.obj_id, left.from_id)
+            if (right.from_id, right.to_id) != (expected_from, left.to_id):
+                raise ValueError(f"箭头 {left.obj_id} 端点改变，已拒绝写入")
+            if left.obj_id in repoint:
+                source, shadow = old.objects[left.from_id], new.objects[expected_from]
+                if (
+                    canonical_name(source.name) != canonical_name(shadow.name)
+                    or not shadow.is_shadow
+                ):
+                    raise ValueError(f"箭头 {left.obj_id} 只能改指到同名影子引用")
+            if any(left.fields[i] != right.fields[i] for i in (6, 7, 9, 12)):
+                raise ValueError("箭头极性、线宽、延迟或字体改变，已拒绝写入")
+            if left.fields[5] != right.fields[5] and config.get("shadow_visibility") != "all":
+                raise ValueError("箭头隐藏层级改变，必须显式使用 shadow_visibility=all")
+        clouds = allowed.get("cloud", set())
+        stocks = allowed.get("stock", set())
+        for oid, left in old.objects.items():
+            right = new.objects[oid]
+            if len(left.raw_fields) != len(right.raw_fields):
+                raise ValueError("草图对象字段数量改变，已拒绝写入")
+            free = {3, 4, 9}
+            if (old.index, oid) in clouds:
+                free |= {2, 5, 6}
+            if (old.index, oid) in stocks:
+                free |= {5, 6}
+            if any(
+                left.raw_fields[index] != right.raw_fields[index]
+                for index in range(len(left.raw_fields))
+                if index not in free
+            ):
+                raise ValueError(f"草图对象 {oid} 语义字段改变，已拒绝写入")
 
 
 def command_layout(
     path: Path,
     output: Path,
     config_path: Path | None = None,
-    _engine: str | None = None,
     route_information_arrows: bool = True,
     mode=None,
     style=None,
     preview=None,
+    split_shadows=None,
 ) -> int:
     from sketch_layout import optimize_view
 
@@ -728,7 +906,10 @@ def command_layout(
         config["layout_mode"] = mode
     if style:
         config["style"] = style
+    if split_shadows is not None:
+        config["split_shadows"] = bool(split_shadows)
     validate_config(config)
+    layout_mode = config.get("layout_mode", "auto")
     document = MdlDocument.read(path)
     lines, views = load_mdl(path)
     selected = choose_views(views, config)
@@ -741,6 +922,8 @@ def command_layout(
         raise ValueError("锚点变量未出现在所选视图: " + ", ".join(sorted(missing)))
     if any(len(v.objects) > 2_000 or len(v.arrows) > 10_000 for v in selected):
         raise ValueError("草图超过布局规模上限，请先按子系统拆分视图")
+    if layout_mode == "natural" and any(len(v.objects) > 400 for v in selected):
+        raise ValueError("natural 排版单个视图上限 400 个对象，请先按子系统拆分视图")
     report_path = output.with_suffix(output.suffix + ".layout_report.json")
     preflight_outputs(
         [output, report_path, *([preview] if preview else [])],
@@ -755,58 +938,179 @@ def command_layout(
     report = {
         "input": str(path),
         "output": str(output),
+        "layout_mode": layout_mode,
         "encoding": document.encoding,
         "equation_sha256": hashlib.sha256(document.equation_bytes).hexdigest(),
         "shadow_visibility": config.get("shadow_visibility", "orphan"),
-        "native_verified": False,
         "views": [],
     }
+    allowed = {"cloud": set(), "stock": set(), "shadows": {}, "repoint": {}}
+    insertions = []
+    policy = config.get("shadow_visibility", "orphan")
+    clearance = float(config.get("clearance", CHECK_CLEARANCE))
+    limit = config.get("max_allowed_crossings", 0)
+
+    def natural(target_lines, view):
+        from natural_layout import natural_view, orphan_shadow_ids
+
+        exclude = orphan_shadow_ids(view) if policy in {"orphan", "all"} else set()
+        # 整体重建时默认统一为黑色箭头；显式 --style preserve 可保留原色
+        return natural_view(
+            target_lines, view, {"style": "monochrome", **config}, frozenset(exclude)
+        )
+
+    def accept_natural(view, item, extra):
+        insertions.extend(extra)
+        allowed["cloud"].update((view.index, oid) for oid in item.get("clouds_repaired", []))
+        allowed["stock"].update((view.index, oid) for oid in item.get("resized_stocks", []))
+        splits = item.get("shadow_splits", [])
+        allowed["shadows"][view.index] = {r["new_shadow_id"]: r["original_source"] for r in splits}
+        allowed["repoint"][view.index] = {r["arrow"]: r["new_shadow_id"] for r in splits}
+
+    def keep_or_refine(target_lines, view, item):
+        if config.get("repair_clouds", True):
+            item["clouds_repaired"] = repair_clouds(target_lines, view)
+            allowed["cloud"].update((view.index, oid) for oid in item["clouds_repaired"])
+        return item
+
+    def severity(metrics):
+        key = quality_key(metrics)
+        return key[0], key[3], key[1] + key[2]
+
+    def minor(view, metrics):
+        """没有交叉、文字问题很少（约每 20 条连线不超过 1 处）：保留作者的版面。"""
+        crossings = len(metrics["arrow_crossings"]) + len(metrics["flow_crossings"])
+        issues = sum(
+            len(metrics[key]) for key in ("node_overlaps", "arrow_node_collisions", "short_arrows")
+        )
+        arrows = sum(1 for a in view.arrows if not a.is_physical_flow)
+        return crossings == 0 and issues <= 3 + arrows // 20
+
+    def auto_view(view, before):
+        """auto：能少改就少改。只有交叉或问题较多时才整体重建。"""
+        refine_config = {**config, "layout_mode": "refine"}
+        if anchors_here(view):
+            # 用户给了锚点：按锚点局部避让，不走“保留原图”
+            item = optimize_view(lines, view, refine_config, route_information_arrows)
+            return keep_or_refine(lines, view, item)
+        # 两种小改动：只挪出问题的个别节点（弧线不动），或只重排弧线（坐标不动）
+        nudged_lines = lines[:]
+        nudged = optimize_view(nudged_lines, view, {**config, "layout_mode": "nudge"}, False)
+        arcs_only = lines[:]
+        preserved = optimize_view(arcs_only, view, {**config, "layout_mode": "preserve"})
+        options = [
+            (severity(before), 0, None, {"strategy": "keep", "after": before}),
+            (severity(nudged["after"]), 1, nudged_lines, nudged),
+            (severity(preserved["after"]), 2, arcs_only, preserved),
+        ]
+        passing = [row for row in options if quality_pass(row[3]["after"], limit)]
+        # 交叉数优先比较，不能用新增交叉去换少擦一处字
+        _, _, chosen, item = min(passing or options, key=lambda row: row[:2])
+        if passing or minor(view, item["after"]):
+            # 小改动就合格，或小改动后只剩零星文字问题：保留作者的版面
+            if chosen is not None:
+                lines[:] = chosen
+            if not quality_pass(item["after"], limit):
+                item["note"] = "原图只有少量文字问题，保留坐标，具体位置见 after"
+            return keep_or_refine(lines, view, item)
+        refined_lines = lines[:]
+        refined = optimize_view(refined_lines, view, refine_config, route_information_arrows)
+        if quality_pass(refined["after"], limit) or len(view.objects) > 400:
+            lines[:] = refined_lines
+            return keep_or_refine(lines, view, refined)
+        rebuilt_lines = lines[:]
+        rebuilt, extra = natural(rebuilt_lines, view)
+        # natural 按更严的生成标准自检；缺陷不多于 refine 时采用整体重建
+        if sum(rebuilt["quality"][:4]) <= sum(quality_key(refined["after"])[:4]):
+            lines[:] = rebuilt_lines
+            accept_natural(view, rebuilt, extra)
+            return rebuilt
+        lines[:] = refined_lines
+        return keep_or_refine(lines, view, refined)
+
+    def anchors_here(view):
+        names = set(config.get("node_positions", {}))
+        return any(obj.name in names for obj in view.objects.values())
+
     for view in selected:
-        item = optimize_view(lines, view, config, route_information_arrows)
+        before = measure_view(view, clearance)
+        if layout_mode == "natural":
+            item, extra = natural(lines, view)
+            accept_natural(view, item, extra)
+        elif layout_mode == "auto" and quality_pass(before, limit) and not anchors_here(view):
+            # 原图已经合格：坐标和弧线都不动，只修云图标，指定样式时统一箭头颜色
+            item = {"strategy": "keep"}
+            for arrow in view.arrows:
+                if not arrow.is_physical_flow:
+                    lines[arrow.line_index] = restyle_arrow_line(lines[arrow.line_index], config)
+            keep_or_refine(lines, view, item)
+        elif layout_mode == "auto":
+            item = auto_view(view, before)
+        else:
+            item = optimize_view(lines, view, config, route_information_arrows)
+            keep_or_refine(lines, view, item)
+        item["before"] = before
         item["view"] = view.name
         item["view_index"] = view.index
-        item["pass"] = quality_pass(item["after"], config.get("max_allowed_crossings", 0))
         report["views"].append(item)
-    hidden_by_view = {
-        view.index: apply_shadow_visibility(lines, view, config.get("shadow_visibility", "orphan"))
-        for view in selected
-    }
-    updated = parse_views(lines, parse_stock_names(document.semantic_text))
+    hidden_by_view = {view.index: apply_shadow_visibility(lines, view, policy) for view in selected}
+    # 新影子行最后插入，按位置倒序，保证其余行号在插入前一直有效。
+    for position, text in sorted(insertions, key=lambda row: row[0], reverse=True):
+        lines[position:position] = text.splitlines(keepends=True)
+    stock_names = parse_stock_names(document.semantic_text)
+    time_names = time_dependent_names(document.semantic_text)
+    updated = parse_views(lines, stock_names, time_names)
     for item in report["views"]:
         new_view = updated[item["view_index"]]
-        item["after"] = measure_view(new_view, float(config.get("clearance", 6)))
+        item["after"] = measure_view(new_view, float(config.get("clearance", CHECK_CLEARANCE)))
         item["pass"] = quality_pass(item["after"], config.get("max_allowed_crossings", 0))
         item["hidden_shadow_ids"] = hidden_by_view.get(item["view_index"], [])
-    for old, new in zip(views, updated, strict=False):
-        if set(old.objects) != set(new.objects) or [
-            (a.obj_id, a.from_id, a.to_id) for a in old.arrows
-        ] != [(a.obj_id, a.from_id, a.to_id) for a in new.arrows]:
-            raise ValueError("草图结构不变量校验失败，已拒绝写入")
-        for left, right in zip(old.objects.values(), new.objects.values(), strict=False):
-            if len(left.raw_fields) != len(right.raw_fields):
-                raise ValueError("草图对象字段数量改变，已拒绝写入")
-            if any(
-                left.raw_fields[index] != right.raw_fields[index]
-                for index in range(len(left.raw_fields))
-                if index not in (3, 4, 9)
-            ):
-                raise ValueError("草图对象语义字段改变，已拒绝写入")
-        for left, right in zip(old.arrows, new.arrows, strict=False):
-            if any(left.fields[i] != right.fields[i] for i in (6, 9, 12)):
-                raise ValueError("箭头极性、延迟、隐藏或字体改变，已拒绝写入")
-            if left.fields[5] != right.fields[5] and config.get("shadow_visibility") != "all":
-                raise ValueError("箭头隐藏层级改变，必须显式使用 shadow_visibility=all")
+    verify_invariants(views, updated, config, allowed)
     data = document.encode(lines)
     report["equations_preserved"] = True
-    report["topology_preserved"] = True
+    report["topology_preserved"] = not any(allowed["repoint"].values())
+    report["shadow_splits"] = sum(len(v) for v in allowed["repoint"].values())
     report["pass"] = all(item["pass"] for item in report["views"])
     atomic_write(output, data)
-    atomic_write(report_path, json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8"))
-    if preview:
-        from sketch_preview import render_preview
+    try:
+        atomic_write(report_path, json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8"))
+        if preview:
+            from sketch_preview import render_preview
 
-        render_preview(output, preview, path if preview.suffix.lower() == ".html" else None)
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+            render_preview(output, preview, path if preview.suffix.lower() == ".html" else None)
+    except Exception:
+        # 附属文件失败时撤回刚写出的主输出，避免留下没有报告的半成品。
+        output.unlink(missing_ok=True)
+        report_path.unlink(missing_ok=True)
+        raise
+    summary = {
+        "output": str(output),
+        "layout_mode": layout_mode,
+        "pass": report["pass"],
+        "shadow_splits": report["shadow_splits"],
+        "views": [
+            {
+                "view": item["view"],
+                "pass": item["pass"],
+                "size": [item["after"]["layout_width"], item["after"]["layout_height"]],
+                **{
+                    key: len(item["after"][key])
+                    for key in (
+                        "arrow_crossings",
+                        "flow_crossings",
+                        "arrow_node_collisions",
+                        "node_overlaps",
+                        "short_arrows",
+                        "time_label_conflicts",
+                    )
+                    if item["after"][key]
+                },
+            }
+            for item in report["views"]
+        ],
+        "report": str(report_path),
+    }
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
     print("NEXT: 在 Vensim 中检查草图、Check Model 和 Units Check。")
     return 0
 
@@ -817,8 +1121,8 @@ def command_visual(path, output=None, strict=False, max_crossings=0):
     report = {
         "model": str(path),
         "views": records,
+        "view_advice": view_advice(views),
         "pass": all(quality_pass(record, max_crossings) for record in records),
-        "native_verified": False,
     }
     data = json.dumps(report, ensure_ascii=False, indent=2)
     if output:
@@ -838,20 +1142,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit = sub.add_parser("audit", help="审计箭头对象引用。")
     p_audit.add_argument("model", type=Path)
 
-    p_layout = sub.add_parser("layout", help="应用骨架优先的本地布局与信息箭头弧线。")
+    p_layout = sub.add_parser("layout", help="骨架优先的自然排版与信息箭头柔和圆弧。")
     p_layout.add_argument("model", type=Path)
     p_layout.add_argument("--output", required=True, type=Path)
     p_layout.add_argument("--config", type=Path)
     p_layout.add_argument(
-        "--route-information-arrows",
-        "--route",
-        action="store_true",
-        default=True,
-        help="为可重布线的信息箭头设置单个圆弧控制点。",
+        "--mode",
+        choices=list(LAYOUT_MODES),
+        help="auto（默认）原图合格则不动，否则先局部避让、不行再整体重建；"
+        "natural 强制整体重建；refine 只做局部避让；preserve 只改圆弧",
     )
-    p_layout.add_argument("--mode", choices=["auto", "preserve", "refine", "graphviz", "circular"])
-    p_layout.add_argument("--style", choices=["academic", "monochrome", "native-blue", "preserve"])
+    p_layout.add_argument("--style", choices=["monochrome", "native-blue", "preserve"])
     p_layout.add_argument("--preview", type=Path)
+    p_layout.add_argument(
+        "--split-shadows",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="natural 模式遇到无法消除的交叉时，复制同名影子变量引出该连线（默认开启）",
+    )
     p_visual = sub.add_parser("visual", help="圆弧碰撞报告，可作为严格质量检查")
     p_visual.add_argument("model", type=Path)
     p_visual.add_argument("--output", type=Path)
@@ -888,11 +1196,10 @@ def main() -> int:
             args.model,
             args.output,
             args.config,
-            None,
-            args.route_information_arrows,
-            args.mode,
-            args.style,
-            args.preview,
+            mode=args.mode,
+            style=args.style,
+            preview=args.preview,
+            split_shadows=args.split_shadows,
         )
     parser.error("Unknown command")
     return 2

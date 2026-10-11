@@ -89,3 +89,13 @@ def test_internal_aliases_cannot_corrupt_real_variable_names(tmp_path):
         run_model(model, ["结果", "结果"])
     with pytest.raises(ValueError, match="有限"):
         run_model(model, ["结果"], params={"中文": True})
+
+
+def test_csv_text_cells_cannot_become_spreadsheet_formulas():
+    from experiments import csv_bytes
+
+    text = csv_bytes(["Scenario", "Value"], [["=HYPERLINK(1)", -1.5], ["-20", "+x"]]).decode(
+        "utf-8-sig"
+    )
+    assert "'=HYPERLINK(1)" in text and ",-1.5" in text
+    assert "\n-20," in text.replace("\r\n", "\n") and "'+x" in text

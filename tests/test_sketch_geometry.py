@@ -130,11 +130,13 @@ def test_duplicate_ids_fail_and_numeric_comment_is_not_parsed():
     assert len(parse_views(text.splitlines(True))[0].objects) == 1
 
 
-def test_unsupported_arrows_and_endpoints_are_unchanged(tmp_path):
+@pytest.mark.parametrize("mode", ["refine", "natural"])
+def test_unsupported_arrows_and_endpoints_are_unchanged(tmp_path, mode):
     source, target = tmp_path / "source.mdl", tmp_path / "target.mdl"
     raw = sketch([node(1, "A", 100, 100), node(2, "B", 400, 100)], [arrow(3, 1, 2, shape=4)])
     source.write_text(raw)
-    command_layout(source, target)
+    command_layout(source, target, mode=mode, style="preserve")
+    # 无法改写为单控制点圆弧的箭头：记录与两端坐标都保持原样。
     assert source.read_bytes() == target.read_bytes()
     report = json.loads(target.with_suffix(".mdl.layout_report.json").read_text())
     assert report["equations_preserved"] and report["topology_preserved"]
@@ -236,9 +238,9 @@ def test_explicit_style_cannot_be_overridden_by_decorative_color():
         {"style": "native-blue", "information_arrow_color": "0-0-0"},
         {"style": "preserve", "information_arrow_color": "0-0-255"},
     ):
-        with pytest.raises(ValueError, match="颜色"):
+        with pytest.raises(ValueError, match="未知"):
             validate_config(config)
-    assert validate_config({"style": "native-blue", "information_arrow_color": "0-0-255"})
+    assert validate_config({"style": "native-blue"})
 
 
 @pytest.mark.parametrize("thickness,physical", [(20, False), (21, True), (22, True)])
@@ -303,3 +305,24 @@ def test_explicit_anchor_is_used_and_unknown_anchor_rejected(tmp_path):
     config.write_text(json.dumps({"node_positions": {"Typo": [150, 200]}}))
     with pytest.raises(ValueError, match="锚点"):
         command_layout(source, target, config)
+
+
+def test_layout_route_preserves_polarity_and_enables_arrow_color():
+    line = "1,9,1,2,0,0,43,2,1,64,0,31-41-55,,,1|(0,0)|\n"
+    output = update_arrow_line(line, (80, 40), {"style": "monochrome"})
+    fields = output.split("|", 1)[0].rstrip("\n").split(",")
+    assert fields[4:9] == ["1", "0", "43", "2", "1"]
+    assert fields[11] == "0-0-0"
+    assert fields[-1] == "1"
+    assert "|(80,40)|" in output
+
+
+def test_arcs_meeting_at_a_shared_interior_point_count_as_crossing():
+    from sketch_geometry import paths_cross
+
+    # 两条弧的控制点相同，必在该点相交；采样点重合时也不能放过
+    first = circle_path((240, 100), (214, 154), (160, 180))
+    second = circle_path((140, 110), (214, 154), (300, 160))
+    assert paths_cross(first, second)
+    # 首尾端点相接（两条箭头指向同一变量）不算交叉
+    assert not paths_cross([(0, 0), (50, 50)], [(100, 0), (50, 50)])

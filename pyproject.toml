@@ -1,7 +1,7 @@
 [project]
 name = "vensim-system-dynamics-skill"
-version = "2.2.6"
-description = "Cross-platform Vensim MDL layout, simulation, audit, and publication workflow"
+version = "2.3.0"
+description = "Vensim system dynamics skill for AI agents: MDL building, layout, checks, simulation and plots"
 requires-python = ">=3.10"
 readme = "README.md"
 

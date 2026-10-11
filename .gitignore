@@ -1,5 +1,4 @@
 # 依赖
-.graphviz/
 __pycache__/
 *.pyc
 .pytest_cache/

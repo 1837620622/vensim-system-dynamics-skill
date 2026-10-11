@@ -1,4 +1,4 @@
-"""从实际仿真序列生成独立的 Vensim 经典结果图，保留曲线与数据的对应关系。"""
+"""仿真结果曲线图：折线或分位带，数据原样绘制，不加标题和水印。"""
 
 from __future__ import annotations
 
@@ -15,84 +15,77 @@ from types import SimpleNamespace
 from mdl_document import atomic_write, preflight_outputs
 
 FORMATS = {"png", "pdf", "svg"}
+CONFIG_TEMPLATE = Path(__file__).resolve().parents[1] / "assets/templates/plot_config.json"
+
+# ---------------------------------------------------------------------------
+# 命令行选项与样式配置
+# ---------------------------------------------------------------------------
 
 
 def plot_options(parser, style=False):
-    parser.add_argument(
-        "--dpi", type=int, default=600, help="PNG 分辨率，默认 600，最高 1200；矢量图不受 DPI 限制"
-    )
-    parser.add_argument("--formats", help="额外导出格式，以逗号分隔，例如 png,pdf,svg")
-    parser.add_argument(
-        "--plot-config", type=Path, help="绘图样式 JSON；尺寸、字体、颜色、线宽与编号密度"
-    )
+    parser.add_argument("--dpi", type=int, default=600, help="PNG 分辨率，72–1200，默认 600")
+    parser.add_argument("--formats", help="额外导出格式，逗号分隔，如 png,pdf,svg")
+    parser.add_argument("--plot-config", type=Path, help="样式 JSON，字段见 plot_config.json")
     if style:
-        parser.add_argument("--plot-style", choices=["auto", "classic", "band"], default="auto")
+        parser.add_argument("--plot-style", choices=["auto", "lines", "band"], default="auto")
+
+
+def _number(value, low, high, integer=False):
+    if isinstance(value, bool) or not isinstance(value, int if integer else (int, float)):
+        return False
+    return math.isfinite(value) and low <= value <= high
 
 
 def load_plot_config(path=None):
-    default = Path(__file__).resolve().parents[1] / "assets/templates/plot_config_classic.json"
-    config = json.loads(default.read_text(encoding="utf-8"))
+    """读取默认样式并按用户 JSON 覆盖；未知字段和越界数值直接报错。"""
+    config = json.loads(CONFIG_TEMPLATE.read_text(encoding="utf-8"))
     if path:
         overrides = json.loads(Path(path).read_text(encoding="utf-8-sig"))
         if not isinstance(overrides, dict) or set(overrides) - set(config):
-            raise ValueError("plot-config 含未知字段；请参考 plot_config_classic.json")
+            raise ValueError("plot-config 含未知字段，可用字段见 plot_config.json")
         config.update(overrides)
-    limits = {
-        "width_inches": (4, 14),
-        "plot_height_inches": (2, 8),
-        "legend_row_inches": (0.18, 0.6),
+    ranges = {
+        "width_inches": (3, 14),
+        "height_inches": (2, 10),
         "font_size": (6, 24),
         "legend_font_size": (6, 20),
-        "line_width": (0.2, 3),
+        "line_width": (0.2, 4),
         "marker_size": (3, 15),
     }
-    for key, (low, high) in limits.items():
-        value = config[key]
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-            or not low <= value <= high
-        ):
+    for key, (low, high) in ranges.items():
+        if not _number(config[key], low, high):
             raise ValueError(f"{key} 必须在 {low} 到 {high} 之间")
-    for key, low, high in (
-        ("marker_repeats", 1, 20),
-        ("legend_repeats", 1, 12),
-        ("max_classic_curves", 1, 30),
-    ):
-        if type(config[key]) is not int or not low <= config[key] <= high:
+    for key, low, high in (("marker_repeats", 1, 20), ("max_lines", 1, 30)):
+        if not _number(config[key], low, high, integer=True):
             raise ValueError(f"{key} 必须为 {low} 到 {high} 的整数")
-    if not isinstance(config["font_family"], list) or any(
-        not isinstance(name, str) or not name for name in config["font_family"]
+    for key in ("band_outer_alpha", "band_inner_alpha"):
+        if not _number(config[key], 0.01, 1):
+            raise ValueError(f"{key} 必须在 0.01 到 1 之间")
+    for key in ("number_lines", "show_grid"):
+        if not isinstance(config[key], bool):
+            raise ValueError(f"{key} 必须为布尔值")
+    if not isinstance(config["font_family"], list) or not all(
+        isinstance(name, str) and name for name in config["font_family"]
     ):
-        raise ValueError("font_family 必须为字体名列表；空列表表示按系统选择")
-    if not isinstance(config["number_lines"], bool):
-        raise ValueError("number_lines 必须为布尔值")
-    if not isinstance(config["show_grid"], bool):
-        raise ValueError("show_grid 必须为布尔值")
-    if any(
-        isinstance(config[key], bool)
-        or not isinstance(config[key], (int, float))
-        or not 0 < config[key] <= 1
-        for key in ("band_outer_alpha", "band_inner_alpha")
-    ):
-        raise ValueError("分位带透明度必须大于 0 且不超过 1")
+        raise ValueError("font_family 必须为字体名列表，空列表表示自动选择")
+    styles = config["line_styles"]
     if (
-        not isinstance(config["line_styles"], list)
-        or not config["line_styles"]
-        or any(style not in ("-", "--", "-.", ":") for style in config["line_styles"])
+        not isinstance(styles, list)
+        or not styles
+        or any(s not in ("-", "--", "-.", ":") for s in styles)
     ):
-        raise ValueError("line_styles 必须是非空线型列表，仅支持 -、--、-.、:")
+        raise ValueError("line_styles 必须是非空列表，只能取 -、--、-.、:")
     colors = config["colors"]
+    hex_color = re.compile(r"#[0-9a-fA-F]{6}")
     if (
         not isinstance(colors, list)
         or not colors
-        or any(
-            not isinstance(color, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", color)
-            for color in [*colors, config["grid_color"], config["border_color"]]
+        or not all(
+            isinstance(c, str) and hex_color.fullmatch(c)
+            for c in [*colors, config["grid_color"], config["border_color"]]
         )
     ):
-        raise ValueError("颜色必须为 #RRGGBB，colors 至少包含一种颜色")
+        raise ValueError("颜色必须写成 #RRGGBB，colors 至少一种")
     return config
 
 
@@ -128,7 +121,7 @@ def validate_results(results, variables):
         if any(b <= a for a, b in zip(result.times, result.times[1:], strict=False)):
             raise ValueError("Time 必须严格递增，不能重复或乱序")
         if getattr(result, "metadata", {}).get("status") == "diagnostic_only":
-            raise ValueError("诊断结果包含求值失败，不能导出正式结果图")
+            raise ValueError("该结果是 --keep-going 生成的诊断结果，含求值失败，不能出图")
         for variable in variables:
             values = result.series.get(variable, [])
             if len(values) != len(result.times) or any(
@@ -145,15 +138,24 @@ def validate_results(results, variables):
 
 
 def font_settings(text, config=None):
+    """选择西文 + 中文字体组合，并逐字检查实际字形，缺字时报错。"""
     from matplotlib import font_manager
     from matplotlib.ft2font import FT2Font
 
     available = {font.name for font in font_manager.fontManager.ttflist}
+
+    def regular(font):
+        weight = font.weight if isinstance(font.weight, int) else 400
+        return weight <= 500 and font.style == "normal"
+
+    # TTC 字体只登记第一个字面，macOS 的 Songti.ttc 首个字面是粗体，跳过粗体字面
+    upright = {font.name for font in font_manager.fontManager.ttflist if regular(font)}
     cjk = next(
         (
             name
             for name in (
                 "SimSun",
+                "SimSong",
                 "Songti SC",
                 "Noto Serif CJK SC",
                 "Source Han Serif SC",
@@ -163,16 +165,15 @@ def font_settings(text, config=None):
                 "Noto Sans CJK SC",
                 "Arial Unicode MS",
             )
-            if name in available
+            if name in upright
         ),
         None,
     )
     latin = "Times New Roman" if "Times New Roman" in available else "DejaVu Serif"
     custom = (config or {}).get("font_family", [])
-    if any(name not in available for name in custom):
-        raise ValueError(
-            "指定字体未安装: " + ", ".join(name for name in custom if name not in available)
-        )
+    missing_fonts = [name for name in custom if name not in available]
+    if missing_fonts:
+        raise ValueError("指定字体未安装: " + ", ".join(missing_fonts))
     families = list(dict.fromkeys([*(custom or [latin]), *([cjk] if cjk else [])]))
     coverage = set()
     for family in families:
@@ -183,13 +184,11 @@ def font_settings(text, config=None):
     missing = sorted({char for char in text if not char.isspace() and ord(char) not in coverage})
     if missing:
         raise RuntimeError(
-            "字体缺少实际图件字形: "
-            + "".join(missing[:30])
-            + "；请安装合适字体并设置 font_family，不能交付缺字图片"
+            "字体缺少以下字形: " + "".join(missing[:30]) + "，请安装字体并在 font_family 中指定"
         )
     return {
         "font.family": families,
-        "font.size": (config or {}).get("font_size", 11),
+        "font.size": (config or {}).get("font_size", 10.5),
         "axes.unicode_minus": False,
         "pdf.fonttype": 42,
         "svg.fonttype": "path",
@@ -198,185 +197,116 @@ def font_settings(text, config=None):
     }
 
 
-def separate_number_markers(axis):
-    """只调整实际采样点上的编号位置；密集处宁可少标，不移动或插值曲线。"""
-    from matplotlib.markers import MarkerStyle
-    from matplotlib.transforms import Bbox
-
-    occupied = []
-    for line in axis.lines:
-        if not line.get_marker():
-            continue
-        marker = MarkerStyle(line.get_marker())
-        glyph = marker.get_path().transformed(marker.get_transform()).get_extents()
-        scale = line.get_markersize() * axis.figure.dpi / 72
-        pixels = axis.transData.transform(
-            list(zip(line.get_xdata(), line.get_ydata(), strict=False))
-        )
-        chosen = []
-        targets = line.get_markevery()
-        # 每个重复位置只在附近寻找，保护长序列的排版时间，不能为了编号改采样网格。
-        radius = min(64, max(1, len(pixels) // max(1, 2 * len(targets))))
-        for target in targets:
-            candidates = sorted(
-                range(max(0, target - radius), min(len(pixels), target + radius + 1)),
-                key=lambda index: (abs(index - target), index),
-            )
-            for index in candidates:
-                x, y = pixels[index]
-                rect = Bbox.from_extents(
-                    x + glyph.x0 * scale,
-                    y + glyph.y0 * scale,
-                    x + glyph.x1 * scale,
-                    y + glyph.y1 * scale,
-                ).expanded(1.35, 1.35)
-                if (
-                    index not in chosen
-                    and axis.bbox.contains(rect.x0, rect.y0)
-                    and axis.bbox.contains(rect.x1, rect.y1)
-                    and not any(rect.overlaps(other) for other in occupied)
-                ):
-                    chosen.append(index)
-                    occupied.append(rect)
-                    break
-        line.set_markevery(sorted(chosen))
+# ---------------------------------------------------------------------------
+# 图形
+# ---------------------------------------------------------------------------
 
 
-def classic_figure(results, variable, xlabel, title="", config=None):
+def _ylabel(results, variable):
+    units = {
+        getattr(result, "metadata", {}).get("variable_units", {}).get(variable)
+        for _, result in results
+    } - {None, ""}
+    return f"{variable} ({units.pop()})" if len(units) == 1 else variable
+
+
+def style_axis(axis, xlabel, ylabel="", title="", config=None):
+    """四边细框、刻度朝内、默认无网格，接近常见期刊插图。"""
+    config = config or load_plot_config()
+    axis.set_xlabel(xlabel)
+    if ylabel:
+        axis.set_ylabel(ylabel)
+    if config["show_grid"]:
+        axis.grid(True, color=config["grid_color"], linewidth=0.5)
+    else:
+        axis.grid(False)
+    axis.set_axisbelow(True)
+    for spine in axis.spines.values():
+        spine.set_color(config["border_color"])
+        spine.set_linewidth(0.8)
+    axis.tick_params(direction="in", length=3.5, width=0.8, top=True, right=True, pad=4)
+    axis.margins(x=0, y=0.06)
+    if title:
+        axis.set_title(title, fontsize=config["font_size"] + 1)
+
+
+def _legend(axis, count, config):
+    if count < 2:
+        return
+    options = {"frameon": False, "fontsize": config["legend_font_size"], "handlelength": 2.8}
+    if count <= 6:
+        axis.legend(loc="best", **options)
+    else:
+        # 曲线较多时图例放到坐标区下方，避免压住曲线
+        axis.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, **options)
+
+
+def lines_figure(results, variable, xlabel, title="", config=None):
+    """每个情景一条曲线；颜色与线型同时区分，黑白打印也能分辨。"""
     import matplotlib.pyplot as plt
     import numpy as np
 
     config = config or load_plot_config()
-    colors = config["colors"]
     count = len(results)
-    if count > config["max_classic_curves"]:
-        raise ValueError("曲线数超过 max_classic_curves；请分组、调整配置或使用 --plot-style band")
-    legend_height = config["legend_row_inches"] * count
-    height = config["plot_height_inches"] + 0.95 + legend_height
-    figure = plt.figure(figsize=(config["width_inches"], height))
-    axis = figure.add_axes(
-        [0.11, (legend_height + 0.78) / height, 0.87, config["plot_height_inches"] / height]
-    )
-    legend = figure.add_axes([0.015, 0.10 / height, 0.965, legend_height / height])
-    legend.set(xlim=(0, 1), ylim=(0, count))
-    legend.set_axis_off()
-    texts = []
+    if count > config["max_lines"]:
+        raise ValueError("曲线数超过 max_lines，请分组出图或改用 --plot-style band")
+    colors, styles = config["colors"], config["line_styles"]
+    extra = 0.25 * math.ceil(count / 2) if count > 6 else 0.0
+    figure, axis = plt.subplots(figsize=(config["width_inches"], config["height_inches"] + extra))
     for i, (label, result) in enumerate(results):
-        color = colors[i % len(colors)]
         values = result.series[variable]
-        line_style = config["line_styles"][i % len(config["line_styles"])]
         (line,) = axis.plot(
             result.times,
             values,
-            color=color,
+            color=colors[i % len(colors)],
+            linestyle=styles[i % len(styles)],
             linewidth=config["line_width"],
-            linestyle=line_style,
             label=label,
         )
-        # 在实际采样点上交错编号；不平滑、不改变数据，也不人为错开曲线。
-        if len(values) > 1:
-            fractions = np.linspace(0.035, 0.88, config["marker_repeats"]) + 0.09 * i / max(
-                1, count
-            )
-            indices = sorted(set(int(round(f * (len(values) - 1))) for f in fractions))
-        else:
-            indices = [0]
-        line.set_marker(f"${i + 1}$" if config["number_lines"] else "")
-        line.set_markevery(indices)
-        line.set_markersize(config["marker_size"])
-        line.set_markeredgewidth(0.35)
-        texts.append(
-            legend.text(
-                0,
-                count - i - 0.5,
-                f"{variable} : {label}",
-                va="center",
-                fontsize=config["legend_font_size"],
-            )
-        )
-    style_axis(axis, xlabel, title, config)
-    figure.canvas.draw()
-    if config["number_lines"]:
-        separate_number_markers(axis)
-    renderer = figure.canvas.get_renderer()
-    text_width = max(text.get_window_extent(renderer).width for text in texts)
-    legend_width = legend.get_window_extent(renderer).width
-    start = text_width / legend_width + 0.025
-    if start > 0.74:
-        plt.close(figure)
-        raise ValueError("图例文字过长，请缩短情景名称，使文字与线段各有足够空间")
-    for i in range(count):
-        y = count - i - 0.5
-        color = colors[i % len(colors)]
-        legend.plot(
-            [start, 0.995],
-            [y, y],
-            color=color,
-            linewidth=config["line_width"],
-            linestyle=config["line_styles"][i % len(config["line_styles"])],
-        )
-        if config["number_lines"]:
-            for x in np.linspace(start + 0.018, 0.98, config["legend_repeats"]):
-                legend.text(
-                    x,
-                    y,
-                    str(i + 1),
-                    color=color,
-                    ha="center",
-                    va="center",
-                    fontsize=config["legend_font_size"],
-                )
+        if config["number_lines"] and len(values) > 1:
+            # Vensim 式编号：只标在真实采样点上，各曲线按间隔的 i/count 错开
+            last = len(values) - 1
+            gap = 0.92 * last / config["marker_repeats"]
+            spots = 0.03 * last + gap * (np.arange(config["marker_repeats"]) + i / count)
+            line.set_marker(f"${i + 1}$")
+            line.set_markersize(config["marker_size"])
+            line.set_markeredgewidth(0.3)
+            line.set_markevery(sorted({int(round(s)) for s in spots}))
+    style_axis(axis, xlabel, _ylabel(results, variable), title, config)
+    _legend(axis, count, config)
+    figure.tight_layout()
     return figure
 
 
-def style_axis(axis, xlabel, title="", config=None):
-    config = config or load_plot_config()
-    axis.set_xlabel(xlabel, labelpad=5)
-    axis.set_axisbelow(True)
-    if config["show_grid"]:
-        axis.grid(True, color=config["grid_color"], linewidth=0.5, linestyle="-")
-    else:
-        axis.grid(False)
-    axis.tick_params(direction="out", length=0, pad=6)
-    for spine in axis.spines.values():
-        spine.set_color(config["border_color"])
-        spine.set_linewidth(0.65)
-    axis.margins(x=0, y=0.06)
-    if title:
-        axis.set_title(title, fontsize=12, pad=10)
-
-
 def band_figure(results, variable, xlabel, title="", config=None):
+    """蒙特卡洛样本的 5–95% 与 25–75% 分位带加中位数线。"""
     import matplotlib.pyplot as plt
     import numpy as np
 
     config = config or load_plot_config()
     times = results[0][1].times
     if any(result.times != times for _, result in results):
-        raise ValueError("分位带要求全部情景使用相同时间网格；不能静默插值")
+        raise ValueError("分位带要求所有样本使用相同的时间网格")
     data = np.asarray([result.series[variable] for _, result in results])
     q05, q25, q50, q75, q95 = np.quantile(data, [0.05, 0.25, 0.5, 0.75, 0.95], axis=0)
-    figure, axis = plt.subplots(
-        figsize=(config["width_inches"], config["plot_height_inches"] + 1.4)
-    )
+    figure, axis = plt.subplots(figsize=(config["width_inches"], config["height_inches"]))
     color = config["colors"][0]
     axis.fill_between(
-        times, q05, q95, color=color, alpha=config["band_outer_alpha"], label="5–95% sample range"
+        times, q05, q95, color=color, alpha=config["band_outer_alpha"], lw=0, label="5–95%"
     )
     axis.fill_between(
-        times, q25, q75, color=color, alpha=config["band_inner_alpha"], label="25–75% sample range"
+        times, q25, q75, color=color, alpha=config["band_inner_alpha"], lw=0, label="25–75%"
     )
-    axis.plot(times, q50, color=color, linewidth=config["line_width"], label=f"{variable} : median")
-    style_axis(axis, xlabel, title, config)
-    axis.legend(
-        loc="upper center",
-        bbox_to_anchor=(0.5, -0.20),
-        frameon=False,
-        fontsize=config["legend_font_size"],
-        ncol=1,
-    )
-    figure.subplots_adjust(left=0.11, right=0.98, top=0.96, bottom=0.32)
+    axis.plot(times, q50, color=color, linewidth=config["line_width"], label="Median")
+    style_axis(axis, xlabel, _ylabel(results, variable), title, config)
+    axis.legend(loc="best", frameon=False, fontsize=config["legend_font_size"])
+    figure.tight_layout()
     return figure
+
+
+# ---------------------------------------------------------------------------
+# 导出
+# ---------------------------------------------------------------------------
 
 
 def export_figures(
@@ -393,14 +323,15 @@ def export_figures(
 ):
     if isinstance(dpi, bool) or not isinstance(dpi, int) or not 72 <= dpi <= 1200:
         raise ValueError("DPI 必须为 72 到 1200 的整数")
-    if style not in {"auto", "classic", "band"}:
-        raise ValueError("未知结果图样式")
+    if style not in {"auto", "lines", "band"}:
+        raise ValueError("plot-style 只能是 auto、lines 或 band")
     validate_results(results, variables)
     config = load_plot_config(plot_config)
     paths, manifest_path = output_paths(output, variables, formats)
-    all_paths = [path for _, path in paths] + [manifest_path]
     preflight_outputs(
-        all_paths, [*inputs, *([plot_config] if plot_config else [])], overwrite=overwrite
+        [path for _, path in paths] + [manifest_path],
+        [*inputs, *([plot_config] if plot_config else [])],
+        overwrite=overwrite,
     )
     import matplotlib
 
@@ -408,42 +339,31 @@ def export_figures(
     import matplotlib.pyplot as plt
 
     if style == "auto":
-        style = "classic"
-        if len(results) > config["max_classic_curves"]:
+        style = "lines"
+        if len(results) > config["max_lines"]:
+            # 只有明确标记为蒙特卡洛抽样的结果才自动合并为分位带
             if not all(
                 getattr(result, "metadata", {}).get("experiment_mode") == "monte-carlo"
                 for _, result in results
             ):
-                raise ValueError(
-                    "情景曲线过多，请分组或明确选择 band；不能把命名政策情景自动合并成抽样分位带"
-                )
+                raise ValueError("命名情景过多，请分组出图；分位带只用于蒙特卡洛抽样结果")
             style = "band"
-    height = (
-        config["plot_height_inches"]
-        + 0.95
-        + config["legend_row_inches"] * (len(results) if style == "classic" else 3)
-    )
-    if config["width_inches"] * height * dpi**2 > 100_000_000:
-        raise ValueError("图件像素规模过大，请减小尺寸/DPI，或分组出图")
+    if config["width_inches"] * (config["height_inches"] + 0.5) * dpi**2 > 100_000_000:
+        raise ValueError("图片像素过大，请减小尺寸或 DPI")
     units = {getattr(result, "metadata", {}).get("time_unit", "") for _, result in results}
     if len(units) != 1:
-        raise ValueError("情景的时间单位不同，不能直接比较")
+        raise ValueError("各情景的时间单位不同，不能画在同一张图上")
     unit = next(iter(units))
     xlabel = f"Time ({unit})" if unit else "Time"
     report = {
-        "artifact_kind": "simulation_result",
         "style": style,
         "dpi": dpi,
         "title": title,
         "time_unit": unit,
-        "native_verified": False,
-        "sample_bands_are_confidence_intervals": False,
         "figures": [],
         "plot_config": config,
         "runs": [{"name": label, **getattr(result, "metadata", {})} for label, result in results],
     }
-    # 先完成所有渲染，再写文件；绘图失败时不留下半套图件。
-    rendered = []
     fonts = font_settings(
         "".join(variables)
         + "".join(label for label, _ in results)
@@ -453,23 +373,24 @@ def export_figures(
         config,
     )
     report["resolved_font_families"] = fonts["font.family"]
+    # 全部渲染成功后再写文件，中途出错不会留下半套图片
+    rendered = []
+    draw = lines_figure if style == "lines" else band_figure
     with plt.rc_context(fonts):
         for variable in variables:
-            figure = (classic_figure if style == "classic" else band_figure)(
-                results, variable, xlabel, title, config
-            )
+            figure = draw(results, variable, xlabel, title, config)
             try:
                 for _, path in (item for item in paths if item[0] == variable):
                     stream = io.BytesIO()
                     extension = path.suffix[1:].lower()
-                    metadata = (
-                        {"CreationDate": None, "ModDate": None}
-                        if extension == "pdf"
-                        else {"Date": None}
-                        if extension == "svg"
-                        else None
+                    # 去掉 PDF/SVG 内的时间戳，同一数据重复导出得到相同文件
+                    metadata = {
+                        "pdf": {"CreationDate": None, "ModDate": None},
+                        "svg": {"Date": None},
+                    }
+                    figure.savefig(
+                        stream, format=extension, dpi=dpi, metadata=metadata.get(extension)
                     )
-                    figure.savefig(stream, format=extension, dpi=dpi, metadata=metadata)
                     content = stream.getvalue()
                     rendered.append((path, content))
                     report["figures"].append(
@@ -492,7 +413,7 @@ def export_figures(
 
 
 def csv_provenance(path, fingerprint):
-    """恢复相邻运行清单；CSV 导入不能丢掉诊断状态或沿用不匹配的仿真身份。"""
+    """读取 CSV 旁边的运行清单，带回模型哈希、时间单位与诊断状态。"""
     candidates = [(path.with_suffix(path.suffix + ".run.json"), "run")]
     if path.name == "series.csv":
         candidates.append((path.parent / "experiment.json", "experiment"))
@@ -512,7 +433,7 @@ def csv_provenance(path, fingerprint):
             else report.get("result_files", {}).get(path.name)
         )
         if recorded is not None and recorded != fingerprint:
-            raise ValueError("CSV 与运行清单哈希不一致；请核对数据来源，不能沿用原仿真身份")
+            raise ValueError("CSV 内容与运行清单记录的哈希不一致，文件可能被改动过")
         if kind == "run":
             rows = [("current", report)]
         elif kind == "experiment":
@@ -537,7 +458,7 @@ def csv_provenance(path, fingerprint):
         ):
             raise ValueError("运行清单缺少有效的情景名称或运行对象")
         if any(row.get("status") == "diagnostic_only" or row.get("warnings") for _, row in rows):
-            raise ValueError("运行清单标记为诊断结果，不能导出正式结果图")
+            raise ValueError("运行清单标记为诊断结果，不能出图")
         return {
             label: {
                 **row,
@@ -600,7 +521,7 @@ def read_result_csv(path, variables=None, time_unit="", encoding="utf-8-sig"):
         metadata = provenance.get(label, {})
         recorded_unit = metadata.get("time_unit", "")
         if time_unit and recorded_unit and time_unit != recorded_unit:
-            raise ValueError("指定时间单位与运行清单不一致；请先明确换算，不能只改标签")
+            raise ValueError("--time-unit 与运行清单记录的时间单位不一致")
         results.append(
             (
                 label,
@@ -626,7 +547,7 @@ def main(argv=None):
     parser.add_argument("csv", type=Path)
     parser.add_argument("--var", action="append")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--time-unit", default="", help="填写真实的时间单位，不猜测为 Year")
+    parser.add_argument("--time-unit", default="", help="时间单位，如 Year、Month")
     parser.add_argument(
         "--encoding", default="utf-8-sig", help="默认 UTF-8/BOM；旧中文 CSV 可用 gb18030"
     )

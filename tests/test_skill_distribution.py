@@ -12,7 +12,7 @@ def test_doctor_flags_installed_dependencies_below_constraints(monkeypatch):
     sys.path.insert(0, str(SKILL / "scripts"))
     import skill_cli
 
-    versions = {"lxml": "6.0.3", "pillow": "12.2.0", "mcp": "1.30.0", "click": "8.3.3rc1"}
+    versions = {"lxml": "6.0.3", "pillow": "12.3.0rc1"}
 
     def installed_version(name):
         if name not in versions:
@@ -21,10 +21,13 @@ def test_doctor_flags_installed_dependencies_below_constraints(monkeypatch):
 
     monkeypatch.setattr(skill_cli.importlib.metadata, "version", installed_version)
     rows = {row["package"]: row for row in skill_cli.dependency_constraints()}
-    assert rows["lxml"]["status"] == rows["pillow"]["status"] == "upgrade_required"
-    assert rows["mcp"]["status"] == "satisfies_constraints"
-    assert rows["click"]["status"] == "version_needs_review"
-    assert rows["anyio"]["status"] == "not_installed"
+    assert rows["lxml"]["status"] == "upgrade_required"
+    assert rows["pillow"]["status"] == "version_needs_review"
+    versions.clear()
+    versions["lxml"] = "6.1.0"
+    rows = {row["package"]: row for row in skill_cli.dependency_constraints()}
+    assert rows["lxml"]["status"] == "satisfies_constraints"
+    assert rows["pillow"]["status"] == "not_installed"
 
 
 def test_skill_entrypoint_and_packaged_assets():
@@ -33,7 +36,7 @@ def test_skill_entrypoint_and_packaged_assets():
     assert "description:" in text.split("---", 2)[1]
     assert (SKILL / "agents/openai.yaml").is_file()
     assert (SKILL / "assets/templates/model_template.json").is_file()
-    assert (SKILL / "assets/templates/plot_config_classic.json").is_file()
+    assert (SKILL / "assets/templates/plot_config.json").is_file()
     assert (SKILL / "LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes()
 
 
@@ -43,7 +46,7 @@ def test_machine_readable_versions_stay_in_sync():
     skill_version = re.search(r"^\s+version:\s*[\"']([^\"']+)", skill, re.MULTILINE)
     project_version = re.search(r"^version\s*=\s*[\"']([^\"']+)", pyproject, re.MULTILINE)
     assert skill_version and project_version
-    assert skill_version.group(1) == project_version.group(1) == "2.2.6"
+    assert skill_version.group(1) == project_version.group(1) == "2.3.0"
 
 
 def test_local_document_links_resolve():

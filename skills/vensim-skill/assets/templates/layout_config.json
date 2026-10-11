@@ -1,0 +1,14 @@
+{
+  "view": "*",
+  "skip_views": [],
+  "layout_mode": "auto",
+  "style": "preserve",
+  "node_positions": {},
+  "lock_node_names": [],
+  "lock_object_ids": [],
+  "split_shadows": true,
+  "max_shadow_splits": 6,
+  "shadow_visibility": "orphan",
+  "seed": 1,
+  "max_allowed_crossings": 0
+}

@@ -1,8 +1,6 @@
-import asyncio
 import csv
 import hashlib
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -76,7 +74,6 @@ def test_calibration_recovers_known_parameter_and_is_reproducible(model, tmp_pat
     assert first["best"]["score"] < first["baseline"]["score"] * 1e-8
     assert first["best"]["parameters"] == second["best"]["parameters"]
     assert first["evaluation_count"] <= 180
-    assert not first["global_optimum_proven"] and not first["native_verified"]
     assert (
         first["observations"]["source_csv_sha256"]
         == hashlib.sha256(observed.read_bytes()).hexdigest()
@@ -252,50 +249,3 @@ def test_optimize_cli_and_pysd_backend(model, tmp_path):
     report = json.loads(result.stdout)
     assert report["backend"] == "pysd" and report["evaluation_count"] == 10
     assert not model.with_suffix(".py").exists()
-
-
-def test_mcp_search_tools_execute_real_models(model, tmp_path):
-    pytest.importorskip("scipy")
-    pytest.importorskip("mcp")
-    from mcp import ClientSession, StdioServerParameters
-    from mcp.client.stdio import stdio_client
-
-    fit = tmp_path / "fit.json"
-    fit.write_text(json.dumps({**calibration_spec(), "max_evaluations": 10}), encoding="utf-8")
-    policy = tmp_path / "policy.json"
-    policy.write_text(json.dumps({**policy_spec(), "max_evaluations": 10}), encoding="utf-8")
-    observed = tmp_path / "observed.csv"
-    observed.write_text("Time,累计量\n0,2\n1,3\n2,4\n", encoding="utf-8")
-
-    async def exercise():
-        params = StdioServerParameters(
-            command=sys.executable,
-            args=[str(TOOLS / "skill_cli.py"), "mcp", "--workspace", str(tmp_path)],
-            env=dict(os.environ),
-        )
-        async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                fitted = await session.call_tool(
-                    "calibrate_model",
-                    {
-                        "model": model.name,
-                        "spec": fit.name,
-                        "data": observed.name,
-                        "output_directory": "mcp-fit",
-                    },
-                )
-                assert not fitted.isError, fitted
-                optimized = await session.call_tool(
-                    "optimize_policy",
-                    {"model": model.name, "spec": policy.name, "output_directory": "mcp-policy"},
-                )
-                assert not optimized.isError, optimized
-        for directory in ("mcp-fit", "mcp-policy"):
-            report = json.loads(
-                (tmp_path / directory / "optimization.json").read_text(encoding="utf-8")
-            )
-            assert report["evaluation_count"] <= 10
-            assert report["feasible_solution_found"]
-
-    asyncio.run(exercise())

@@ -6,16 +6,19 @@ import dataclasses
 import math
 
 from sketch_geometry import (
+    CHECK_CLEARANCE,
     arrow_path,
     box,
     boxes_intersect,
     measure_view,
     path_hits_box,
-    path_length,
-    paths_cross,
     quality_key,
     visible,
 )
+
+# ---------------------------------------------------------------------------
+# 坐标替换与圆弧重排
+# ---------------------------------------------------------------------------
 
 
 def positioned_view(view, positions):
@@ -32,49 +35,9 @@ def positioned_view(view, positions):
     )
 
 
-def control_candidates(view, arrow, config):
-    source, target = view.objects[arrow.from_id], view.objects[arrow.to_id]
-    # 统一端点顺序，反向箭头不会因法向量同时反向而落在同一根线上。
-    left, right = sorted((source, target), key=lambda obj: obj.obj_id)
-    dx, dy = right.x - left.x, right.y - left.y
-    distance = math.hypot(dx, dy)
-    if distance < 1:
-        return []
-    nx, ny = -dy / distance, dx / distance
-    minimum = min(float(config.get("minimum_curve_pixels", 14)), distance * 0.15)
-    maximum = min(float(config.get("maximum_curve_pixels", 180)), distance * 0.48)
-    amplitudes = {
-        minimum,
-        max(minimum, min(maximum, distance * float(config.get("curve_strength", 0.12)))),
-    }
-    amplitudes.update(
-        max(minimum, min(maximum, distance * ratio)) for ratio in (0.07, 0.14, 0.24, 0.36, 0.48)
-    )
-    # 直线是原生 Arrow 的合法几何。大型视图先把中点加入候选，只有直线
-    # 会穿过文字、管道或与其他箭头相交时才使用圆弧，避免所有关系被强行
-    # 弯成同一种“AI 弧线”。
-    candidates = []
-    if len(view.objects) >= 12:
-        candidates.append((round(left.x + dx * 0.5), round(left.y + dy * 0.5)))
-    for amplitude in sorted(amplitudes):
-        for direction in (1, -1):
-            for fraction in (0.5, 0.35, 0.65):
-                candidates.append(
-                    (
-                        round(left.x + dx * fraction + nx * amplitude * direction),
-                        round(left.y + dy * fraction + ny * amplitude * direction),
-                    )
-                )
-    # 现有的正常圆弧也参加比较，避免对已排好的模型反复扰动。
-    if arrow.shape == 1 and len(arrow.points) == 1:
-        point = arrow.points[0]
-        sagitta = abs(dx * (point[1] - left.y) - dy * (point[0] - left.x)) / distance
-        if minimum * 0.75 <= sagitta <= maximum:
-            candidates.insert(0, point)
-    return list(dict.fromkeys(candidates))
-
-
 def route_view(lines, view, positions, config):
+    """为可重布线的信息箭头选择柔和圆弧（与 natural 相同的 k 规则与约束）。"""
+    from arc_routing import route_arcs
     from vensim_autolayout import (
         _is_information_arrow,
         restyle_arrow_line,
@@ -83,48 +46,27 @@ def route_view(lines, view, positions, config):
 
     current = positioned_view(view, positions)
     routeable = [arrow for arrow in current.arrows if _is_information_arrow(arrow, current.objects)]
-    paths = {a.obj_id: arrow_path(current, a) for a in current.arrows if visible(a)}
-    obstacles = [obj for obj in current.objects.values() if visible(obj)]
-    clearance = float(config.get("clearance", 6))
-    routeable.sort(key=lambda a: (-path_length(paths.get(a.obj_id, [])), a.obj_id))
-    candidates = {}
-    for arrow in routeable:
-        rows = []
-        for control in control_candidates(current, arrow, config):
-            path = arrow_path(current, arrow, control)
-            if len(path) < 2:
-                continue
-            hits = sum(
-                path_hits_box(path, box(obj, clearance))
-                for obj in obstacles
-                if obj.obj_id not in (arrow.from_id, arrow.to_id)
-            )
-            rows.append((control, path, hits, path_length(path)))
-        candidates[arrow.obj_id] = rows
-    chosen = {}
-    for _ in range(int(config.get("routing_passes", 2))):
-        for arrow in routeable:
-
-            def cost(row, arrow=arrow):
-                control, path, hits, length = row
-                crossings = sum(
-                    paths_cross(path, other) for oid, other in paths.items() if oid != arrow.obj_id
-                )
-                return hits, crossings, round(length, 1)
-
-            if candidates[arrow.obj_id]:
-                best = min(candidates[arrow.obj_id], key=cost)
-                chosen[arrow.obj_id], paths[arrow.obj_id] = best[0], best[1]
+    chosen = route_arcs(
+        current,
+        routeable,
+        clearance=float(config.get("clearance", CHECK_CLEARANCE)),
+        passes=int(config.get("routing_passes", 5)),
+    )
     changed = 0
     for arrow in routeable:
         if arrow.obj_id in chosen:
             old = lines[arrow.line_index]
-            lines[arrow.line_index] = update_arrow_line(old, chosen[arrow.obj_id], config)
+            lines[arrow.line_index] = update_arrow_line(old, chosen[arrow.obj_id][0], config)
             changed += old != lines[arrow.line_index]
     for arrow in current.arrows:
-        if not arrow.is_physical_flow:
+        if not arrow.is_physical_flow and arrow.obj_id not in chosen:
             lines[arrow.line_index] = restyle_arrow_line(lines[arrow.line_index], config)
     return changed
+
+
+# ---------------------------------------------------------------------------
+# 整体避让（refine）
+# ---------------------------------------------------------------------------
 
 
 def clear_positions(view, proposed, movable, config):
@@ -193,14 +135,83 @@ def clear_positions(view, proposed, movable, config):
     return result
 
 
+# ---------------------------------------------------------------------------
+# 最小位移（nudge）
+# ---------------------------------------------------------------------------
+
+
+def _culprits(view, metrics, movable):
+    """按检查结果列出该挪的节点：文字重叠的双方、被线穿过的对象、过短箭头的两端。"""
+    arrows = {arrow.obj_id: arrow for arrow in view.arrows}
+    found = [oid for pair in metrics["node_overlaps"] for oid in pair]
+    found += [item["object"] for item in metrics["arrow_node_collisions"]]
+    found += [item["object"] for item in metrics.get("physical_node_collisions", [])]
+    for item in metrics.get("time_label_conflicts", []):
+        found += [item["owner"], item.get("object")]
+    for item in metrics["arrow_node_collisions"] + metrics["short_arrows"]:
+        arrow = arrows.get(item["arrow"])
+        if arrow is not None:
+            found += [arrow.to_id, arrow.from_id]
+    return list(dict.fromkeys(oid for oid in found if oid in movable))
+
+
+def nudge_positions(view, movable, config, max_moves=6):
+    """最小位移：只挪出问题的节点，其余坐标和全部弧线控制点保持原样。
+
+    每轮从出问题的节点里找一个，在原位周围由近到远试探，取第一个让各项缺陷
+    都不增加、且至少一项减少的位置。作者原图通常只有一两处文字相压，没必要
+    为此重排整张图。
+    """
+    clearance = float(config.get("clearance", CHECK_CLEARANCE))
+    positions: dict[int, tuple[int, int]] = {}
+    current = measure_view(view, clearance)
+    for _ in range(max_moves):
+        key = quality_key(current)[:4]
+        if not any(key):
+            break
+        trial_view = positioned_view(view, positions)
+        best = None
+        for oid in _culprits(trial_view, current, movable):
+            x0, y0 = trial_view.objects[oid].x, trial_view.objects[oid].y
+            for radius in (10, 20, 30, 40, 60, 80):
+                for angle in range(0, 360, 30):
+                    theta = math.radians(angle)
+                    point = (
+                        round(x0 + radius * math.cos(theta)),
+                        round(y0 + radius * math.sin(theta)),
+                    )
+                    metrics = measure_view(
+                        positioned_view(view, {**positions, oid: point}), clearance
+                    )
+                    new = quality_key(metrics)[:4]
+                    if new != key and all(a <= b for a, b in zip(new, key, strict=True)):
+                        if best is None or (new, radius) < (best[0], best[1]):
+                            best = (new, radius, oid, point, metrics)
+                if best is not None:
+                    break
+            if best is not None:
+                break
+        if best is None:
+            break
+        positions[best[2]] = best[3]
+        current = best[4]
+    return positions
+
+
+# ---------------------------------------------------------------------------
+# refine / preserve / nudge 方案比较
+# ---------------------------------------------------------------------------
+
+
 def optimize_view(lines, view, config, route=True):
+    """refine 与 preserve：尽量保留人工坐标，preserve 只改圆弧，refine 就近避让。
+
+    refine 同时比较最小位移（nudge）和整体避让两种方案；auto 单独用 nudge。
+    """
     from vensim_autolayout import eligible_movable_nodes, parse_views, update_obj_line
 
     movable = eligible_movable_nodes(view, config)
-    requested_mode = config.get("layout_mode", "refine")
-    # 旧配置中的 graphviz 只保留为迁移别名；所有位置都由本地、可复现
-    # 的骨架/邻域算法生成，避免外部样条和节点尺度把 MDL 拉成超宽长图。
-    mode = "auto" if requested_mode == "graphviz" else requested_mode
+    mode = config.get("layout_mode", "refine")
     anchors = {}
     for name, point in config.get("node_positions", {}).items():
         matches = [oid for oid, obj in view.objects.items() if obj.name == name]
@@ -212,35 +223,17 @@ def optimize_view(lines, view, config, route=True):
     # 锚点先进入障碍物集合，其他节点才能真正绕开其最终位置。
     working = positioned_view(view, anchors)
     free = {oid: obj for oid, obj in movable.items() if oid not in anchors}
-    proposals = [("preserve", {})]
-    if mode != "preserve":
+    proposals = [] if mode == "nudge" else [("preserve", {})]
+    if mode in {"refine", "nudge"} and not anchors:
+        proposals.append(("nudge", nudge_positions(view, free, config)))
+    if mode == "refine":
         proposals.append(("refine", clear_positions(working, {}, free, config)))
-        if mode == "circular":
-            from circular_layout import circular_proposals
-
-            proposals = [
-                ("circular", clear_positions(working, proposed, free, config))
-                for proposed in circular_proposals(working, free, config)
-            ]
-        if mode == "auto" and free:
-            from circular_layout import circular_proposals
-
-            proposals.extend(
-                (
-                    "native-circular",
-                    clear_positions(working, proposed, free, config),
-                )
-                for proposed in circular_proposals(working, free, config)
-            )
     if anchors:
         proposals = [(label, {**positions, **anchors}) for label, positions in proposals]
-    if requested_mode == "graphviz" and free:
-        # 明确使用旧别名时仍只接受本地候选，不再尝试外部布局器。
-        proposals = [proposal for proposal in proposals if proposal[0] != "original"]
     evaluated = []
     stock_names = next(iter(view.objects.values())).stock_names if view.objects else set()
-    # 原图也作为候选：在自动模式下不因美化而恶化碰撞指标。
-    if mode in {"auto", "refine", "preserve"} and not anchors:
+    # 原图也参与比较，保证排版后碰撞指标不比原图差。
+    if not anchors:
         evaluated.append(
             (quality_key(measure_view(view)), "original", lines[:], {}, 0, measure_view(view))
         )
@@ -250,31 +243,38 @@ def optimize_view(lines, view, config, route=True):
             candidate[movable[oid].line_index] = update_obj_line(
                 candidate[movable[oid].line_index], x, y
             )
-        changed = route_view(candidate, view, positions, config) if route else 0
-        updated = parse_views(candidate, stock_names)[view.index]
-        metrics = measure_view(updated, float(config.get("clearance", 6)))
+        # nudge 只挪个别节点，作者画的弧线控制点原样保留
+        changed = (
+            route_view(candidate, view, positions, config) if route and label != "nudge" else 0
+        )
+        updated = parse_views(candidate, stock_names, view.time_dependents)[view.index]
+        metrics = measure_view(updated, float(config.get("clearance", CHECK_CLEARANCE)))
         evaluated.append((quality_key(metrics), label, candidate, positions, changed, metrics))
-    # 同等几何质量时优先采用有明确弧线的方案，原图排在最后。
-    # 既有直线不参加长度惩罚：先保证不增加碰撞，再选择自然圆弧。
-    best = min(evaluated, key=lambda row: (row[0][:-1], row[1] == "original", row[0][-1]))
+    # 缺陷数相同时优先最小位移；再比总长，同等时优先有明确弧线的方案，原图排在最后。
+    best = min(
+        evaluated,
+        key=lambda row: (
+            row[0][:4],
+            row[1] != "nudge",
+            row[0][4:-1],
+            row[1] == "original",
+            row[0][-1],
+        ),
+    )
     lines[:] = best[2]
-    if best[1] == "original":
+    if best[1] in {"original", "nudge"}:
         from vensim_autolayout import restyle_arrow_line
 
         for arrow in view.arrows:
             if not arrow.is_physical_flow:
                 lines[arrow.line_index] = restyle_arrow_line(lines[arrow.line_index], config)
     return {
-        "strategy": (
-            "native-auto"
-            if requested_mode == "graphviz" and best[1] == "native-circular"
-            else best[1]
-        ),
+        "strategy": best[1],
         "moved_auxiliary_nodes": sum(
             (view.objects[oid].x, view.objects[oid].y) != pos for oid, pos in best[3].items()
         ),
         "rerouted_information_arrows": best[4],
-        "before": measure_view(view, float(config.get("clearance", 6))),
+        "before": measure_view(view, float(config.get("clearance", CHECK_CLEARANCE))),
         "after": best[5],
         "candidates": [{"strategy": row[1], "quality": list(row[0])} for row in evaluated],
     }

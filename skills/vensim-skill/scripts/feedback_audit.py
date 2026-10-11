@@ -11,13 +11,18 @@ from pathlib import Path
 from mdl_document import MdlDocument, atomic_write, preflight_outputs
 from vensim_engine import _to_python_expr, canonical_name, extract_deps, parse_equations
 
+# ---------------------------------------------------------------------------
+# 极性推断：按方程求偏导符号
+# ---------------------------------------------------------------------------
+
+
 SIGNS = {"+": 1, "S": 1, "s": 1, "-": -1, "O": -1, "o": -1}
 
 
 def infer_polarity(expression, source, equations):
     """保守分析偏导的符号区间。其他变量保持不变，字面常量按当前 MDL 取值。
 
-    只覆盖线性组合、常量乘除和 MIN/MAX；未知非线性或作用相消时不猜。
+    只覆盖线性组合、常量乘除和 MIN/MAX；其他非线性或作用相消时返回 unknown。
     返回 + / - / 0 / unknown；非严格单调的饱和区允许导数为零。
     """
     names = {name: f"v{i}" for i, name in enumerate(equations)}
@@ -118,6 +123,11 @@ def infer_polarity(expression, source, equations):
     return "unknown"
 
 
+# ---------------------------------------------------------------------------
+# 回路核对
+# ---------------------------------------------------------------------------
+
+
 def check_loops(equations, loops):
     if not isinstance(loops, list):
         raise ValueError("feedback_loops 必须是列表")
@@ -149,7 +159,7 @@ def check_loops(equations, loops):
         path = resolved_path
         declared = loop.get("polarity")
         if declared is not None and (not isinstance(declared, str) or declared not in {"R", "B"}):
-            raise ValueError("回路 polarity 仅支持 R 或 B；不能用顺逆时针代替回路正负")
+            raise ValueError("回路 polarity 只能是 R 或 B")
         signs = []
         for source, target in zip(path, path[1:] + path[:1], strict=False):
             eq = equations[target]
@@ -186,6 +196,11 @@ def check_loops(equations, loops):
             }
         )
     return result
+
+
+# ---------------------------------------------------------------------------
+# 整体审计与命令行
+# ---------------------------------------------------------------------------
 
 
 def audit_feedback(text, loops=None):
@@ -234,9 +249,8 @@ def audit_feedback(text, loops=None):
                 expression = flow_expression
                 kind = "flow"
             else:
-                # 信息箭头指向存量时不能无条件拿初值关系判断。若 source
-                # 只出现在净流率中，它仍是动态作用；只有初值中存在时才标为
-                # initial。两者同时出现则保守地要求人工核对。
+                # 指向存量的箭头：source 只在净流率中出现是动态作用，只在初值中
+                # 出现记为 initial，两处都出现时交给人工判断
                 init_deps = extract_deps(init_expression, set(equations))
                 flow_deps = extract_deps(flow_expression, set(equations))
                 in_init = source in init_deps
@@ -301,9 +315,6 @@ def audit_feedback(text, loops=None):
         "conflicts": conflicts,
         "unresolved": unresolved,
         "status": "conflict" if conflicts else "needs_review" if needs_review else "checked_subset",
-        "native_verified": False,
-        "symbol_placement_requires_native_review": True,
-        "scope": "只证明支持表达式在当前字面常量下的直接作用；未标注不等于已验证。重跑改变参数后须重查；回路性质不表示动态稳定性。",
     }
 
 

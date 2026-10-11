@@ -11,6 +11,11 @@ from pathlib import Path
 SKETCH_MARKER = b"\\\\\\---///"
 
 
+# ---------------------------------------------------------------------------
+# 输出安全：不覆盖输入、不覆盖已有文件、原子写入
+# ---------------------------------------------------------------------------
+
+
 def separate_output(output: Path, inputs) -> None:
     for source in inputs:
         if output.resolve() == source.resolve() or (
@@ -52,6 +57,11 @@ def atomic_write(path: Path, data: bytes, *, overwrite=False) -> None:
 
 
 @dataclasses.dataclass
+# ---------------------------------------------------------------------------
+# MDL 文档：保留原编码与换行
+# ---------------------------------------------------------------------------
+
+
 class MdlDocument:
     raw: bytes
     encoding: str

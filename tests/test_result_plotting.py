@@ -12,9 +12,9 @@ sys.path.insert(0, str(TOOLS))
 from experiments import experiment_runs  # noqa: E402
 from result_plotting import (  # noqa: E402
     band_figure,
-    classic_figure,
     export_figures,
     font_settings,
+    lines_figure,
     load_plot_config,
     read_result_csv,
     validate_results,
@@ -115,7 +115,7 @@ def test_font_checks_actual_glyphs_instead_of_only_font_name():
         font_settings("Stock", {"font_family": ["Missing Font For Vensim Regression"]})
 
 
-def test_classic_curve_data_legends_and_no_title():
+def test_lines_keep_data_and_use_color_plus_line_style():
     pytest.importorskip("matplotlib")
     import matplotlib
 
@@ -123,23 +123,25 @@ def test_classic_curve_data_legends_and_no_title():
     import matplotlib.pyplot as plt
 
     results = trajectories()
-    fig = classic_figure(results, "Stock", "Time (Month)")
-    axis, legend = fig.axes
-    assert axis.get_title() == ""
-    assert fig._suptitle is None
+    fig = lines_figure(results, "Stock", "Time (Month)")
+    (axis,) = fig.axes
+    assert axis.get_title() == "" and fig._suptitle is None
     assert len(axis.lines) == 5
     for i, line in enumerate(axis.lines):
         assert list(line.get_ydata()) == results[i][1].series["Stock"]
-        assert line.get_marker() == f"${i + 1}$"
-    assert [line.get_color() for line in legend.lines] == [
+        assert line.get_marker() in ("None", None, "")
+    assert [line.get_color() for line in axis.lines] == [
         "#0072B2",
         "#D55E00",
         "#009E73",
-        "#CC79A7",
         "#E69F00",
+        "#CC79A7",
     ]
-    assert len(legend.texts) == 30
+    assert len({line.get_linestyle() for line in axis.lines}) == 4
+    legend = axis.get_legend()
+    assert [text.get_text() for text in legend.get_texts()] == [label for label, _ in results]
     assert all(spine.get_visible() for spine in axis.spines.values())
+    assert axis.get_ylabel() == "Stock"
     plt.close(fig)
 
 
@@ -151,7 +153,7 @@ def test_export_dpi_vector_and_provenance(tmp_path):
     report = export_figures(trajectories(), ["Stock"], output, formats="pdf,svg")
     assert len(report["figures"]) == 3
     with Image.open(output) as image:
-        assert image.size == (4320, 3390)
+        assert image.size == (3780, 2280)
         assert image.info["dpi"][0] == pytest.approx(600, abs=0.02)
     assert output.with_suffix(".pdf").read_bytes().startswith(b"%PDF")
     assert "<svg" in output.with_suffix(".svg").read_text()
@@ -159,7 +161,6 @@ def test_export_dpi_vector_and_provenance(tmp_path):
     assert manifest["title"] == ""
     assert manifest["time_unit"] == "Month"
     assert len(manifest["runs"]) == 5
-    assert not manifest["native_verified"]
 
 
 def test_multi_variable_outputs_cannot_overwrite_any_input(tmp_path):
@@ -194,22 +195,18 @@ def test_quantile_band_uses_sample_quantiles_and_rejects_different_time_grid():
         validate_results(results, ["Stock"])
 
 
-def test_color_styles_match_legend_and_do_not_change_data():
+def test_number_lines_option_marks_real_samples():
     pytest.importorskip("matplotlib")
     import matplotlib.pyplot as plt
 
-    config = {**load_plot_config(), "line_styles": ["-", "--", "-.", ":"], "show_grid": False}
+    config = {**load_plot_config(), "number_lines": True}
     results = trajectories()
-    fig = classic_figure(results, "Stock", "Time", config=config)
-    axis, legend = fig.axes
-    assert [line.get_linestyle() for line in axis.lines] == [
-        line.get_linestyle() for line in legend.lines
-    ]
-    assert len({line.get_linestyle() for line in axis.lines}) == 4
+    fig = lines_figure(results, "Stock", "Time", config=config)
+    axis = fig.axes[0]
+    for i, line in enumerate(axis.lines):
+        assert line.get_marker() == f"${i + 1}$"
+        assert list(line.get_ydata()) == results[i][1].series["Stock"]
     assert not any(line.get_visible() for line in [*axis.get_xgridlines(), *axis.get_ygridlines()])
-    assert len({line.get_color() for line in axis.lines}) == len(results)
-    assert axis.get_title() == "" and fig._suptitle is None
-    assert list(axis.lines[2].get_ydata()) == results[2][1].series["Stock"]
     plt.close(fig)
 
 
@@ -232,8 +229,8 @@ def test_invalid_line_styles_are_rejected(tmp_path, value):
 
 def test_named_scenarios_are_not_silently_replaced_with_quantiles(tmp_path):
     pytest.importorskip("matplotlib")
-    results = [(str(i), trajectories()[0][1]) for i in range(13)]
-    with pytest.raises(ValueError, match="政策情景"):
+    results = [(str(i), trajectories()[0][1]) for i in range(9)]
+    with pytest.raises(ValueError, match="命名情景"):
         export_figures(results, ["Stock"], tmp_path / "unsafe.svg")
     assert not (tmp_path / "unsafe.svg").exists()
     assert not (tmp_path / "unsafe.plot.json").exists()
@@ -241,7 +238,7 @@ def test_named_scenarios_are_not_silently_replaced_with_quantiles(tmp_path):
         result.metadata["experiment_mode"] = "monte-carlo"
     export_figures(results, ["Stock"], tmp_path / "samples.svg")
     report = json.loads((tmp_path / "samples.plot.json").read_text())
-    assert report["style"] == "band" and not report["sample_bands_are_confidence_intervals"]
+    assert report["style"] == "band"
 
 
 def test_single_curve_and_quantile_bands_are_colored_by_default():
@@ -250,7 +247,7 @@ def test_single_curve_and_quantile_bands_are_colored_by_default():
     from matplotlib.colors import to_rgb
 
     for fig in (
-        classic_figure(trajectories()[:1], "Stock", "Time"),
+        lines_figure(trajectories()[:1], "Stock", "Time"),
         band_figure(trajectories(), "Stock", "Time"),
     ):
         axis = fig.axes[0]
@@ -268,7 +265,9 @@ def test_coincident_curves_keep_data_but_do_not_share_number_positions():
         (str(i), SimpleNamespace(times=list(range(60)), series={"Stock": [1] * 60}))
         for i in range(6)
     ]
-    fig = classic_figure(results, "Stock", "Time")
+    fig = lines_figure(
+        results, "Stock", "Time", config={**load_plot_config(), "number_lines": True}
+    )
     indices = [index for line in fig.axes[0].lines for index in line.get_markevery()]
     assert len(indices) == len(set(indices)) and indices
     assert all(list(line.get_ydata()) == [1] * 60 for line in fig.axes[0].lines)

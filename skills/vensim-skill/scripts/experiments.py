@@ -1,4 +1,4 @@
-"""批量情景、参数敏感性和时间步长检查，保留每次运行的参数与完整序列。"""
+"""批量情景、参数扰动、网格与蒙特卡洛实验，以及时间步长收敛检查。"""
 
 from __future__ import annotations
 
@@ -17,22 +17,36 @@ from simulation_runner import run_model, validate_parameter_time_dependencies
 from vensim_engine import get_time_bounds, parse_equations
 
 MAX_RUNS = 200
-MAX_EXPERIMENT_VALUES = 2_000_000
+MAX_EXPERIMENT_VALUES = 2_000_000  # 一次实验最多保存的数值个数，防止输出文件过大
+
+# ---------------------------------------------------------------------------
+# 实验定义
+# ---------------------------------------------------------------------------
 
 
 def _check_model_identity(model, fingerprint, result=None):
-    """批量运行与发布前均核对同一源模型，不能把不同模型混为一组实验。"""
+    """实验过程中模型文件被改动时中止，避免一组结果混入两个版本的模型。"""
     if hashlib.sha256(model.read_bytes()).hexdigest() != fingerprint or (
         result is not None and result.metadata.get("model_sha256") != fingerprint
     ):
         raise ValueError("实验期间源模型发生变化，整组结果已拒绝发布")
 
 
+def _csv_cell(value):
+    """以 = + - @ 开头的文字在 Excel 中会被当成公式执行，前面加单引号；数值原样保留。"""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        try:
+            float(value)
+        except ValueError:
+            return "'" + value
+    return value
+
+
 def csv_bytes(header, rows):
     stream = io.StringIO(newline="")
     writer = csv.writer(stream)
-    writer.writerow(header)
-    writer.writerows(rows)
+    writer.writerow([_csv_cell(cell) for cell in header])
+    writer.writerows([_csv_cell(cell) for cell in row] for row in rows)
     return stream.getvalue().encode("utf-8-sig")
 
 
@@ -75,7 +89,7 @@ def experiment_runs(spec, baseline=None):
                 "changes 必须为非零、不重复的有限相对变化列表，例如 [-0.2, -0.1, 0.2, 0.1]"
             )
         if baseline is None or any(name not in baseline for name in names):
-            raise ValueError("扰动参数必须是模型中的数值常量，不能覆盖反馈方程")
+            raise ValueError("扰动参数必须是模型中的数值常量")
         if any(baseline[name] == 0 for name in names):
             raise ValueError("零基准值不能做百分比扰动，请改用 scenarios 指定绝对参数值")
         runs = [
@@ -104,8 +118,8 @@ def experiment_runs(spec, baseline=None):
                 raise ValueError(f"必须显式提供 samples，取 1 到 {MAX_RUNS} 的整数")
             seed = spec.get("seed")
             if type(seed) is not int:
-                raise ValueError("必须显式提供整数 seed，不能沿用其他实验的随机种子")
-            # 固定种子的统计抽样，不用于口令或任何密码学用途。
+                raise ValueError("蒙特卡洛实验需要整数 seed，以便复现抽样")
+            # 抽样只用于实验设计，不涉及密码学
             rng = random.Random(seed)  # nosec B311
             for limits in parameters.values():
                 if (
@@ -141,6 +155,11 @@ def experiment_runs(spec, baseline=None):
     return runs
 
 
+# ---------------------------------------------------------------------------
+# 批量运行
+# ---------------------------------------------------------------------------
+
+
 def execute_experiment(
     model,
     spec,
@@ -173,7 +192,7 @@ def execute_experiment(
         or any(not isinstance(v, str) for v in variables)
         or len(set(variables)) != len(variables)
     ):
-        raise ValueError("必须指定 variables，避免把内部参数当作结果")
+        raise ValueError("请在 variables 中列出要输出的变量")
     outputs = [output / "series.csv", output / "summary.csv", output / "experiment.json"]
     plot_paths, plot_manifest = output_paths(plot, variables, formats) if plot else ([], None)
     plots = [path for _, path in plot_paths] + ([plot_manifest] if plot_manifest else [])
@@ -204,9 +223,7 @@ def execute_experiment(
         _check_model_identity(model, fingerprint)
         result = run_model(model, variables, backend=backend, params=run["params"], **time)
         _check_model_identity(model, fingerprint, result)
-        # 资源上限必须依据后端实际返回的保存点复核。参数覆盖已经在
-        # run_model 前检查了时间依赖，但后端仍可能因浮点网格或翻译器
-        # 行为返回不同长度；不能只用覆盖前的模型方程估算并放行超大输出。
+        # 按后端实际返回的保存点数再核一次输出规模（PySD 的时间网格可能与估算不同）
         actual_values = len(result.times) * len(runs) * len(variables)
         if actual_values > MAX_EXPERIMENT_VALUES:
             raise ValueError(
@@ -216,10 +233,7 @@ def execute_experiment(
         if not result.times or not math.isclose(
             result.times[-1], result.metadata["final_time"], rel_tol=0, abs_tol=1e-9
         ):
-            raise ValueError(
-                "批量摘要需要保存 FINAL TIME；请调整 SAVEPER 或实验时间设置，"
-                "不能把最后保存点误称为终值"
-            )
+            raise ValueError("保存点没有落在 FINAL TIME 上，请调整 SAVEPER 使终值被保存")
         result.metadata["experiment_mode"] = spec.get("mode", "scenarios")
         manifest.append({"name": run["name"], **result.metadata})
         results.append((run["name"], result))
@@ -246,7 +260,6 @@ def execute_experiment(
         "runs": manifest,
         "run_count": len(runs),
         "model_sha256": fingerprint,
-        "native_verified": False,
     }
     contents = {
         outputs[0]: csv_bytes(["Scenario", "Time", "Variable", "Value"], series),
@@ -257,8 +270,7 @@ def execute_experiment(
     report["result_files"] = {
         path.name: hashlib.sha256(content).hexdigest() for path, content in contents.items()
     }
-    # 所有求解及图形渲染成功后才保存实验清单，不伪报完整实验。
-    _check_model_identity(model, fingerprint)
+    # 先完成全部仿真与绘图，再写结果文件；实验清单最后写出
     figure_report = (
         plot_experiment(
             results,
@@ -276,11 +288,14 @@ def execute_experiment(
     )
     _check_model_identity(model, fingerprint)
     for path, content in contents.items():
-        _check_model_identity(model, fingerprint)
         atomic_write(path, content)
-    _check_model_identity(model, fingerprint)
     atomic_write(outputs[2], json.dumps(report, ensure_ascii=False, indent=2).encode())
     return {"run_count": len(runs), "output": str(output), "plot": figure_report}
+
+
+# ---------------------------------------------------------------------------
+# 绘图与步长检查
+# ---------------------------------------------------------------------------
 
 
 def plot_experiment(results, variables, output, title=None, **options):
@@ -302,7 +317,7 @@ def convergence(model, variables, output, tolerance=0.01):
         result = run_model(model, variables, time_step=dt / factor, saveper=sp)
         _check_model_identity(model, fingerprint, result)
         if runs and result.times != runs[0].times:
-            raise ValueError("步长检查的保存时刻不一致，结果已拒绝发布")
+            raise ValueError("不同步长的保存时刻不一致，无法比较")
         runs.append(result)
     records = []
     for variable in variables:
@@ -331,11 +346,15 @@ def convergence(model, variables, output, tolerance=0.01):
         "variables": records,
         "pass": all(item["pass"] for item in records),
         "model_sha256": fingerprint,
-        "native_verified": False,
     }
     _check_model_identity(model, fingerprint)
     atomic_write(output, json.dumps(report, ensure_ascii=False, indent=2).encode())
     return report
+
+
+# ---------------------------------------------------------------------------
+# 命令行
+# ---------------------------------------------------------------------------
 
 
 def main(argv=None):

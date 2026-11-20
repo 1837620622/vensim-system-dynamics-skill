@@ -102,7 +102,11 @@ def build_files(
     files["graphs.vgd"] = "\n\n".join(graphs) + "\n"
     # 路径相对命令脚本所在目录写出，整个文件夹连同模型一起拷到 Windows 上也能用
     base_dir = Path(base_dir) if base_dir is not None else model.parent
-    model_ref = Path(os.path.relpath(model.resolve(), base_dir.resolve())).as_posix()
+    try:
+        model_ref = Path(os.path.relpath(model.resolve(), base_dir.resolve())).as_posix()
+    except ValueError:
+        # Windows 上模型和输出目录不在同一个盘符时无法写相对路径，退回绝对路径
+        model_ref = str(model.resolve())
     cmd = [f"SPECIAL>LOADMODEL|{model_ref}"]
     for cin, run_name in zip(cins, run_names, strict=True):
         if cin is not None:

@@ -48,3 +48,16 @@ def test_rejects_unknown_parameter_and_existing_output(tmp_path):
     command_vensim_script(MODEL, SPEC, [], out)
     with pytest.raises(ValueError, match="已存在"):
         command_vensim_script(MODEL, SPEC, [], out)
+
+
+def test_falls_back_to_absolute_model_path_across_drives(tmp_path, monkeypatch):
+    import vensim_dss
+
+    def _cross_drive(*_args, **_kwargs):
+        raise ValueError("path is on mount 'D:', start on mount 'C:'")
+
+    monkeypatch.setattr(vensim_dss.os.path, "relpath", _cross_drive)
+    out = tmp_path / "dss"
+    assert command_vensim_script(MODEL, SPEC, [], out) == 0
+    first = (out / "run_all.cmd").read_text(encoding="utf-8").splitlines()[0]
+    assert first == f"SPECIAL>LOADMODEL|{Path(MODEL).resolve()}"

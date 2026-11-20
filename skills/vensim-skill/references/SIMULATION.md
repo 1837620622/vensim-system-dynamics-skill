@@ -13,12 +13,24 @@
 | `RAMP(slope,start,end)` | `Time <= start` 为 0，之后线性上升到 end 并保持 | 反向区间与 PySD 不同 |
 | `MODULO(A,B)` | 正除数用 C 风格余数（结果与被除数同号） | 非正除数直接报错，Vensim 与 PySD 定义不同 |
 | `DELAY FIXED(input,duration,initial)` | 独立的离散状态队列，时长和初值在初始化时冻结 | 时长按步长取整（半步向上）；必须单独写在等号右侧 |
-| `SMOOTH`、`SMOOTH3` 及 I 变体 | 一阶或三阶信息平滑 | |
-| `DELAY1`、`DELAY3` 及 I 变体 | 各阶段管道存量逐级流出 | 物料延迟，不同于信息平滑 |
+| `SMOOTH`、`SMOOTH3`、`SMOOTH N(input,delay,initial,n)` 及 I 变体 | 一阶、三阶或 n 阶信息平滑 | n 必须是 1–100 的整数常数 |
+| `DELAY1`、`DELAY3`、`DELAY N(input,delay,initial,n)` 及 I 变体 | 各阶段管道存量逐级流出 | 物料延迟，不同于信息平滑 |
+| `TREND(input,average time,initial trend)` | 平均值为输入的一阶平滑，趋势 = `ZIDZ(input−平均, 平均时间×|平均|)` | 按 Vensim 手册定义展开 |
+| `FORECAST(input,average time,horizon)` | `input × (1 + TREND(input,average time,0) × horizon)` | |
+| `SAMPLE IF TRUE(condition,input,initial)` | 条件为真时取当前输入，否则保持上一时刻的输出；起点为 initial（起点条件为真时取输入） | 有状态，每个时间步末提交 |
+| `INITIAL(x)` | 取 x 在初始时刻的值并冻结 | |
+| `ACTIVE INITIAL(active,initial)` | 初始化阶段取 initial，之后取 active | 初始化只追踪 initial 的依赖，可打破初值环 |
 | 独立 Lookup、`WITH LOOKUP` | 数据点之间线性插值，范围外取首末值 | 至少两个点，x 严格递增 |
-| `IF THEN ELSE`、`MIN`、`MAX`、`ABS`、`SQRT`、`EXP`、`LN` 等 | 标准数学与条件函数 | `IF THEN ELSE` 只求所选分支 |
+| `LOOKUP EXTRAPOLATE`、`LOOKUP FORWARD`、`LOOKUP BACKWARD` | 表外沿首尾段外推；取下一个或上一个数据点的值 | 第一个参数是查表变量名 |
+| `PULSE TRAIN(start,duration,repeat,end)` | `start ≤ Time < end` 内每隔 repeat 出现宽 duration 的脉冲 | 与 PySD 一致；end 处是否取 1 与 Vensim 未逐点核对 |
+| `QUANTUM`、`POWER`、`LOG(x,base)`、`INTEGER`、`ARCSIN`、`ARCCOS`、`ARCTAN`、`SINH`、`COSH`、`TANH` | 确定性数学函数 | `QUANTUM` 的 q ≤ 0 时原样返回 |
+| `IF THEN ELSE`、`MIN`、`MAX`、`ABS`、`SQRT`、`EXP`、`LN`、`SIN`、`COS`、`TAN` | 标准数学与条件函数 | `IF THEN ELSE` 只求所选分支 |
 
-方程通过受限的表达式树求值，不执行任意 Python 代码。遇到不支持的函数直接报错；`--keep-going` 把失败变量置零后继续，结果标记为诊断数据，不能出图或写进结论。变量名不区分大小写，空格与下划线等价。
+平滑、延迟、TREND、FORECAST 可以嵌在表达式里，例如 `2 * SMOOTH(x, 3) + 1`。上表新增函数与 PySD 3.14 逐点一致（`tests/test_engine_functions.py`）。
+
+`NPV`、`RANDOM` 系列、`GET XLS`/`GET DIRECT` 数据函数、数组函数（`SUM`、`VMIN`、`VMAX` 等）、`DELAY CONVEYOR`、`QUEUE FIFO`、`ALLOCATE` 系列、`LOOKUP INVERT` 等不在内置引擎里，遇到时报“内置引擎不支持 Vensim 函数 …”，请用 `--backend pysd`、`crosscheck` 或 Vensim 运行。
+
+方程通过受限的表达式树求值，不执行任意 Python 代码，每个方程只解析一次。遇到不支持的函数直接报错；`--keep-going` 把失败变量置零后继续，结果标记为诊断数据，不能出图或写进结论。变量名不区分大小写，空格与下划线等价。
 
 ## 时间设置
 
@@ -58,6 +70,8 @@ PySD 在临时目录翻译模型，不在模型旁边留下 `.py` 文件；引�
 只能覆盖数值常量，不能替换方程。每次运行都从原始初值开始，实验期间模型文件被改动会中止。最多 200 次运行、200 万个保存值。输出 `series.csv`（长表）、`summary.csv`（初值、终值、最小、最大、峰值时刻）和 `experiment.json`。终值只在最后一个保存点正好是 FINAL TIME 时写出。
 
 基准、策略、机制等情景只是名字，含义由当前研究决定。比较机制作用时，保持其他参数、时间网格和种子相同，分别运行去掉机制、基准和加入机制的情景。两个模型耦合时，写清接口的方向、单位换算和时间对齐，分目录保存独立运行与耦合运行的结果。
+
+在 Vensim DSS 里重跑同一组情景并出原生图：`./skill.sh vensim-script model.mdl --spec experiment.json --output-dir results/dss`，生成 `.cin`、`.vgd`、`.cmd`，详见 [RESULT_PLOTS.md](RESULT_PLOTS.md#vensim-dss-原生结果图)。
 
 ## 参数校准与政策搜索
 

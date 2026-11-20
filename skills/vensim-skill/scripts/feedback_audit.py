@@ -150,6 +150,12 @@ def numeric_link_signs(text):
     step = max(1, math.ceil(len(result.times) / NUMERIC_POINTS))
     samples = range(0, len(result.times), step)
     signs = {}
+    cache: dict = {}
+    contexts = []
+    for index in samples:
+        ctx = {name: values[index] for name, values in result.series.items()}
+        ctx.update(Time=result.times[index], __time_step__=dt)
+        contexts.append(ctx)
     for target, eq in equations.items():
         if eq.integ_flow is not None or eq.is_lookup or eq.delay_fixed_args is not None:
             continue
@@ -160,13 +166,12 @@ def numeric_link_signs(text):
                 continue
             seen = set()
             try:
-                for index in samples:
-                    ctx = {name: values[index] for name, values in result.series.items()}
-                    ctx.update(Time=result.times[index], __time_step__=dt)
-                    base = evaluate(eq.rhs, ctx, lookups, name_map)
+                for sample in contexts:
+                    ctx = dict(sample)
+                    base = evaluate(eq.rhs, ctx, lookups, name_map, cache)
                     value = ctx[source]
                     ctx[source] = value + 1e-6 * max(1.0, abs(value))
-                    change = evaluate(eq.rhs, ctx, lookups, name_map) - base
+                    change = evaluate(eq.rhs, ctx, lookups, name_map, cache) - base
                     seen.add(0 if abs(change) <= 1e-12 * (1 + abs(base)) else (change > 0) * 2 - 1)
             except (ValueError, KeyError, ZeroDivisionError, OverflowError):
                 continue

@@ -42,6 +42,30 @@
 - `links` 只在需要强调或方程推不出符号时写，其余交给 `build` 自动标。
 - 建完跑 `visual --strict` 和 `check --strict`；输出里的“建议”逐条处理。
 
+## 因果回路图（`cld`）
+
+论文和报告通常要求每个子系统一张因果回路图（CLD），再加一张总体图。`cld` 读取与 `build` 相同的 JSON，不需要另写字段：
+
+```bash
+./skill.sh cld assets/templates/ev_adoption_zh.json --output results/ev_cld.mdl
+```
+
+| 输出 | 内容 |
+| --- | --- |
+| `ev_cld.mdl` | 每个 `view`（子系统）一个视图；来自其他子系统的原因变量按 Vensim 习惯画成灰色影子 |
+| `ev_cld_总体.mdl` | 总体因果回路图，全部变量在一个视图里，没有影子（英文模型为 `_overall`） |
+| `ev_cld.mdl.cld_report.json` | 每个视图的几何检查、回路标记、推不出极性的连线 |
+
+画法：
+
+- 变量是不带框的文字（形状 8）。存量不画方框，流量不画阀门和管道。
+- 连线标 `+`/`-`。极性来源与 `build` 相同：`links` 里写明的优先，没写的由方程推导，推不出的按基准运行数值求偏导；流量对流入的存量记 `+`，对流出的存量记 `-`。仍推不出的连线不标符号，并在报告中列出。
+- `feedback_loops` 中核对通过的回路画 R/B 标记，按声明顺序给 R、B 分别编号，同一条回路在子系统图和总体图里编号相同。整条回路在某个子系统视图内才在该视图画标记；总体图画全部核对通过的回路。
+- 默认不画常量，`--include-constants` 可以加上；`--no-overall` 只生成子系统文件。没有任何连线的变量不画，列在报告的 `isolated` 里。
+- 排版与 `build` 相同（natural 引擎、回路标记归位、零交叉验收），多视图时并行。
+
+方程写成 `A FUNCTION OF(原因变量, ...)`，这是 Vensim 定性模型的写法，CLD 文件只用来出图，不能仿真，`check` 会报循环依赖，属正常现象。仿真和存量流量图仍用 `build` 生成的模型。总体图单独成文件，是因为同一个变量在一个文件里只能有一处正常定义，放进第二个视图就成了带 `<>` 的影子。
+
 ## 实验 JSON（`experiment`）
 
 公共字段：`mode`、`variables`，可选 `time: {time_step, final_time, saveper}`。各 mode 见 [SIMULATION.md](SIMULATION.md#批量实验)，示例见 `inventory_scenarios.json`、`inventory_perturb.json`、`inventory_sensitivity.json`。

@@ -1,26 +1,45 @@
-Vensim Skill Non-Commercial License
-SPDX-License-Identifier: LicenseRef-Vensim-Skill-NonCommercial
+Vensim Skill Source-Available License (Non-Commercial Free, Commercial Paid)
+SPDX-License-Identifier: LicenseRef-Vensim-Skill-NonCommercial-2.5
 
 Copyright (c) 传康KK（万能程序员） / GitHub 1837620622
 
-Permission is granted to use, copy, study, and modify this software and its
-associated documentation (the "Software") solely for non-commercial learning,
-research, and personal use. Non-commercial redistribution of the Software and
-its modifications is permitted if this license and the above attribution are
-retained, changes are identified, and the same non-commercial restrictions are
-included. Attribution belongs in documentation; no watermark on a model figure
-is required.
+1. Source availability. The source code and documentation of this software
+   (the "Software") are published openly so that anyone can read, study and
+   evaluate them.
 
-Commercial use is prohibited. This includes selling copies or modifications,
-incorporating the Software into paid products or services, providing paid
-modeling or consulting with the Software, and using it for commercial client
-deliverables. No patent or trademark rights are granted. This is a source-
-available non-commercial license, not an OSI-approved open source license.
+2. Free non-commercial use. You may use, copy, study and modify the Software
+   free of charge for personal learning, coursework, theses and other
+   non-commercial academic research. Non-commercial redistribution of the
+   Software or of modified versions is permitted if this license and the above
+   attribution are kept, modifications are marked, and the same terms apply to
+   recipients. Attribution belongs in documentation; model figures and results
+   produced with the Software need no watermark.
 
-User-provided data and model content remain subject to their owners' rights.
-Third-party components retain their own licenses. Copies of earlier versions
-released under a different license remain governed by the license accompanying
-those versions; this license does not revoke previously granted permissions.
+3. Commercial use requires a paid license. Any commercial use needs a separate
+   written commercial license from the author, obtained for a fee before the
+   use begins. Commercial use includes, among other things:
+   - paid modeling, simulation, data analysis or consulting work done with the
+     Software;
+   - models, reports, figures or other deliverables produced for clients who
+     pay for them;
+   - incorporating the Software into a paid product, platform or service;
+   - selling, renting or otherwise charging for copies of the Software or of
+     modified versions.
+
+4. Commercial license contact:
+   - Email: 2040168455@qq.com
+   - GitHub: https://github.com/1837620622 (for example, open an issue in the
+     repository)
+
+5. No patent or trademark rights are granted. This is a source-available
+   license, not an OSI-approved open source license.
+
+6. User-provided data and model content remain subject to their owners'
+   rights. Third-party components, including the models under
+   assets/reference_models, keep their own licenses. Copies of earlier versions
+   released under a different license remain governed by the license that
+   accompanied those versions; this license does not revoke permissions
+   already granted for them.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A PARTICULAR
@@ -28,11 +47,23 @@ PURPOSE AND NONINFRINGEMENT. TO THE EXTENT PERMITTED BY APPLICABLE LAW, THE
 AUTHORS SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING
 FROM THE SOFTWARE OR ITS USE.
 
-作者：传康KK（万能程序员）
-微信：1837620622（传康Kk）
-邮箱：2040168455@qq.com
-咸鱼 / B站：万能程序员
+----------------------------------------------------------------------------
+中文说明
 
-中文说明：仅限非商业学习、研究和个人使用。禁止商业使用、付费分发、
-收费服务集成和商业客户交付。复制、修改及非商业再分发须保留作者署名
-和本许可证；修改版本须说明修改。署名放在文档中，无需在模型图上加水印。
+作者：传康KK（万能程序员） / GitHub 1837620622
+
+一、源代码公开，任何人都可以阅读、学习和评估。
+二、个人学习、课程作业、学位论文和其他非商业学术研究可以免费使用、复制和修改。
+    非商业再分发须保留作者署名和本许可证，修改的版本须注明修改之处，并以相同
+    条款提供给接收者。署名写在文档中即可，用本软件生成的模型图和结果无需加水印。
+三、任何商业使用须事先向作者购买商业授权，包括但不限于：用本软件提供收费的建模、
+    仿真、数据分析或咨询服务；为付费客户制作模型、报告、图表等交付物；把本软件
+    集成进收费的产品、平台或服务；出售、出租或以其他方式有偿提供本软件及其修改版本。
+四、商业授权联系方式：邮箱 2040168455@qq.com；GitHub https://github.com/1837620622
+    （可在仓库提交 issue）。
+五、不授予专利权和商标权。本许可证属于源码公开许可，不属于 OSI 认可的开源许可证。
+六、用户自己的数据和模型内容归其权利人所有。第三方组件（包括
+    assets/reference_models 中的模型）保留各自的许可证。以前版本若随附其他许可证，
+    其副本继续适用当时的许可证，本许可证不撤销已经授予的权利。
+
+本软件按“现状”提供，不附带任何明示或默示的担保。

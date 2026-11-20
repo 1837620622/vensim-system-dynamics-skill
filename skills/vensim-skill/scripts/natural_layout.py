@@ -829,6 +829,9 @@ class Scene:
         self.visible_len = [0.0] * len(self.info)
         self.ang = [(0.0, 0.0)] * len(self.info)
         self.pseg = [None] * len(self.pipes)
+        self._arrow_cache: dict[int, tuple] = {}
+        self._info_version = 0
+        self._derived = None
 
     # -- 节点与线段维护 -------------------------------------------------
 
@@ -855,6 +858,7 @@ class Scene:
         self.node_arrows[s].remove(arrow_index)
         self.node_arrows[new_source].append(arrow_index)
         self.info[arrow_index] = (new_source, d)
+        self._info_version += 1
         self._update_arrow(arrow_index)
 
     def place(self, i, x, y):
@@ -879,10 +883,27 @@ class Scene:
     def _update_arrow(self, a):
         s, d = self.info[a]
         X, Y, HW, HH = self.X, self.Y, self.HW, self.HH
-        self.seg[a] = _segment(X[s], Y[s], HW[s], HH[s], X[d], Y[d], HW[d], HH[d])
-        self.visible_len[a] = arc_visible_length(X[s], Y[s], HW[s], HH[s], X[d], Y[d], HW[d], HH[d])
-        angle = math.atan2(Y[d] - Y[s], X[d] - X[s])
-        self.ang[a] = (angle, angle + math.pi if angle <= 0 else angle - math.pi)
+        key = (X[s], Y[s], HW[s], HH[s], X[d], Y[d], HW[d], HH[d])
+        # 退火被拒绝时节点退回原位，几何量与移动前相同：每条线保留最近两组结果直接复用
+        cache = self._arrow_cache.get(a)
+        if cache is not None and cache[2] == key:
+            values = cache[3]
+            self._arrow_cache[a] = (key, values, cache[0], cache[1])
+        elif cache is not None and cache[0] == key:
+            values = cache[1]
+        else:
+            angle = math.atan2(Y[d] - Y[s], X[d] - X[s])
+            values = (
+                _segment(*key),
+                arc_visible_length(*key),
+                (angle, angle + math.pi if angle <= 0 else angle - math.pi),
+            )
+            self._arrow_cache[a] = (
+                (key, values, cache[0], cache[1])
+                if cache is not None
+                else (key, values, None, None)
+            )
+        self.seg[a], self.visible_len[a], self.ang[a] = values
 
     def _update_pipe(self, p):
         v, e = self.pipes[p]
@@ -980,57 +1001,84 @@ class Scene:
                 v, e = pipes[p]
                 if act[v] and act[e]:
                     P.add(p)
-        active_arrows = [a for a, (s, d) in enumerate(info) if act[s] and act[d]]
-        active_pipes = [p for p, (v, e) in enumerate(pipes) if act[v] and act[e]]
         nodes = self.active_list
+        tw, th, toff = TIME_LABEL_HALF_WIDTH, TIME_LABEL_HALF_HEIGHT, TIME_LABEL_OFFSET
+        # 只随节点激活、增删和箭头改接而变的派生列表，按版本缓存
+        version = (len(nodes), len(HW), len(info), len(pipes), self._info_version)
+        derived = self._derived
+        if derived is None or derived[0] != version:
+            derived = (
+                version,
+                [a for a, (s, d) in enumerate(info) if act[s] and act[d]],
+                [p for p, (v, e) in enumerate(pipes) if act[v] and act[e]],
+                [o for o in nodes if time_owner[o]],
+                [w if w > tw else tw for w in HW],
+                [h if h > th else th for h in HH],
+            )
+            self._derived = derived
+        _, active_arrows, active_pipes, owners, reach_w, reach_h = derived
         cost = 0.0
         cross = pipe_cross = hits = over = short = narrow = 0
         tw, th, toff = TIME_LABEL_HALF_WIDTH, TIME_LABEL_HALF_HEIGHT, TIME_LABEL_OFFSET
         cl = ARROW_CLEAR
         # 信息线交叉与穿管
+        # 外接框不相交的线段对在调用 _cross 之前排除（与 _cross 内的首个判断相同）
         for a in A:
             sa = seg[a]
             a0, a1 = info[a]
+            ax0, ay0, ax1, ay1 = sa[4], sa[5], sa[6], sa[7]
             for b in active_arrows:
+                sb = seg[b]
+                if ax1 < sb[4] or sb[6] < ax0 or ay1 < sb[5] or sb[7] < ay0:
+                    continue
                 if b == a or (b in A and b < a):
                     continue
                 b0, b1 = info[b]
                 if a0 == b0 or a0 == b1 or a1 == b0 or a1 == b1:
                     continue
-                if _cross(sa, seg[b]):
+                if _cross(sa, sb):
                     cross += 1
             for p in active_pipes:
-                if _cross(sa, pseg[p]):
+                sb = pseg[p]
+                if ax1 < sb[4] or sb[6] < ax0 or ay1 < sb[5] or sb[7] < ay0:
+                    continue
+                if _cross(sa, sb):
                     pipe_cross += 1
         for p in P:
             sp = pseg[p]
             p0, p1 = pipes[p]
+            px0, py0, px1, py1 = sp[4], sp[5], sp[6], sp[7]
             for b in active_arrows:
+                sb = seg[b]
+                if px1 < sb[4] or sb[6] < px0 or py1 < sb[5] or sb[7] < py0:
+                    continue
                 if b in A:
                     continue
-                if _cross(sp, seg[b]):
+                if _cross(sp, sb):
                     pipe_cross += 1
             for q in active_pipes:
+                sb = pseg[q]
+                if px1 < sb[4] or sb[6] < px0 or py1 < sb[5] or sb[7] < py0:
+                    continue
                 if q == p or (q in P and q < p):
                     continue
                 q0, q1 = pipes[q]
                 if p0 == q0 or p0 == q1 or p1 == q0 or p1 == q1:
                     continue
-                if _cross(sp, pseg[q]):
+                if _cross(sp, sb):
                     cross += 1
         # 信息线、管道穿字与 <Time> 预留区；先用外接框排除，再做精确裁剪
         exempt = self.pipe_exempt
-        owners = [o for o in nodes if time_owner[o]]
 
         def crossings(s, ends, skip, pad, candidates):
             count = 0
             x0, y0, x1, y1 = s[4], s[5], s[6], s[7]
             for o in candidates:
-                if o in ends or o in skip:
-                    continue
                 w, h = HW[o] + pad, HH[o] + pad
                 xo, yo = X[o], Y[o]
                 if x1 < xo - w or x0 > xo + w or y1 < yo - h or y0 > yo + h:
+                    continue
+                if o in ends or o in skip:
                     continue
                 if _hits(s, xo, yo, w, h):
                     count += 1
@@ -1049,21 +1097,44 @@ class Scene:
 
         moved_active = [o for o in S if act[o]]
         moved_owners = [o for o in moved_active if time_owner[o]]
+        # 移动节点（含 <Time> 预留区、留白）的总外接框；未移动的线段与它不相交时，
+        # crossings/time_hits 对这些候选必然为 0，直接跳过。
+        if moved_active:
+            pad = max(cl, 4)
+            bx0 = min(X[o] - HW[o] - pad for o in moved_active)
+            bx1 = max(X[o] + HW[o] + pad for o in moved_active)
+            by0 = min(Y[o] - HH[o] - pad for o in moved_active)
+            by1 = max(Y[o] + HH[o] + pad for o in moved_active)
+            if moved_owners:
+                bx0 = min(bx0, min(X[o] - tw for o in moved_owners))
+                bx1 = max(bx1, max(X[o] + tw for o in moved_owners))
+                by0 = min(by0, min(Y[o] + toff - th for o in moved_owners))
+                by1 = max(by1, max(Y[o] + toff + th for o in moved_owners))
         for a in A:
             hits += crossings(seg[a], info[a], (), cl, nodes) + time_hits(seg[a], owners)
-        for b in active_arrows:
-            if b not in A:
-                hits += crossings(seg[b], info[b], (), cl, moved_active)
-                hits += time_hits(seg[b], moved_owners)
+        if moved_active:
+            for b in active_arrows:
+                if b not in A:
+                    sb = seg[b]
+                    if sb[6] < bx0 or sb[4] > bx1 or sb[7] < by0 or sb[5] > by1:
+                        continue
+                    hits += crossings(sb, info[b], (), cl, moved_active)
+                    if moved_owners:
+                        hits += time_hits(sb, moved_owners)
         for p in P:
             ends = pipes[p]
             hits += crossings(pseg[p], ends, exempt.get(ends[0], ()), 4, nodes)
             hits += time_hits(pseg[p], owners)
-        for p in active_pipes:
-            if p not in P:
-                ends = pipes[p]
-                hits += crossings(pseg[p], ends, exempt.get(ends[0], ()), 4, moved_active)
-                hits += time_hits(pseg[p], moved_owners)
+        if moved_active:
+            for p in active_pipes:
+                if p not in P:
+                    sb = pseg[p]
+                    if sb[6] < bx0 or sb[4] > bx1 or sb[7] < by0 or sb[5] > by1:
+                        continue
+                    ends = pipes[p]
+                    hits += crossings(sb, ends, exempt.get(ends[0], ()), 4, moved_active)
+                    if moved_owners:
+                        hits += time_hits(sb, moved_owners)
         # 文字框重叠（含 <Time> 预留区）
         own = self.own
         for o in S:
@@ -1071,7 +1142,18 @@ class Scene:
                 continue
             xo, yo, wo, ho = X[o], Y[o], HW[o], HH[o]
             to = time_owner[o]
+            # 三种重叠的宽高都不超过 reach_*；水平或竖直距离超出时三项都为 0
+            reach_x = max(wo, tw) + GAP_X
+            reach_y = max(ho, th) + GAP_Y + 2 * abs(toff)
             for q in nodes:
+                dxq = xo - X[q]
+                rxq = reach_x + reach_w[q]
+                if dxq >= rxq or -dxq >= rxq:
+                    continue
+                dyq = yo - Y[q]
+                ryq = reach_y + reach_h[q]
+                if dyq >= ryq or -dyq >= ryq:
+                    continue
                 if q == o or (q in S and q < o):
                     continue
                 if (min(o, q), max(o, q)) in own:

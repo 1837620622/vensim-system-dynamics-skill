@@ -1,9 +1,11 @@
 [project]
 name = "vensim-system-dynamics-skill"
-version = "2.4.0"
+version = "2.5.0"
 description = "Vensim system dynamics skill for AI agents: MDL building, layout, checks, simulation and plots"
 requires-python = ">=3.10"
 readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "传康KK（万能程序员）", email = "2040168455@qq.com" }]
 
 [tool.ruff]
 target-version = "py310"

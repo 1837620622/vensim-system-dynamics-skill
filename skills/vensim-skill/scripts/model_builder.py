@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import sys
 from pathlib import Path
 
 from mdl_document import atomic_write, preflight_outputs, separate_output
@@ -607,6 +609,56 @@ def _model_text(spec):
 # ---------------------------------------------------------------------------
 
 
+def _layout_workers(view_count):
+    """并行排版的进程数：VENSIM_SKILL_WORKERS 优先，默认取 CPU 数，不超过视图数。"""
+    raw = os.environ.get("VENSIM_SKILL_WORKERS", "").strip()
+    try:
+        wanted = int(raw) if raw else (os.cpu_count() or 1)
+    except ValueError:
+        wanted = 1
+    return max(1, min(wanted, view_count, 8))
+
+
+def _natural_view_job(lines, view, config):
+    """子进程里排一个视图，只回传本视图改动的行；各视图的随机种子相互独立。"""
+    from natural_layout import natural_view
+
+    work = list(lines)
+    item, extra = natural_view(work, view, config)
+    changed = {index: line for index, line in enumerate(work) if line != lines[index]}
+    return item, extra, changed
+
+
+def _natural_views(lines, jobs, natural_view):
+    """各视图的 natural 排版互不依赖（只读方程区和本视图的草图行），可以并行。
+
+    结果与逐个视图顺序排版逐字节相同；进程池不可用时自动退回顺序执行。
+    """
+    workers = _layout_workers(len(jobs))
+    if workers > 1:
+        try:
+            from concurrent.futures import ProcessPoolExecutor
+
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                futures = [
+                    pool.submit(_natural_view_job, lines, view, config) for view, config in jobs
+                ]
+                outcomes = [future.result() for future in futures]
+        except ValueError:
+            raise  # 模型或排版本身的错误，顺序执行也会同样失败，直接报出
+        except Exception as exc:  # noqa: BLE001
+            # 进程池本身的故障（无 /dev/shm、不允许创建进程、无法序列化）退回顺序排版
+            sys.stderr.write(f"并行排版不可用，改为逐个视图排版: {exc}\n")
+        else:
+            results = []
+            for item, extra, changed in outcomes:
+                for index, line in changed.items():
+                    lines[index] = line
+                results.append((item, extra))
+            return results
+    return [natural_view(lines, view, config) for view, config in jobs]
+
+
 def _prepare_model(spec):
     from feedback_audit import audit_feedback
     from natural_layout import _set_fields, loop_marker_shape, natural_view
@@ -630,18 +682,22 @@ def _prepare_model(spec):
         "lock_node_names": [item["name"] for item in spec["variables"] if "position" in item],
     }
     reports, insertions, markers = [], [], {}
-    for view in parse_views(lines, stock_names, time_names):
+    parsed_views = parse_views(lines, stock_names, time_names)
+    for view in parsed_views:
         markers[view.name] = _marker_nodes(view, lines, notes["loop_markers"])
-        if config["layout_mode"] == "natural":
-            item, extra = natural_view(
-                lines,
-                view,
-                {**config, "_marker_loops": markers[view.name], "_free_row_order": True},
-            )
+    if config["layout_mode"] == "natural":
+        jobs = [
+            (view, {**config, "_marker_loops": markers[view.name], "_free_row_order": True})
+            for view in parsed_views
+        ]
+        results = _natural_views(lines, jobs, natural_view)
+        for view, (item, extra) in zip(parsed_views, results, strict=True):
             insertions.extend(extra)
-        else:
+            reports.append({"view": view.name, **item})
+    else:
+        for view in parsed_views:
             item = optimize_view(lines, view, config)
-        reports.append({"view": view.name, **item})
+            reports.append({"view": view.name, **item})
     # 新影子行按位置倒序插入，保证其余视图的行号不受影响
     for position, block in sorted(insertions, key=lambda row: row[0], reverse=True):
         lines[position:position] = block.splitlines(keepends=True)

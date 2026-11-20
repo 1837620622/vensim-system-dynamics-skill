@@ -239,7 +239,7 @@ X = RAMP(2, 1, 3)
 
 def test_unsupported_function_fails_instead_of_silent_nodata():
     text = """
-X = ACTIVE INITIAL( 2 * Time, 10 )
+X = DELAY CONVEYOR( 2 * Time, 1, 0, 0, 0, 0 )
     ~ Dmnl
     |
 """ + control_block(final_time=1)
@@ -249,7 +249,7 @@ X = ACTIVE INITIAL( 2 * Time, 10 )
     try:
         simulate(equations, *get_time_bounds(equations))
     except ValueError as exc:
-        assert "ACTIVE INITIAL" in str(exc)
+        assert "DELAY CONVEYOR" in str(exc)
     else:
         raise AssertionError("unsupported function should fail in strict mode")
 

@@ -1,8 +1,8 @@
 # Vensim System Dynamics Skill
 
-![Version](https://img.shields.io/badge/version-2.4.0-2f6f9f)
+![Version](https://img.shields.io/badge/version-2.5.0-2f6f9f)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
-![License](https://img.shields.io/badge/license-non--commercial-8a8a8a)
+![License](https://img.shields.io/badge/license-non--commercial%20free%20%7C%20commercial%20paid-8a8a8a)
 
 简体中文 · [English](README.en.md)
 
@@ -51,13 +51,14 @@ Duggan 教材的 Student Flows 模型。原图有文字重叠、连线交叉和�
 | 环节 | 命令 | 说明 |
 | --- | --- | --- |
 | 建模 | `build` `fix` | 由 JSON 写明存量、流向、方程、单位，生成 MDL 并完成排版和极性核对；按 `feedback_loops` 画出核对过的 R/B 回路标记，没声明时给出可直接粘贴的回路建议；可按子系统分视图，跨视图自动生成影子变量；`fix` 按显式选项补单位、删除断裂的箭头、把没人用的输出指标标为 Supplementary |
+| 因果回路图 | `cld` | 用建模 JSON 生成每个子系统一张因果回路图和一张总体图：变量为无框文字，连线标 `+/-`，核对通过的回路画 R/B 标记，排版与 `build` 相同 |
 | 检查 | `inspect` `audit` `check` `units` | 草图对象、断裂引用、未定义变量、初值循环、缺失单位；`check --strict` 还要求没有 Vensim 的 USE FLAG（没有被使用的变量），打开模型时不再提示 |
 | 排版 | `layout` `visual` `preview` | 四种模式（见下文）；`visual --strict` 检查交叉、压字、重叠、过短箭头和 `<Time>` 预留区；`preview` 生成草图 HTML，字宽为估算值，只用于定位问题 |
 | 反馈 | `feedback` | 按方程求偏导符号，核对箭头 `+/-` 和指定回路的 R/B |
 | 仿真 | `simulate` `crosscheck` `convergence` | 内置 Euler 引擎；与 PySD 逐点对照；dt、dt/2、dt/4 步长收敛检查 |
 | 实验 | `experiment` | 命名情景、单因素扰动、网格、蒙特卡洛 |
 | 校准与政策 | `calibrate` `optimize` | SciPy 差分进化，有界参数、约束和仿真次数上限 |
-| 出图 | `graph` `compare` `plot-data` | PNG 600 dpi，可同时导出 PDF、SVG；清单记录数据哈希和全部参数 |
+| 出图 | `graph` `compare` `plot-data` `vensim-script` | Vensim DSS 风格 PNG 300 dpi，可同时导出 PDF、SVG，也可生成 Vensim 原生自定义图和运行脚本；清单记录数据哈希和全部参数 |
 
 每次仿真都写一份 `.run.json`，记录模型哈希、后端版本、积分方法和时间设置；出图时会核对它，模型改过就拒绝用旧数据出图。
 
@@ -142,7 +143,7 @@ skills/vensim-skill/
 ├── scripts/              解析、排版、检查、仿真、出图
 ├── references/           按需阅读的规则说明
 ├── assets/templates/     建模、实验、排版、出图 JSON 模板
-├── assets/examples/      两个中文示例 MDL
+├── assets/examples/      三个中文示例 MDL
 ├── assets/reference_models/  7 个教材模型及其许可证
 └── requirements/         可选依赖与版本下限
 tests/                    回归测试
@@ -171,4 +172,6 @@ CI 配置覆盖 Ubuntu、macOS、Windows 和 Python 3.10–3.12；本地在 macO
 
 作者：传康KK（万能程序员） · GitHub [1837620622](https://github.com/1837620622)
 
-仅限非商业学习、研究和个人使用；禁止商业使用、付费分发和商业客户交付。复制、修改和非商业再分发须保留作者署名和许可证，见 [LICENSE](LICENSE)。`reference_models` 中的第三方模型保留各自的 MIT 许可。
+源代码公开。个人学习、课程作业、学位论文和非商业学术研究可以免费使用；复制、修改和非商业再分发须保留作者署名和许可证。
+
+商业使用须事先购买商业授权，包括收费建模或咨询、为付费客户制作的交付物、收费产品或服务，以及出售本软件的副本。授权请联系邮箱 2040168455@qq.com，或在 GitHub [1837620622](https://github.com/1837620622) 的仓库提交 issue。完整条款见 [LICENSE](LICENSE)，以前版本的副本继续适用各自随附的许可证。`reference_models` 中的第三方模型保留各自的 MIT 许可。

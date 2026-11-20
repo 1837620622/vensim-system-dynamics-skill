@@ -1,8 +1,8 @@
 # Vensim System Dynamics Skill
 
-![Version](https://img.shields.io/badge/version-2.4.0-2f6f9f)
+![Version](https://img.shields.io/badge/version-2.5.0-2f6f9f)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
-![License](https://img.shields.io/badge/license-non--commercial-8a8a8a)
+![License](https://img.shields.io/badge/license-non--commercial%20free%20%7C%20commercial%20paid-8a8a8a)
 
 [简体中文](README.md) · English
 
@@ -51,13 +51,14 @@ Diagrams on this page are rendered from the MDL by the `preview` command; text w
 | Step | Commands | What it does |
 | --- | --- | --- |
 | Build | `build` `fix` | Generates an MDL from a JSON spec of stocks, flows, equations and units, then lays it out and checks polarity; draws R/B loop markers for the declared loops it can verify, or suggests pasteable loop entries when none are declared; splits views by subsystem with automatic shadow variables; `fix` fills units, drops broken arrows and marks unused outputs as Supplementary on explicit options |
+| Causal loop diagrams | `cld` | From the same model JSON, one causal loop diagram per subsystem plus an overall one: plain-text variables, `+/-` links, R/B markers on verified loops, laid out like `build` |
 | Check | `inspect` `audit` `check` `units` | Sketch objects, broken references, undefined variables, initialisation loops, missing units; `check --strict` also requires no Vensim USE FLAG (variables nothing uses), so the model opens without notices |
 | Layout | `layout` `visual` `preview` | Four modes (below); `visual --strict` checks crossings, text overlap, too-short arrows and the `<Time>` slot; `preview` writes a sketch as HTML with estimated text widths, for locating problems only |
 | Feedback | `feedback` | Signs of partial derivatives from the equations, checked against arrow `+/-` and declared R/B loops |
 | Simulate | `simulate` `crosscheck` `convergence` | Built-in Euler engine; point-by-point comparison with PySD; dt, dt/2, dt/4 convergence |
 | Experiments | `experiment` | Named scenarios, one-at-a-time perturbation, grid, Monte Carlo |
 | Calibration and policy | `calibrate` `optimize` | SciPy differential evolution with bounds, constraints and a simulation budget |
-| Plots | `graph` `compare` `plot-data` | PNG at 600 dpi plus optional PDF and SVG; a manifest records data hashes and every setting |
+| Plots | `graph` `compare` `plot-data` `vensim-script` | PNG at 300 dpi in Vensim DSS style plus optional PDF and SVG; `vensim-script` writes native Vensim graph and run scripts; a manifest records data hashes and every setting |
 
 Every run writes a `.run.json` with the model hash, backend version, integration method and time settings. Plotting checks it and refuses to plot stale data from a model that has since changed.
 
@@ -142,7 +143,7 @@ skills/vensim-skill/
 ├── scripts/              parsing, layout, checks, simulation, plotting
 ├── references/           rule documents loaded on demand
 ├── assets/templates/     JSON templates for models, experiments, layout, plots
-├── assets/examples/      two Chinese example MDLs
+├── assets/examples/      three Chinese example MDLs
 ├── assets/reference_models/  seven textbook models and their licences
 └── requirements/         optional dependencies and version floors
 tests/                    regression tests
@@ -171,4 +172,6 @@ The CI configuration covers Ubuntu, macOS and Windows with Python 3.10–3.12; l
 
 Author: 传康KK (万能程序员) · GitHub [1837620622](https://github.com/1837620622)
 
-Non-commercial learning, research and personal use only. Commercial use, paid redistribution and commercial client work are prohibited. Copies, modifications and non-commercial redistribution must keep the attribution and the licence; see [LICENSE](LICENSE). Third-party models in `reference_models` keep their own MIT licences.
+The source is public. Personal learning, coursework, theses and non-commercial academic research are free; copies, modifications and non-commercial redistribution must keep the attribution and the licence.
+
+Any commercial use needs a paid commercial licence from the author first. That covers paid modelling or consulting, deliverables for paying clients, paid products or services, and selling copies. For a licence, email 2040168455@qq.com or open an issue on GitHub [1837620622](https://github.com/1837620622). Full terms are in [LICENSE](LICENSE); copies of earlier versions stay under the licence that came with them. Third-party models in `reference_models` keep their own MIT licences.

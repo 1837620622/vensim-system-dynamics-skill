@@ -129,13 +129,13 @@ def test_lines_keep_data_and_use_color_plus_line_style():
     assert len(axis.lines) == 5
     for i, line in enumerate(axis.lines):
         assert list(line.get_ydata()) == results[i][1].series["Stock"]
-        assert line.get_marker() in ("None", None, "")
+        assert line.get_marker() == f"${i + 1}$"  # Vensim 式曲线编号是默认样式
     assert [line.get_color() for line in axis.lines] == [
-        "#0072B2",
-        "#D55E00",
-        "#009E73",
-        "#E69F00",
-        "#CC79A7",
+        "#0000FF",
+        "#FF0000",
+        "#008000",
+        "#808080",
+        "#C000C0",
     ]
     assert len({line.get_linestyle() for line in axis.lines}) == 4
     legend = axis.get_legend()
@@ -153,8 +153,8 @@ def test_export_dpi_vector_and_provenance(tmp_path):
     report = export_figures(trajectories(), ["Stock"], output, formats="pdf,svg")
     assert len(report["figures"]) == 3
     with Image.open(output) as image:
-        assert image.size == (3780, 2280)
-        assert image.info["dpi"][0] == pytest.approx(600, abs=0.02)
+        assert image.size == (1890, 1140)
+        assert image.info["dpi"][0] == pytest.approx(300, abs=0.02)
     assert output.with_suffix(".pdf").read_bytes().startswith(b"%PDF")
     assert "<svg" in output.with_suffix(".svg").read_text()
     manifest = json.loads(output.with_suffix(".plot.json").read_text())

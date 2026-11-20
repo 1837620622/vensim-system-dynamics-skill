@@ -1,9 +1,9 @@
 ---
 name: vensim-skill
 description: "Build, lay out, check and simulate Vensim system dynamics models (.mdl). Use when the user wants a stock-and-flow or causal loop diagram in Vensim, needs an existing MDL tidied (overlapping labels, crossing arrows, messy views), wants polarity and R/B loop checks, or needs reproducible simulation, scenario, sensitivity, calibration or policy runs with publication-quality Python plots. Chinese variable names by default; Windows, macOS and Linux."
-license: "Non-commercial only; commercial use, paid redistribution and commercial delivery are prohibited; see LICENSE"
+license: "Source-available; free for personal learning and non-commercial research; commercial use requires a paid license (2040168455@qq.com); see LICENSE"
 metadata:
-  version: "2.4.0"
+  version: "2.5.0"
 ---
 
 # Vensim 建模、排版与仿真
@@ -29,10 +29,10 @@ metadata:
 
 1. 读模型或资料：`doctor` 看环境，`inspect`、`audit`、`check` 看结构和方程。截图只用来定位问题，不能据此猜方程。
 2. 先修语义问题（未定义变量、断裂引用、缺初值、缺单位、没有被使用的变量），再排版。
-3. 新模型：照模板写建模 JSON（格式见 [SPECIFICATIONS.md](references/SPECIFICATIONS.md)），`build` 生成 MDL，排版、极性和回路核对一起完成（二十几个变量约需 20 秒，不要中断）。输出里的每条“建议”都要处理：名字过长就精简，没声明的回路按给出的条目补进 `feedback_loops`，常量被移到别的视图就改 JSON；改完重新 `build`。
+3. 新模型：照模板写建模 JSON（格式见 [SPECIFICATIONS.md](references/SPECIFICATIONS.md)），`build` 生成 MDL，排版、极性和回路核对一起完成（二十几个变量约需 15 秒，上百个变量、多个视图时几分钟，多视图按 CPU 数并行，不要中断）。需要因果回路图时用同一份 JSON 跑 `cld`，得到每个子系统一张 CLD 和一张总体 CLD。输出里的每条“建议”都要处理：名字过长就精简，没声明的回路按给出的条目补进 `feedback_loops`，常量被移到别的视图就改 JSON；改完重新 `build`。
 4. 已有模型：`layout` 输出新文件，`visual --strict` 检查；不合格时按报告里的对象 ID 处理，必要时用 `node_positions` 固定个别变量后重跑。
 5. 在 Vensim 中打开每个视图，运行 Check Model 和 Units Check，导出结构图。
-6. 仿真和实验：`simulate`、`experiment`、`convergence`；装了 PySD 时用 `crosscheck` 对照。结果图用 `graph` 或 `plot-data`。
+6. 仿真和实验：`simulate`、`experiment`、`convergence`；装了 PySD 时用 `crosscheck` 对照。结果图用 `graph` 或 `plot-data`（默认 Vensim DSS 风格）；要 Vensim 原生结果图时用 `vensim-script` 生成 `.cin`、`.vgd` 和 `.cmd`，在 Vensim DSS 中运行。
 7. 交付 MDL、CSV、运行清单（`.run.json`）、图件和检查报告；不交付 `preview` 调试图和临时文件。
 
 ## 命令
@@ -42,6 +42,7 @@ metadata:
 ```bash
 ./skill.sh doctor
 ./skill.sh build model.json --output work/model.mdl
+./skill.sh cld model.json --output work/model_cld.mdl                    # 子系统 CLD + 总体 CLD
 ./skill.sh audit work/model.mdl
 ./skill.sh check work/model.mdl --strict                                 # 缺单位、没人用的变量也算失败
 ./skill.sh fix work/model.mdl --output work/model_fixed.mdl --mark-supplementary  # 没人用的输出指标标 Supplementary
@@ -55,6 +56,7 @@ metadata:
 ./skill.sh convergence work/model_layout.mdl --var 库存 --output results/convergence.json
 ./skill.sh calibrate work/model_layout.mdl --spec calibration.json --data observed.csv --output-dir results/fit
 ./skill.sh optimize work/model_layout.mdl --spec policy.json --output-dir results/policy
+./skill.sh vensim-script work/model_layout.mdl --spec experiment.json --output-dir results/dss   # Vensim DSS 原生结果图
 ```
 
 各命令加 `--help` 查看完整参数。输出文件已存在时命令会拒绝覆盖，重跑请换新文件名或新目录。
@@ -73,4 +75,4 @@ metadata:
 
 内置引擎覆盖常见标量函数，数组、宏、外部数据交给 PySD 或 Vensim。`--keep-going` 产生的诊断结果不能出图或写进结论。
 
-非商业许可，作者 传康KK（万能程序员），详见 [LICENSE](LICENSE)。
+源码公开，个人学习和非商业研究免费，商业使用须购买授权（2040168455@qq.com 或 GitHub 1837620622），作者 传康KK（万能程序员），详见 [LICENSE](LICENSE)。

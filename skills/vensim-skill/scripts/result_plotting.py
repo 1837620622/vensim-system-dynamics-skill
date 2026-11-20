@@ -23,7 +23,7 @@ CONFIG_TEMPLATE = Path(__file__).resolve().parents[1] / "assets/templates/plot_c
 
 
 def plot_options(parser, style=False):
-    parser.add_argument("--dpi", type=int, default=600, help="PNG 分辨率，72–1200，默认 600")
+    parser.add_argument("--dpi", type=int, default=300, help="PNG 分辨率，72–1200，默认 300")
     parser.add_argument("--formats", help="额外导出格式，逗号分隔，如 png,pdf,svg")
     parser.add_argument("--plot-config", type=Path, help="样式 JSON，字段见 plot_config.json")
     if style:
@@ -61,7 +61,9 @@ def load_plot_config(path=None):
     for key in ("band_outer_alpha", "band_inner_alpha"):
         if not _number(config[key], 0.01, 1):
             raise ValueError(f"{key} 必须在 0.01 到 1 之间")
-    for key in ("number_lines", "show_grid"):
+    if not isinstance(config["x_label"], str) or len(config["x_label"]) > 80:
+        raise ValueError("x_label 必须是 80 字以内的字符串，空串表示 Time (单位)")
+    for key in ("number_lines", "show_grid", "integer_time_ticks"):
         if not isinstance(config[key], bool):
             raise ValueError(f"{key} 必须为布尔值")
     if not isinstance(config["font_family"], list) or not all(
@@ -209,10 +211,19 @@ def _ylabel(results, variable):
     return f"{variable} ({units.pop()})" if len(units) == 1 else variable
 
 
-def style_axis(axis, xlabel, ylabel="", title="", config=None):
-    """四边细框、刻度朝内、默认无网格，接近常见期刊插图。"""
+def _integer_ticks(axis, times):
+    """时间是整数（年份等）时横轴只用整数刻度，不用科学计数和偏移量。"""
+    from matplotlib.ticker import MaxNLocator, StrMethodFormatter
+
+    if times and all(float(t).is_integer() for t in times[:: max(1, len(times) // 50)]):
+        axis.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=8))
+        axis.xaxis.set_major_formatter(StrMethodFormatter("{x:.0f}"))
+
+
+def style_axis(axis, xlabel, ylabel="", title="", config=None, times=None):
+    """四边黑色细框、刻度朝内、默认无网格，接近 Vensim DSS 和期刊插图。"""
     config = config or load_plot_config()
-    axis.set_xlabel(xlabel)
+    axis.set_xlabel(config.get("x_label") or xlabel)
     if ylabel:
         axis.set_ylabel(ylabel)
     if config["show_grid"]:
@@ -225,6 +236,9 @@ def style_axis(axis, xlabel, ylabel="", title="", config=None):
         spine.set_linewidth(0.8)
     axis.tick_params(direction="in", length=3.5, width=0.8, top=True, right=True, pad=4)
     axis.margins(x=0, y=0.06)
+    axis.ticklabel_format(axis="y", useOffset=False, style="plain")
+    if config.get("integer_time_ticks", True) and times is not None:
+        _integer_ticks(axis, list(times))
     if title:
         axis.set_title(title, fontsize=config["font_size"] + 1)
 
@@ -271,7 +285,7 @@ def lines_figure(results, variable, xlabel, title="", config=None):
             line.set_markersize(config["marker_size"])
             line.set_markeredgewidth(0.3)
             line.set_markevery(sorted({int(round(s)) for s in spots}))
-    style_axis(axis, xlabel, _ylabel(results, variable), title, config)
+    style_axis(axis, xlabel, _ylabel(results, variable), title, config, results[0][1].times)
     _legend(axis, count, config)
     figure.tight_layout()
     return figure
@@ -297,7 +311,7 @@ def band_figure(results, variable, xlabel, title="", config=None):
         times, q25, q75, color=color, alpha=config["band_inner_alpha"], lw=0, label="25–75%"
     )
     axis.plot(times, q50, color=color, linewidth=config["line_width"], label="Median")
-    style_axis(axis, xlabel, _ylabel(results, variable), title, config)
+    style_axis(axis, xlabel, _ylabel(results, variable), title, config, times)
     axis.legend(loc="best", frameon=False, fontsize=config["legend_font_size"])
     figure.tight_layout()
     return figure
@@ -312,7 +326,7 @@ def export_figures(
     results,
     variables,
     output,
-    dpi=600,
+    dpi=300,
     formats=None,
     style="auto",
     title="",

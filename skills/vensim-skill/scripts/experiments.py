@@ -166,7 +166,7 @@ def execute_experiment(
     output,
     backend="builtin",
     plot=None,
-    dpi=600,
+    dpi=300,
     formats=None,
     plot_style="auto",
     protected=(),

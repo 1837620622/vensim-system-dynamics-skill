@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import bisect
 import dataclasses
+import functools
 import hashlib
 import json
 import math
@@ -55,7 +57,84 @@ HELPER_TOKENS = {
     "_step": "@14@",
     "_delay_fixed": "@15@",
     "_sd_modulo": "@16@",
+    "_sample_if_true": "@17@",
+    "_sd_initial": "@18@",
+    "_sd_initializing": "@19@",
+    "_sd_quantum": "@20@",
+    "_sd_power": "@21@",
+    "_sd_logb": "@22@",
+    "_pulse_train": "@23@",
+    "_lookup_extrapolate": "@24@",
+    "_lookup_forward": "@25@",
+    "_lookup_backward": "@26@",
+    "_sd_asin": "@27@",
+    "_sd_acos": "@28@",
+    "_sd_atan": "@29@",
+    "_sd_sinh": "@30@",
+    "_sd_cosh": "@31@",
+    "_sd_tanh": "@32@",
 }
+
+# 内置引擎明确不支持的 Vensim 函数：遇到时直接报中文错误，不猜语义。
+UNSUPPORTED_FUNCTIONS = (
+    "NPV",
+    "NPVE",
+    "RANDOM UNIFORM",
+    "RANDOM NORMAL",
+    "RANDOM POISSON",
+    "RANDOM EXPONENTIAL",
+    "RANDOM BINOMIAL",
+    "RANDOM GAMMA",
+    "RANDOM BETA",
+    "RANDOM LOGNORMAL",
+    "RANDOM TRIANGULAR",
+    "RANDOM WEIBULL",
+    "RANDOM PINK NOISE",
+    "RANDOM 0 1",
+    "RANDOM LOOKUP",
+    "GET XLS DATA",
+    "GET XLS CONSTANTS",
+    "GET XLS LOOKUPS",
+    "GET DIRECT DATA",
+    "GET DIRECT CONSTANTS",
+    "GET DIRECT LOOKUPS",
+    "GET DATA AT TIME",
+    "GET DATA BETWEEN TIMES",
+    "GET TIME VALUE",
+    "TIME BASE",
+    "VECTOR SELECT",
+    "VECTOR ELM MAP",
+    "VECTOR SORT ORDER",
+    "VECTOR RANK",
+    "VMIN",
+    "VMAX",
+    "SUM",
+    "PROD",
+    "ELMCOUNT",
+    "ALLOCATE BY PRIORITY",
+    "ALLOCATE AVAILABLE",
+    "QUEUE FIFO",
+    "QUEUE ATTRIBUTE",
+    "DELAY CONVEYOR",
+    "DELAY PROFILE",
+    "DELAY BATCH",
+    "DELAY MATERIAL",
+    "SHIFT IF TRUE",
+    "LOOKUP INVERT",
+    "LOOKUP AREA",
+    "TABBED ARRAY",
+    "GAME",
+    "INVERT MATRIX",
+)
+_UNSUPPORTED_PATTERN = re.compile(
+    r"(?<![\w$])("
+    + "|".join(
+        re.escape(name).replace(r"\ ", r"\s+")
+        for name in sorted(UNSUPPORTED_FUNCTIONS, key=len, reverse=True)
+    )
+    + r")\s*\(",
+    re.I,
+)
 
 # 方程块以 "变量名 = ..." 开头，后续 ~ 单位 ~ 注释 | 结束。
 # 变量名可以是中文、含空格或 $，不能只按英文标识符匹配
@@ -79,6 +158,7 @@ class Equation:
     supplementary: bool = False  # 注释后的 ~ :SUP 字段：只作输出、不参与其他方程
 
 
+@functools.lru_cache(maxsize=65536)
 def canonical_name(name: str) -> str:
     """原生名称不区分大小写，连续空格与下划线等价；返回用于比对的键。"""
     return re.sub(r"[\s_]+", " ", name.strip('"')).strip().casefold()
@@ -152,6 +232,48 @@ def _split_top_level_args(text: str) -> list[str]:
     if tail:
         args.append(tail)
     return args
+
+
+def _replace_calls(expr: str, function_name: str, handler) -> str:
+    """替换函数调用，参数解析支持嵌套括号；函数名前一个字符必须不是变量字符。"""
+    out: list[str] = []
+    lower = expr.lower()
+    needle = function_name.lower()
+    i = 0
+    while i < len(expr):
+        j = lower.find(needle, i)
+        if j < 0:
+            out.append(expr[i:])
+            break
+        before = expr[j - 1] if j > 0 else ""
+        if before and (before.isalnum() or before in "_$"):
+            out.append(expr[i : j + 1])
+            i = j + 1
+            continue
+        k = j + len(function_name)
+        while k < len(expr) and expr[k].isspace():
+            k += 1
+        if k >= len(expr) or expr[k] != "(":
+            out.append(expr[i : j + 1])
+            i = j + 1
+            continue
+        end = _matching_paren(expr, k)
+        args = _split_top_level_args(expr[k + 1 : end])
+        out.append(expr[i:j])
+        out.append(handler(args, expr[j : end + 1]))
+        i = end + 1
+    return "".join(out)
+
+
+def init_dependency_text(expression: str) -> str:
+    """初始化阶段 ACTIVE INITIAL 只取初值参数，其余依赖照常。"""
+
+    def handler(args: list[str], raw: str) -> str:
+        if len(args) != 2:
+            raise ValueError(f"ACTIVE INITIAL 需要 2 个参数: {raw}")
+        return f"({init_dependency_text(args[1])})"
+
+    return _replace_calls(expression, "ACTIVE INITIAL", handler)
 
 
 def _function_args(text: str, function_name: str) -> list[str] | None:
@@ -247,34 +369,86 @@ def parse_equations(mdl_text: str, expand: bool = True) -> OrderedDict[str, Equa
     return equations
 
 
+# 平滑与延迟族：名称 -> (阶数, 是否平滑, 参数个数)。阶数为 None 时取第 4 个参数。
+_STATE_FUNCTIONS = {
+    "SMOOTH N": (None, True, 4),
+    "DELAY N": (None, False, 4),
+    "SMOOTH3I": (3, True, 3),
+    "SMOOTHI": (1, True, 3),
+    "SMOOTH3": (3, True, 2),
+    "SMOOTH": (1, True, 2),
+    "DELAY3I": (3, False, 3),
+    "DELAY1I": (1, False, 3),
+    "DELAY3": (3, False, 2),
+    "DELAY1": (1, False, 2),
+    "TREND": (1, True, 3),
+    "FORECAST": (1, True, 3),
+}
+_STATE_CALL = re.compile(
+    r"(?<![\w$])("
+    + "|".join(
+        re.escape(name).replace(r"\ ", r"\s+")
+        for name in sorted(_STATE_FUNCTIONS, key=len, reverse=True)
+    )
+    + r")\s*\(",
+    re.I,
+)
+
+
+def _find_state_call(rhs: str):
+    """返回第一个平滑/延迟族调用 (函数名, 起点, 终点, 参数)。"""
+    for match in _STATE_CALL.finditer(rhs):
+        function = " ".join(match.group(1).upper().split())
+        open_index = match.end() - 1
+        close_index = _matching_paren(rhs, open_index)
+        args = _split_top_level_args(rhs[open_index + 1 : close_index])
+        return function, match.start(), close_index + 1, args
+    return None
+
+
 def _expand_smooth_delay(equations):
-    """平滑保存状态量，物料延迟保存管道存量；延迟默认初值等于初始输入。"""
-    additions = []
-    functions = {
-        "SMOOTH": (1, True),
-        "SMOOTH3": (3, True),
-        "SMOOTHI": (1, True),
-        "SMOOTH3I": (3, True),
-        "DELAY1": (1, False),
-        "DELAY3": (3, False),
-        "DELAY1I": (1, False),
-        "DELAY3I": (3, False),
-    }
+    """平滑、延迟、TREND 和 FORECAST 展开成隐式库存；调用可以嵌在表达式中。
+
+    物料延迟保存管道存量，默认初值等于初始输入；TREND 和 FORECAST 按 Vensim
+    手册的定义展开：平均值是输入的一阶平滑，趋势为 ZIDZ(输入-平均, 平均时间*|平均|)。
+    """
     used = {canonical_name(name) for name in equations}
-    for name, eq in list(equations.items()):
-        for function, (order, smooth) in functions.items():
-            args = _function_args(eq.rhs, function)
-            if args is None:
-                continue
-            expected = 3 if function.endswith("I") else 2
+    queue = list(equations.items())
+    additions = []
+    while queue:
+        name, eq = queue.pop(0)
+        if eq.is_lookup:
+            continue
+        calls = 0
+        while True:
+            found = _find_state_call(eq.rhs)
+            if found is None:
+                break
+            function, begin, finish, args = found
+            order, smooth, expected = _STATE_FUNCTIONS[function]
             if len(args) != expected:
                 raise ValueError(f"{name}: {function} 需要 {expected} 个参数")
-            value, delay = args[:2]
-            initial = args[2] if expected == 3 else value
+            if order is None:
+                try:
+                    order = int(float(args[3]))
+                except ValueError as exc:
+                    raise ValueError(
+                        f"{name}: {function} 的阶数必须是正整数常数，当前为 {args[3]}"
+                    ) from exc
+                if order < 1 or order != float(args[3]) or order > 100:
+                    raise ValueError(f"{name}: {function} 的阶数必须是 1 到 100 的整数")
+            value, delay = args[0], args[1]
+            if function in ("TREND", "FORECAST"):
+                trend0 = args[2] if function == "TREND" else "0"
+                initial = f"({value}) / (1 + ({trend0}) * ({delay}))"
+            else:
+                initial = args[2] if expected >= 3 else value
             duration = f"(({delay}) / {order})"
             previous = f"({value})"
+            prefix = name if calls == 0 else f"{name}__{calls + 1}"
+            calls += 1
             for stage in range(order):
-                stock = f"{name}__stage{stage + 1}"
+                stock = f"{prefix}__stage{stage + 1}"
                 if canonical_name(stock) in used:
                     raise ValueError(f"隐式状态名与模型变量冲突: {stock}")
                 used.add(canonical_name(stock))
@@ -295,9 +469,25 @@ def _expand_smooth_delay(equations):
                     line_index=eq.line_index,
                 )
                 additions.append((stock, state))
+                queue.append((stock, state))
                 previous = outflow
-            eq.rhs, eq.integ_flow, eq.integ_init = previous, None, None
-            break
+            if function == "TREND":
+                previous = f"ZIDZ(({value}) - {previous}, ({delay}) * ABS({previous}))"
+            elif function == "FORECAST":
+                previous = (
+                    f"(({value}) * (1 + ZIDZ(({value}) - {previous}, ({delay}) * ABS({previous}))"
+                    f" * ({args[2]})))"
+                )
+            eq.rhs = eq.rhs[:begin] + previous + eq.rhs[finish:]
+        if calls:
+            integ_args = _function_args(eq.rhs, "INTEG")
+            if integ_args is not None and len(integ_args) == 2:
+                eq.integ_flow, eq.integ_init_expr = integ_args
+            else:
+                eq.integ_flow, eq.integ_init, eq.integ_init_expr = None, None, None
+            fixed_args = _function_args(eq.rhs, "DELAY FIXED")
+            if fixed_args is not None:
+                eq.delay_fixed_args = fixed_args
     equations.update(additions)
 
 
@@ -344,6 +534,13 @@ _KEYWORDS = {
     "INTEG",
     "SMOOTH",
     "SMOOTH3",
+    "SAMPLE IF TRUE",
+    "ACTIVE INITIAL",
+    "TREND",
+    "FORECAST",
+    "QUANTUM",
+    "POWER",
+    "PULSE TRAIN",
     "DELAY1",
     "DELAY3",
     "DELAY",
@@ -372,6 +569,7 @@ _KEYWORDS = {
 }
 
 
+@functools.lru_cache(maxsize=65536)
 def _name_pattern(name: str) -> str:
     """返回变量名匹配模式，兼容中文、空格和美元符号变量名。
 
@@ -392,7 +590,9 @@ def extract_deps(rhs: str, known_names: set) -> list[str]:
     sorted_names = sorted(known_names, key=lambda name: (-len(name), name))
     # 先移除函数名
     function_words = (
-        r"INTEG|SMOOTH3?|DELAY[13]?|DELAY FIXED|IF THEN ELSE|WITH LOOKUP|"
+        r"INTEG|SMOOTH3?I?|SMOOTH N|DELAY[13]?I?|DELAY FIXED|DELAY N|IF THEN ELSE|WITH LOOKUP|"
+        r"SAMPLE IF TRUE|ACTIVE INITIAL|INITIAL|TREND|FORECAST|QUANTUM|POWER|LOG|"
+        r"PULSE TRAIN|LOOKUP EXTRAPOLATE|LOOKUP FORWARD|LOOKUP BACKWARD|ZIDZ|XIDZ|INTEGER|"
         r"ABS|SQRT|EXP|LN|MIN|MAX|MODULO|PULSE|RAMP|STEP"
     )
     cleaned = re.sub(rf"\b({function_words})\b(?=\s*\()", " ", rhs, flags=re.I)
@@ -540,14 +740,61 @@ class LookupTable:
             return self.ys[0]
         if x >= self.xs[-1]:
             return self.ys[-1]
-        for i in range(len(self.xs) - 1):
-            if self.xs[i] <= x <= self.xs[i + 1]:
-                x0, y0 = self.xs[i], self.ys[i]
-                x1, y1 = self.xs[i + 1], self.ys[i + 1]
-                if x1 == x0:
-                    return y0
-                return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
-        return self.ys[-1]
+        i = max(bisect.bisect_right(self.xs, x) - 1, 0)
+        x0, y0 = self.xs[i], self.ys[i]
+        x1, y1 = self.xs[i + 1], self.ys[i + 1]
+        return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+
+    def extrapolate(self, x: float) -> float:
+        """LOOKUP EXTRAPOLATE：表外沿首尾两段直线外推。"""
+        if x < self.xs[0]:
+            x0, x1, y0, y1 = self.xs[0], self.xs[1], self.ys[0], self.ys[1]
+        elif x > self.xs[-1]:
+            x0, x1, y0, y1 = self.xs[-2], self.xs[-1], self.ys[-2], self.ys[-1]
+        else:
+            return self(x)
+        return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+
+    def forward(self, x: float) -> float:
+        """LOOKUP FORWARD：取不小于 x 的下一个数据点的值。"""
+        i = bisect.bisect_left(self.xs, x)
+        return self.ys[min(i, len(self.ys) - 1)]
+
+    def backward(self, x: float) -> float:
+        """LOOKUP BACKWARD：取不大于 x 的上一个数据点的值。"""
+        i = bisect.bisect_right(self.xs, x) - 1
+        return self.ys[max(i, 0)]
+
+
+class StatefulStore:
+    """SAMPLE IF TRUE 与 INITIAL 的状态；仿真器在每个时间步结束时提交。"""
+
+    def __init__(self):
+        self.values: dict[str, float] = {}
+        self.pending: dict[str, float] = {}
+        self.initializing = True
+
+    def commit(self) -> None:
+        self.values.update(self.pending)
+        self.pending.clear()
+
+
+_PROTECTED_TOKEN = re.compile(r"@(?:var\d+|\d+)@")
+
+
+@functools.lru_cache(maxsize=64)
+def _known_names(names: tuple[str, ...]) -> frozenset[str]:
+    return frozenset(canonical_name(name) for name in names)
+
+
+@functools.lru_cache(maxsize=64)
+def _names_regex(names: tuple[str, ...]):
+    """同一组变量名只编译一次替换正则；大模型上这是转换的主要开销。"""
+    pattern = "|".join(_name_pattern(name) for name in sorted(names, key=len, reverse=True))
+    if not pattern:
+        return None
+    aliases = {canonical_name(name): f"@var{index}@" for index, name in enumerate(names)}
+    return re.compile(f"{_PROTECTED_TOKEN.pattern}|(?:{pattern})", re.I), aliases
 
 
 def _to_python_expr(rhs: str, name_map: dict[str, str], _nested=False) -> str:
@@ -556,36 +803,6 @@ def _to_python_expr(rhs: str, name_map: dict[str, str], _nested=False) -> str:
 
     def _helper(name: str) -> str:
         return HELPER_TOKENS[name]
-
-    def _replace_calls(expr: str, function_name: str, handler) -> str:
-        """替换函数调用，参数解析支持嵌套括号。"""
-        out: list[str] = []
-        lower = expr.lower()
-        needle = function_name.lower()
-        i = 0
-        while i < len(expr):
-            j = lower.find(needle, i)
-            if j < 0:
-                out.append(expr[i:])
-                break
-            before = expr[j - 1] if j > 0 else ""
-            if before and (before.isalnum() or before == "_"):
-                out.append(expr[i : j + 1])
-                i = j + 1
-                continue
-            k = j + len(function_name)
-            while k < len(expr) and expr[k].isspace():
-                k += 1
-            if k >= len(expr) or expr[k] != "(":
-                out.append(expr[i : j + 1])
-                i = j + 1
-                continue
-            end = _matching_paren(expr, k)
-            args = _split_top_level_args(expr[k + 1 : end])
-            out.append(expr[i:j])
-            out.append(handler(args, expr[j : end + 1]))
-            i = end + 1
-        return "".join(out)
 
     def _replace_with_lookup_calls(expr: str) -> str:
         def handler(args, raw):
@@ -640,13 +857,76 @@ def _to_python_expr(rhs: str, name_map: dict[str, str], _nested=False) -> str:
         key = hashlib.blake2s(raw.encode("utf-8"), digest_size=6).hexdigest()
         return f"{_helper('_delay_fixed')}('{key}', {_expr_arg(args[0])}, {_expr_arg(args[1])}, {_expr_arg(args[2])})"
 
+    names_key = tuple(name_map)
+    if not _nested:
+        known = _known_names(names_key)
+        for match in _UNSUPPORTED_PATTERN.finditer(s):
+            function = " ".join(match.group(1).upper().split())
+            if canonical_name(function) in known:
+                continue  # 同名的模型变量（如查表函数），不是 Vensim 内置函数
+            raise ValueError(
+                f"内置引擎不支持 Vensim 函数 {function}，"
+                "请用 `crosscheck`（PySD）或在 Vensim 中运行该模型"
+            )
+
+    def _call_handler(helper: str, counts: tuple[int, ...], label: str):
+        def handler(args: list[str], raw: str) -> str:
+            if len(args) not in counts:
+                raise ValueError(f"{label} 参数数量错误: {raw}")
+            return f"{_helper(helper)}({', '.join(_expr_arg(arg) for arg in args)})"
+
+        return handler
+
+    def _stateful_handler(helper: str, count: int, label: str):
+        def handler(args: list[str], raw: str) -> str:
+            if len(args) != count:
+                raise ValueError(f"{label} 需要 {count} 个参数: {raw}")
+            key = hashlib.blake2s(raw.encode("utf-8"), digest_size=6).hexdigest()
+            converted = ", ".join(_expr_arg(arg) for arg in args)
+            return f"{_helper(helper)}('{key}', {converted})"
+
+        return handler
+
+    def _active_initial_handler(args: list[str], raw: str) -> str:
+        if len(args) != 2:
+            raise ValueError(f"ACTIVE INITIAL 需要 2 个参数: {raw}")
+        # 条件表达式只求值选中的一支，初始化时不会碰到尚未就绪的 active 依赖
+        return (
+            f"(({_expr_arg(args[1])}) if {_helper('_sd_initializing')}() "
+            f"else ({_expr_arg(args[0])}))"
+        )
+
+    s = _replace_calls(
+        s, "SAMPLE IF TRUE", _stateful_handler("_sample_if_true", 3, "SAMPLE IF TRUE")
+    )
+    s = _replace_calls(s, "ACTIVE INITIAL", _active_initial_handler)
+    s = _replace_calls(s, "INITIAL", _stateful_handler("_sd_initial", 1, "INITIAL"))
     s = _replace_calls(s, "IF THEN ELSE", _if_handler)
     s = _replace_with_lookup_calls(s)
     s = _replace_calls(s, "DELAY FIXED", _delay_fixed_handler)
     s = _replace_calls(s, "MODULO", _modulo_handler)
     s = _replace_calls(s, "XIDZ", _division_guard_handler("XIDZ"))
     s = _replace_calls(s, "ZIDZ", _division_guard_handler("ZIDZ"))
+    s = _replace_calls(s, "PULSE TRAIN", _call_handler("_pulse_train", (4,), "PULSE TRAIN"))
     s = _replace_calls(s, "PULSE", _time_func_handler("pulse"))
+    s = _replace_calls(s, "QUANTUM", _call_handler("_sd_quantum", (2,), "QUANTUM"))
+    s = _replace_calls(s, "POWER", _call_handler("_sd_power", (2,), "POWER"))
+    s = _replace_calls(s, "LOG", _call_handler("_sd_logb", (2,), "LOG"))
+    for vensim_name, helper in (
+        ("LOOKUP EXTRAPOLATE", "_lookup_extrapolate"),
+        ("LOOKUP FORWARD", "_lookup_forward"),
+        ("LOOKUP BACKWARD", "_lookup_backward"),
+    ):
+        s = _replace_calls(s, vensim_name, _call_handler(helper, (2,), vensim_name))
+    for vensim_name, helper in (
+        ("ARCSIN", "_sd_asin"),
+        ("ARCCOS", "_sd_acos"),
+        ("ARCTAN", "_sd_atan"),
+        ("SINH", "_sd_sinh"),
+        ("COSH", "_sd_cosh"),
+        ("TANH", "_sd_tanh"),
+    ):
+        s = _replace_calls(s, vensim_name, _call_handler(helper, (1,), vensim_name))
     s = _replace_calls(s, "RAMP", _ramp_handler)
     s = _replace_calls(s, "STEP", _time_func_handler("step"))
     # 数学函数（Vensim 函数名与左括号之间允许空白，如 MAX ( 0, ... )）
@@ -664,20 +944,17 @@ def _to_python_expr(rhs: str, name_map: dict[str, str], _nested=False) -> str:
     s = s.replace("^", "**")
     # 变量名替换：按长度降序，中文/带空格变量名映射为合法 Python 标识符。
     # 单次替换，防止刚生成的内部别名又被另一个真实变量名匹配。
-    pattern = "|".join(_name_pattern(name) for name in sorted(name_map, key=len, reverse=True))
-    if pattern:
+    compiled_names = _names_regex(names_key)
+    if compiled_names is not None:
         # 内部别名保持占位符直到最外层转换结束，避免递归函数重新匹配真实同名变量。
-        aliases = {canonical_name(name): f"@var{index}@" for index, name in enumerate(name_map)}
-        protected = r"@(?:var\d+|\d+)@"
-        s = re.sub(
-            f"{protected}|(?:{pattern})",
+        regex, aliases = compiled_names
+        s = regex.sub(
             lambda match: (
                 match.group(0)
-                if re.fullmatch(protected, match.group(0))
+                if _PROTECTED_TOKEN.fullmatch(match.group(0))
                 else aliases[canonical_name(match.group(0))]
             ),
             s,
-            flags=re.I,
         )
     # 先处理真实变量名，再处理原生逻辑运算符，避免破坏带特殊字符的名称。
     s = re.sub(r":AND:", " and ", s, flags=re.I)
@@ -689,8 +966,9 @@ def _to_python_expr(rhs: str, name_map: dict[str, str], _nested=False) -> str:
     if not _nested:
         for helper_name, token in HELPER_TOKENS.items():
             s = s.replace(token, helper_name)
-        for index, alias in enumerate(name_map.values()):
-            s = s.replace(f"@var{index}@", alias)
+        if "@var" in s:
+            values = list(name_map.values())
+            s = re.sub(r"@var(\d+)@", lambda match: values[int(match.group(1))], s)
     return s.strip()
 
 
@@ -831,8 +1109,8 @@ def _safe_eval_expr(py_expr: str, namespace: dict) -> float:
     return _safe_eval_node(tree, namespace)
 
 
-def evaluate(rhs: str, ctx: dict, lookups: dict, name_map: dict[str, str]) -> float:
-    """在上下文 ctx 中求值 rhs；name_map 把带空格变量名映射为合法标识符。"""
+def _compile_expr(rhs: str, name_map: dict[str, str]):
+    """把 rhs 转成经过资源检查的表达式树。"""
     integ_args = _function_args(rhs, "INTEG")
     if integ_args:
         expr = integ_args[0]
@@ -840,8 +1118,53 @@ def evaluate(rhs: str, ctx: dict, lookups: dict, name_map: dict[str, str]) -> fl
         raise ValueError("LOOKUP 表不能直接作为标量求值")
     else:
         expr = rhs
-
     py_expr = _to_python_expr(expr, name_map)
+    if len(py_expr) > MAX_EXPR_CHARS:
+        raise ValueError("表达式过长")
+    try:
+        tree = ast.parse(py_expr, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(
+            f"求值失败 [{py_expr[:80]}]: 无法解析，可能用了内置引擎不认识的函数或写法；"
+            "请核对方程，或用 `crosscheck`（PySD）运行"
+        ) from exc
+    if sum(1 for _ in ast.walk(tree)) > MAX_AST_NODES:
+        raise ValueError("表达式节点过多")
+    if _ast_depth(tree) > MAX_AST_DEPTH:
+        raise ValueError("表达式嵌套过深")
+    # 只把表达式用到的名字放进求值命名空间，大模型上省去每次复制全部变量
+    reverse = {alias: name for name, alias in name_map.items()}
+    idents = tuple(
+        sorted(
+            {
+                (node.id, reverse.get(node.id, node.id))
+                for node in ast.walk(tree)
+                # 与模型变量同名的辅助函数名（如 _sd_max）不能被变量值覆盖
+                if isinstance(node, ast.Name) and (node.id in reverse or node.id not in name_map)
+            }
+        )
+    )
+    return py_expr, tree, idents
+
+
+def evaluate(
+    rhs: str,
+    ctx: dict,
+    lookups: dict,
+    name_map: dict[str, str],
+    cache: dict | None = None,
+) -> float:
+    """在上下文 ctx 中求值 rhs；name_map 把带空格变量名映射为合法标识符。
+
+    cache 由仿真器传入，同一方程只转换和解析一次；不传时每次重新编译。
+    """
+    compiled = cache.get(rhs) if cache is not None else None
+    if compiled is None:
+        compiled = _compile_expr(rhs, name_map)
+        if cache is not None:
+            cache[rhs] = compiled
+    py_expr, tree, idents = compiled
+    store = ctx.get("__stateful__")
 
     def _wl(x, table):
         return LookupTable(table)(x)
@@ -880,6 +1203,56 @@ def evaluate(rhs: str, ctx: dict, lookups: dict, name_map: dict[str, str]) -> fl
     def _delay_fixed(key, value, delay_time, initial_value):
         raise ValueError("DELAY FIXED 必须由仿真器作为独立状态运行")
 
+    def _sample_if_true(key, condition, value, initial):
+        # Vensim 语义：条件为真时取当前输入，否则保持上一时刻的输出；起点为初值。
+        if store is None:
+            return value if condition else initial
+        held = store.values.setdefault(key, _ensure_number(initial, "SAMPLE IF TRUE 初值"))
+        out = value if condition else held
+        store.pending[key] = out
+        return out
+
+    def _initial(key, value):
+        if store is None:
+            return value
+        return store.values.setdefault(key, _ensure_number(value, "INITIAL 参数"))
+
+    def _initializing():
+        return True if store is None else store.initializing
+
+    def _quantum(value, quantum):
+        if quantum <= 0:
+            return value
+        return quantum * int(value / quantum)
+
+    def _power(base, exponent):
+        if abs(float(exponent)) > MAX_POWER_EXPONENT:
+            raise ValueError("指数过大")
+        return base**exponent
+
+    def _logb(value, base):
+        return math.log(value) / math.log(base)
+
+    def _pulse_train(start, duration, repeat, end):
+        # 与 PySD 定义一致：start <= t < end 内每隔 repeat 出现宽 duration 的脉冲
+        t = ctx.get("Time", 0.0)
+        dt = ctx.get("__time_step__") or 0.0
+        eps = dt * 1e-6
+        if t + eps < start or t >= end:
+            return 0.0
+        if repeat <= 0:
+            raise ValueError("PULSE TRAIN 的重复间隔必须大于 0")
+        width = dt if duration == 0 else duration
+        return 1.0 if math.fmod(t - start + eps, repeat) < width else 0.0
+
+    def _lookup_method(method):
+        def call(table, x):
+            if not isinstance(table, LookupTable):
+                raise ValueError("第一个参数必须是查表函数名")
+            return getattr(table, method)(x)
+
+        return call
+
     namespace = {
         "math": math,
         "_wl": _wl,
@@ -899,15 +1272,31 @@ def evaluate(rhs: str, ctx: dict, lookups: dict, name_map: dict[str, str]) -> fl
         "_ramp": _ramp,
         "_step": _step,
         "_delay_fixed": _delay_fixed,
+        "_sample_if_true": _sample_if_true,
+        "_sd_initial": _initial,
+        "_sd_initializing": _initializing,
+        "_sd_quantum": _quantum,
+        "_sd_power": _power,
+        "_sd_logb": _logb,
+        "_pulse_train": _pulse_train,
+        "_lookup_extrapolate": _lookup_method("extrapolate"),
+        "_lookup_forward": _lookup_method("forward"),
+        "_lookup_backward": _lookup_method("backward"),
+        "_sd_asin": math.asin,
+        "_sd_acos": math.acos,
+        "_sd_atan": math.atan,
+        "_sd_sinh": math.sinh,
+        "_sd_cosh": math.cosh,
+        "_sd_tanh": math.tanh,
     }
-    # 注入 lookup 变量为可调用对象
-    for k, v in lookups.items():
-        namespace[name_map.get(k, k)] = v
-    # 注入变量值（用别名）
-    for k, v in ctx.items():
-        namespace[name_map.get(k, k)] = v
+    # 注入表达式用到的查表函数和变量值（用别名）；变量值优先于同名查表
+    for ident, key in idents:
+        if key in ctx:
+            namespace[ident] = ctx[key]
+        elif key in lookups:
+            namespace[ident] = lookups[key]
     try:
-        return _ensure_number(_safe_eval_expr(py_expr, namespace), "方程结果")
+        return _ensure_number(_safe_eval_node(tree, namespace), "方程结果")
     except Exception as exc:
         raise ValueError(f"求值失败 [{py_expr[:80]}]: {exc}") from exc
 
@@ -979,9 +1368,12 @@ def simulate(
         name_map[name] = f"_v{i}"
 
     # 递归求初值依赖；库存的流率依赖不参与初始化，避免用临时零值污染辅助量。
-    ctx: dict = {"Time": t0, "__time_step__": dt}
+    store = StatefulStore()
+    cache: dict = {}
+    ctx: dict = {"Time": t0, "__time_step__": dt, "__stateful__": store}
     lookups = {name: LookupTable(eq.lookup_pairs) for name, eq in equations.items() if eq.is_lookup}
     initializing = set()
+    names = set(equations)
     eval_warnings = []
     fixed_delays = {}
 
@@ -1008,13 +1400,13 @@ def simulate(
                 if eq.delay_fixed_args is not None
                 else expression
             )
-            for dependency in extract_deps(dependencies, set(equations)):
+            for dependency in extract_deps(init_dependency_text(dependencies), names):
                 initial_value(dependency)
             try:
-                ctx[name] = evaluate(expression, ctx, lookups, name_map)
+                ctx[name] = evaluate(expression, ctx, lookups, name_map, cache)
                 if eq.delay_fixed_args is not None:
                     duration = _ensure_number(
-                        evaluate(eq.delay_fixed_args[1], ctx, lookups, name_map),
+                        evaluate(eq.delay_fixed_args[1], ctx, lookups, name_map, cache),
                         f"{name} 的固定延迟时间",
                     )
                     ratio = max(duration / dt, 1)
@@ -1038,6 +1430,7 @@ def simulate(
 
     for name in equations:
         initial_value(name)
+    store.initializing = False
 
     times: list[float] = []
     series: dict[str, list[float]] = {n: [] for n, eq in equations.items() if not eq.is_lookup}
@@ -1055,7 +1448,7 @@ def simulate(
             if eq.integ_flow is not None or eq.delay_fixed_args is not None or eq.is_lookup:
                 continue
             try:
-                ctx[name] = evaluate(eq.rhs, ctx, lookups, name_map)
+                ctx[name] = evaluate(eq.rhs, ctx, lookups, name_map, cache)
             except ValueError as exc:
                 message = f"{name} @t={t:.2f}: {exc}"
                 if strict:
@@ -1068,7 +1461,7 @@ def simulate(
         for name, eq in equations.items():
             if eq.integ_flow is not None:
                 try:
-                    flows[name] = evaluate(eq.integ_flow, ctx, lookups, name_map)
+                    flows[name] = evaluate(eq.integ_flow, ctx, lookups, name_map, cache)
                 except ValueError as exc:
                     message = f"flow {name} @t={t:.2f}: {exc}"
                     if strict:
@@ -1088,7 +1481,7 @@ def simulate(
         for name in fixed_delays:
             try:
                 delayed_inputs[name] = _ensure_number(
-                    evaluate(equations[name].delay_fixed_args[0], ctx, lookups, name_map),
+                    evaluate(equations[name].delay_fixed_args[0], ctx, lookups, name_map, cache),
                     f"{name} 的延迟输入",
                 )
             except ValueError as exc:
@@ -1100,6 +1493,8 @@ def simulate(
             for name, value in delayed_inputs.items():
                 fixed_delays[name].append(value)
                 ctx[name] = fixed_delays[name][0]
+
+        store.commit()
 
         # Euler 更新库存
         for name, eq in equations.items():
@@ -1162,7 +1557,7 @@ def command_simulate(
     variables: list[str],
     plot: Path | None = None,
     strict: bool = True,
-    dpi=600,
+    dpi=300,
     formats=None,
     plot_config=None,
     **options,
@@ -1213,7 +1608,7 @@ def command_graph(
     output: Path,
     title: str,
     strict: bool = True,
-    dpi=600,
+    dpi=300,
     formats=None,
     plot_config=None,
     **options,
@@ -1243,7 +1638,7 @@ def command_compare(
     output: Path,
     title: str,
     strict: bool = True,
-    dpi=600,
+    dpi=300,
     formats=None,
     plot_config=None,
     **options,

@@ -193,6 +193,7 @@ HELP = """Vensim System Dynamics Skill
 建模与排版
   doctor                              检查 Python、可选包、原生 Vensim 与字体
   build spec.json --output m.mdl      按存量、流向和方程生成 MDL（默认 natural 排版）
+  cld spec.json --output m_cld.mdl    子系统因果回路图（每个视图一张）和总体因果回路图
   inspect | audit | check m.mdl       列对象、查草图引用、查方程与时间设置
   units m.mdl                         列出缺失单位（不做量纲推导）
   fix m.mdl --output fixed.mdl        按显式选项修复，见 fix --help
@@ -208,6 +209,8 @@ HELP = """Vensim System Dynamics Skill
   graph m.mdl --var 变量 --output r.png
   compare base.mdl --scenario policy.mdl --var 变量 --output c.png
   plot-data series.csv --output r.png --time-unit 单位
+  vensim-script m.mdl --spec scenarios.json --var 变量 --output-dir dss
+                                      生成 .cin/.vgd/.cmd，在 Vensim DSS 里出原生结果图
   experiment m.mdl --spec experiment.json --output-dir results
   convergence m.mdl --var 变量 --output convergence.json
   calibrate m.mdl --spec calibration.json --data observed.csv --output-dir fit
@@ -230,6 +233,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if cmd == "build":
         return _invoke(model_builder.main, rest)
+    if cmd == "cld":
+        from cld_builder import main as cld_main
+
+        return _invoke(cld_main, rest)
     if cmd in {"inspect", "audit", "visual", "preview", "layout"}:
         if cmd == "layout" and rest and not _has_option(args, "--output"):
             args.extend(["--output", _default_output(rest[0], "_layout.mdl")])
@@ -259,6 +266,10 @@ def main(argv: list[str] | None = None) -> int:
         from result_plotting import main as plot_main
 
         return _invoke(plot_main, rest)
+    if cmd == "vensim-script":
+        from vensim_dss import main as dss_main
+
+        return _invoke(dss_main, rest)
     if cmd == "crosscheck":
         return _invoke(_crosscheck, rest)
     print(f"ERROR: 未知命令 {cmd}，运行 --help 查看用法", file=sys.stderr)

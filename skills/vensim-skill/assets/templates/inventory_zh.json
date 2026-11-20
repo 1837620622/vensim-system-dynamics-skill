@@ -72,6 +72,11 @@
       "from": "目标库存",
       "to": "补货",
       "polarity": "+"
+    },
+    {
+      "from": "发货时间",
+      "to": "销售",
+      "polarity": "-"
     }
   ],
   "feedback_loops": [

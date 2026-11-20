@@ -12,7 +12,7 @@
 | `variables` | 变量列表，名字不能重复 |
 | `links` | 可选，给已有依赖标极性 `+`/`-` 和延迟 `delay: true`；不能增加方程里没有的关系。不写时 `build` 按方程给变量之间的链接自动标极性，推不出的按基准运行数值求偏导 |
 | `feedback_loops` | 可选，`[{name, variables: [按因果顺序], polarity: "R"或"B"}]`，最后一个变量自动连回第一个；核对一致且整条回路在同一视图里时，`build` 画出 R1、B1 … 标记。不写时 `build` 会找出能核对的回路，给出可粘贴的条目 |
-| `sketch` | 可选：`font_family`、`font_size`（默认 Vensim Sans SC、12）、`layout_mode`（默认 natural）、`split_shadows`、`seed`、`polarity`（标哪些箭头的极性：`dynamic` 默认，只标变量之间的链接；`all` 连参数链接也标；`declared` 只标 `links` 里写明的） |
+| `sketch` | 可选：`font_family`、`font_size`（默认 Vensim Sans SC、12）、`layout_mode`（默认 natural）、`split_shadows`、`seed`、`polarity`（标哪些箭头的极性：`all` 默认，每条箭头都标，推不出的列进报告 `unsigned_arrows`，须在 `links` 里补写；`dynamic` 只标变量之间的链接，`declared` 只标 `links` 里写明的，两者只用于草稿，交付前 `check --strict` 会失败） |
 
 变量：
 

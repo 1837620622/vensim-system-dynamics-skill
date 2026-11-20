@@ -164,14 +164,15 @@ def test_loop_through_a_product_is_checked_numerically_and_gets_a_marker():
     assert [row["label"] for row in notes["loop_markers"]] == ["B1"]
 
 
-def test_default_polarity_marks_dynamic_links_and_leaves_parameter_links_bare():
+def test_default_polarity_signs_every_link_and_dynamic_leaves_parameter_links_bare():
+    # 每条箭头都标正负号是默认要求，dynamic 只作草稿
     text, _ = _model_text(spec(*COUPLED))
     rows = {(r["source"], r["target"]): r for r in audit_feedback(text)["links"]}
     assert rows[("库存", "效率")]["displayed"] == "+"
-    assert rows[("目标库存", "补货")]["displayed"] == ""
-    text_all, _ = _model_text(spec(*COUPLED, polarity="all"))
-    rows = {(r["source"], r["target"]): r for r in audit_feedback(text_all)["links"]}
     assert rows[("目标库存", "补货")]["displayed"] == "+"
+    text_dyn, _ = _model_text(spec(*COUPLED, polarity="dynamic"))
+    rows = {(r["source"], r["target"]): r for r in audit_feedback(text_dyn)["links"]}
+    assert rows[("目标库存", "补货")]["displayed"] == ""
 
 
 def test_constants_move_to_the_only_view_that_uses_them():
@@ -283,3 +284,33 @@ def test_templates_build_clean_and_match_the_shipped_examples(name, tmp_path):
     stocks = {item["name"] for item in template["variables"] if item["kind"] == "stock"}
     views = parse_views(text.splitlines(True), stocks)
     assert all(quality_pass(measure_view(view)) for view in views)
+
+
+def test_check_strict_fails_on_unsigned_arrows(tmp_path, capsys):
+    # 每条信息箭头都要标正负号：dynamic 草稿留下的常量箭头让 check --strict 失败
+    text, _ = _model_text(spec(*COUPLED, polarity="dynamic"))
+    path = tmp_path / "draft.mdl"
+    path.write_text(text, encoding="utf-8")
+    assert command_check(path, strict=True) == 1
+    assert "目标库存 → 补货 没有标极性" in capsys.readouterr().out
+    text, _ = _model_text(spec(*COUPLED))
+    path = tmp_path / "signed.mdl"
+    path.write_text(text, encoding="utf-8")
+    assert command_check(path, strict=True) == 0
+
+
+def test_conditional_and_zidz_polarity_follow_the_branches():
+    from feedback_audit import infer_polarity
+
+    class Var:
+        rhs = "x"
+
+    class Const:
+        rhs = "2"
+
+    equations = {name: Var() for name in "abc"}
+    equations["k"] = Const()
+    assert infer_polarity("ZIDZ(a, k)", "a", equations) == "+"
+    assert infer_polarity("IF THEN ELSE(Time <= k, b, c)", "b", equations) == "+"
+    assert infer_polarity("IF THEN ELSE(Time <= k, b, c - b)", "b", equations) == "unknown"
+    assert infer_polarity("IF THEN ELSE(a > k, b, c)", "a", equations) == "unknown"

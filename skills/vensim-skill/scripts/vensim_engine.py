@@ -1739,6 +1739,20 @@ def command_check(path: Path, strict: bool = False) -> int:
                 if arrow.from_id not in ids or arrow.to_id not in ids:
                     errors += 1
                     print(f"  ERROR 草图 {view.name}: 箭头 {arrow.obj_id} 断裂引用")
+                    continue
+                # 每条信息箭头都要标正负号（原则性要求）；物理管道和指向阀门的箭头不算
+                ends = view.objects[arrow.from_id], view.objects[arrow.to_id]
+                if (
+                    not arrow.is_physical_flow
+                    and all(obj.kind == 10 for obj in ends)
+                    and (arrow.fields[6].strip() if len(arrow.fields) > 6 else "0")
+                    not in {"43", "45", "83", "79", "115", "111"}
+                ):
+                    warnings += 1
+                    print(
+                        f"  WARNING 草图 {view.name}: 箭头 {arrow.obj_id} "
+                        f"{ends[0].name} → {ends[1].name} 没有标极性，在 links 里写明 + 或 -"
+                    )
 
     # 5. 用内置引擎实际求一次初值，暴露表达式里的未知名称和语法问题
     try:
@@ -1773,7 +1787,7 @@ def command_check(path: Path, strict: bool = False) -> int:
         print(f"\nFAIL: {errors} 个错误。")
     print(f"Warnings: {warnings}")
     if strict and warnings:
-        print("FAIL(--strict): 警告也要清零（缺单位、USE FLAG），Vensim 打开时才不会提示。")
+        print("FAIL(--strict): 警告也要清零（缺单位、USE FLAG、箭头缺极性）。")
     return 1 if errors or (strict and warnings) else 0
 
 
@@ -1888,7 +1902,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_check = sub.add_parser("check", help="检查方程引用、时间设置与草图记录")
     p_check.add_argument("model", type=Path)
     p_check.add_argument(
-        "--strict", action="store_true", help="警告（缺单位、未使用变量）也按失败处理"
+        "--strict", action="store_true", help="警告（缺单位、未使用变量、箭头缺极性）也按失败处理"
     )
 
     p_fix = sub.add_parser("fix", help="自动修复")

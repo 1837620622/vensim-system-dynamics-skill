@@ -60,6 +60,11 @@ def test_multi_view_cld_uses_shadows_and_shared_loop_numbers(tmp_path):
     _, views = _objects(output)
     assert [view.name for view in views] == ["汽车市场", "充电设施"]
     assert any(obj.is_shadow for view in views for obj in view.objects.values())
+    for view in views:
+        # 影子变量只作原因，不接收箭头
+        assert not any(
+            view.objects[a.to_id].is_shadow for a in view.arrows if a.to_id in view.objects
+        )
     report = json.loads(output.with_suffix(".mdl.cld_report.json").read_text("utf-8"))
     overall = {m["loop"]: m["label"] for v in report["overall"]["loop_markers"].values() for m in v}
     for markers in report["subsystems"]["loop_markers"].values():

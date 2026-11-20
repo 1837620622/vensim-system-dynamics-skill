@@ -217,7 +217,7 @@ HELP = """Vensim System Dynamics Skill
   optimize m.mdl --spec policy.json --output-dir policy
 
 各命令加 --help 查看完整参数。排版只改草图坐标与连线形状，不改方程。
-非商业使用许可，作者 传康KK（万能程序员）。"""
+源码公开，个人学习与非商业研究免费，商业使用须付费授权（2040168455@qq.com 或 GitHub 1837620622）。作者 传康KK（万能程序员）。"""
 
 
 def main(argv: list[str] | None = None) -> int:

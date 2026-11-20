@@ -23,7 +23,8 @@ SIGNS = {"+": 1, "S": 1, "s": 1, "-": -1, "O": -1, "o": -1}
 def infer_polarity(expression, source, equations):
     """保守分析偏导的符号区间。其他变量保持不变，字面常量按当前 MDL 取值。
 
-    只覆盖线性组合、常量乘除和 MIN/MAX；其他非线性或作用相消时返回 unknown。
+    只覆盖线性组合、常量乘除、MIN/MAX，以及条件里不含 source 的 IF THEN ELSE
+    （含 ZIDZ/XIDZ）；其他非线性或作用相消时返回 unknown。
     返回 + / - / 0 / unknown；非严格单调的饱和区允许导数为零。
     """
     names = {name: f"v{i}" for i, name in enumerate(equations)}
@@ -106,6 +107,15 @@ def infer_polarity(expression, source, equations):
                 else None
             )
             return value, (min(row[1][0] for row in rows), max(row[1][1] for row in rows))
+        if isinstance(node, ast.IfExp):
+            # 条件不含 source 时，偏导落在两个分支偏导的并集里；条件含 source 时不下结论
+            if any(
+                isinstance(item, ast.Name) and item.id == names.get(source)
+                for item in ast.walk(node.test)
+            ):
+                raise ValueError("条件依赖 source")
+            rows = [walk(node.body), walk(node.orelse)]
+            return None, (min(row[1][0] for row in rows), max(row[1][1] for row in rows))
         raise ValueError("极性证明未覆盖的表达式")
 
     try:

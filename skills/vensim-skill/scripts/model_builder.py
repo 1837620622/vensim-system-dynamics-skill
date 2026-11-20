@@ -57,6 +57,7 @@ def _model_text(spec):
         "moved_constants": [],
         "supplementary": [],
         "numeric_links": [],
+        "unsigned_arrows": [],
         "suggested_loops": [],
         "loop_markers": [],
         "unmarked_loops": [],
@@ -76,9 +77,10 @@ def _model_text(spec):
             "sketch 只接受 font_family、font_size、layout_mode、node_spacing、"
             "shadow_visibility、split_shadows、seed、polarity"
         )
-    # 箭头极性：dynamic 给变量之间能由方程推出符号的链接标 +/-，常量引出的链接不标；
-    # declared 只标 links 里写明的；all 连常量链接也标。links 里写明的总会标出
-    polarity_mode = sketch_options.get("polarity", "dynamic")
+    # 箭头极性是原则性要求：默认 all，每条信息箭头都标 +/-（常量引出的和存量初值也标）。
+    # dynamic 只标变量之间的链接，declared 只标 links 里写明的，两者只用于草稿；
+    # 推不出的箭头记入 unsigned_arrows，交付前必须在 links 里写明
+    polarity_mode = sketch_options.get("polarity", "all")
     if polarity_mode not in POLARITY_MODES:
         raise ValueError("sketch.polarity 只能是 dynamic、declared 或 all")
     if sketch_options.get("layout_mode", "natural") not in {"natural", "refine", "preserve"}:
@@ -462,7 +464,6 @@ def _model_text(spec):
                     raise ValueError("polarity 仅支持 +、-、S、O；无依据时留空")
                 if (
                     not polarity
-                    and name not in stocks
                     and polarity_mode != "declared"
                     and (polarity_mode == "all" or names[dep]["kind"] != "constant")
                 ):
@@ -473,6 +474,8 @@ def _model_text(spec):
                         if inferred:
                             notes["numeric_links"].append([dep, name, inferred])
                     polarity = inferred
+                if not polarity:
+                    notes.setdefault("unsigned_arrows", []).append([dep, name])
                 links.append(
                     (
                         ids.get(dep, shadows.get(dep)),
@@ -857,6 +860,13 @@ def _advice(spec, notes, views, view_advice):
             f"{len(notes['numeric_links'])} 条箭头的极性方程推不出（多为变量相乘），按基准运行"
             "逐时刻数值求偏导确定，只在这次运行的取值范围内成立；需要时在 links 里写明"
         )
+    for source, target in notes.get("unsigned_arrows", []):
+        advice.append(
+            f"箭头 {source} → {target} 没有极性（方程和数值偏导都判断不了，多为时间开关、"
+            f"平滑或延迟）。每条箭头都要标正负号，在 links 里写 "
+            f'{{"from": "{source}", "to": "{target}", "polarity": "+ 或 -"}}，'
+            "并在说明里写明成立的取值范围"
+        )
     for row in notes["unmarked_loops"]:
         if len(row["views"]) > 1:
             advice.append(f"回路「{row['loop']}」跨视图 {'、'.join(row['views'])}，不画 R/B 标记")
@@ -899,6 +909,12 @@ def command_build(spec_path, output):
     print(f"已生成: {output}；请在 Vensim 执行 Check Model 和 Units Check")
     if not report["pass"]:
         print(f"排版仍有几何问题，详见 {report_path}")
+    unsigned = report["sketch_decisions"].get("unsigned_arrows", [])
+    if unsigned:
+        print(
+            f"有 {len(unsigned)} 条箭头没有极性，交付前必须在 links 里写明正负号，"
+            f"逐条见下面的建议和 {report_path}"
+        )
     if report["feedback"]["status"] == "needs_review":
         print(f"部分已标极性或回路需要领域与取值范围核对，见 {report_path}")
     drawn = report["sketch_decisions"]["loop_markers"]

@@ -169,7 +169,8 @@ def _view_records(view_name, members, defined, links, loops, font, font_size):
         markers.append({"label": label, "loop": row["name"], "variables": row["variables"]})
         next_id += 1
     for source, target, polarity, delay in links:
-        if source not in ids or target not in ids:
+        if source not in ids or target not in ids or target not in defined:
+            # 影子变量只作原因出现，不接收箭头，免得 Vensim 里出现指向影子的连线
             continue
         s, t = ids[source], ids[target]
         x = round((positions[s][0] + positions[t][0]) / 2)
@@ -315,8 +316,8 @@ def command_cld(spec_path: Path, output: Path, include_constants=False, overall=
         print(f"已生成总体因果回路图: {second}")
     if result["notes"]["unsigned_links"]:
         print(
-            f"有 {len(result['notes']['unsigned_links'])} 条连线推不出极性，未标符号，"
-            f"见 {report_path}；可在 links 中写明 polarity"
+            f"有 {len(result['notes']['unsigned_links'])} 条连线推不出极性。每条连线都要标正负号，"
+            f"交付前必须在 links 中写明 polarity，逐条见 {report_path}"
         )
     failed = [
         row["view"]

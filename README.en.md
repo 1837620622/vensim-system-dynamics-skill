@@ -1,6 +1,6 @@
 # Vensim System Dynamics Skill
 
-![Version](https://img.shields.io/badge/version-2.5.0-2f6f9f)
+![Version](https://img.shields.io/badge/version-2.6.0-2f6f9f)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-non--commercial%20free%20%7C%20commercial%20paid-8a8a8a)
 

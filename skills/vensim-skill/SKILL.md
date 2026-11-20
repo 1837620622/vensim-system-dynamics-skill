@@ -3,7 +3,7 @@ name: vensim-skill
 description: "Build, lay out, check and simulate Vensim system dynamics models (.mdl). Use when the user wants a stock-and-flow or causal loop diagram in Vensim, needs an existing MDL tidied (overlapping labels, crossing arrows, messy views), wants polarity and R/B loop checks, or needs reproducible simulation, scenario, sensitivity, calibration or policy runs with publication-quality Python plots. Chinese variable names by default; Windows, macOS and Linux."
 license: "Source-available; free for personal learning and non-commercial research; commercial use requires a paid license (2040168455@qq.com); see LICENSE"
 metadata:
-  version: "2.5.0"
+  version: "2.6.0"
 ---
 
 # Vensim 建模、排版与仿真
@@ -19,7 +19,7 @@ metadata:
 5. **视图只做关键的。** 定义变量约 40 个以内用一个视图；更大的模型按子系统分，每个视图 6–40 个定义变量，对应一条主要存量链或一组紧密相关的机制；跨视图引用用影子变量。不做一个变量一个视图、两三个变量的碎视图，也不把上百个变量挤在一起。
 6. **图面朴素。** 存量画方框，流量画阀门和双线管道，其余变量只写名字。信息线统一黑色（`monochrome`），或 Vensim 传统纯蓝（`native-blue`）。图内只放变量、极性、延迟标记和核对过的 R/B，不加标题、水印、底色、说明框或装饰。
 7. **新模型默认中文变量名。** 用户要求英文时用英文；Vensim 函数和 `INITIAL TIME` 等控制变量保持英文。修改已有模型时不改变量名。
-8. **极性和回路按方程判断**，不按变量名或曲线涨跌猜。用 `feedback` 核对；非线性、查表关系说明适用范围，判断不了的标为待核对，不硬填符号。
+8. **每条箭头都标正负号，这是原则性要求。** SFD 和 CLD 里的每条信息箭头（含常量引出的箭头和存量初值箭头）都要有 `+` 或 `-`，`build` 默认 `polarity: all`。符号按方程判断，不按变量名或曲线涨跌猜；方程推不出的按基准运行数值偏导确定，仍推不出的（时间开关、平滑或延迟时间、分母可正可负的比值等）由建模者按经济或物理含义在 `links` 里写明，并在说明里写成立的取值范围。`build`、`cld` 报出的每条无极性箭头都要处理，`check --strict` 遇到无极性箭头直接失败。用 `feedback` 核对回路。
 9. **参数来自当前资料。** 时间范围、初值、参数、情景幅度、抽样次数和种子都按当前任务确定；示例和参考模型里的数值不能拿来填空。缺资料时列出缺项。
 10. **结果图用 Python 出，默认无标题。** 坐标框细线、刻度朝内、无网格；颜色和线型同时区分曲线；超过 8 条曲线分组出图（`max_lines`），蒙特卡洛画分位带；数据不平滑、不删点。样式依据见 [RESULT_PLOTS.md](references/RESULT_PLOTS.md)。
 11. **结构图从 Vensim 导出。** `preview` 生成的 HTML/SVG 用估算字宽，只用来定位问题。没有 Vensim 时交付 MDL 和检查报告，并写明“未在 Vensim 中核对”。

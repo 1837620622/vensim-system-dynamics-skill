@@ -24,7 +24,13 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-from mdl_document import MdlDocument, atomic_write, preflight_outputs, separate_output
+from mdl_document import (
+    MdlDocument,
+    atomic_write,
+    preflight_outputs,
+    separate_output,
+    split_sketch_fields,
+)
 from sketch_geometry import (  # noqa: F401
     CHECK_CLEARANCE,
     arrow_path,
@@ -291,7 +297,10 @@ def parse_views(
                 continue
             kind = _safe_int(first, -1)
             if kind in OBJECT_TYPES | {T_ARROW}:
-                record_id = _safe_int(body.split(",", 2)[1], -1)
+                head = body.split(",", 2)
+                if len(head) < 2:
+                    raise ValueError(f"视图 {name}: 第 {line_index + 1} 行草图记录字段不足")
+                record_id = _safe_int(head[1], -1)
                 if record_id in seen_ids:
                     raise ValueError(f"视图 {name}: 对象 ID {record_id} 重复")
                 seen_ids.add(record_id)
@@ -318,7 +327,7 @@ def parse_views(
                 )
             elif kind in OBJECT_TYPES:
                 # 10/11/12,id,name,x,y,w,h,shape,bits,...
-                fields = re.split(r",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", body)
+                fields = split_sketch_fields(body)
                 if len(fields) < 9:
                     continue
                 objects[_safe_int(fields[1])] = Obj(
@@ -442,7 +451,7 @@ def eligible_movable_nodes(view: View, config: dict) -> dict[int, Obj]:
 
 def update_obj_line(line: str, x: float, y: float) -> str:
     ending = _line_ending(line)
-    fields = re.split(r",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", _line_body(line))
+    fields = split_sketch_fields(_line_body(line))
     fields[3] = str(int(round(x)))
     fields[4] = str(int(round(y)))
     return ",".join(fields) + ending

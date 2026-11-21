@@ -1703,14 +1703,30 @@ def command_check(path: Path, strict: bool = False) -> int:
     warnings = 0
     print(f"CHECK: {path}")
 
-    # 1. 未定义变量引用
+    # 1. 未定义变量引用：整条方程转 AST 逐个名字核对，不依赖初始时刻走到哪个分支
+    name_map = {name: f"_v{i}" for i, name in enumerate(equations)}
+    allowed = set(name_map.values()) | set(HELPER_TOKENS) | {"Time", "True", "False"}
     for name, eq in equations.items():
-        rhs = eq.integ_flow or eq.rhs
-        deps = extract_deps(rhs, names)
-        for d in deps:
-            if d not in equations:
+        if eq.is_lookup:
+            continue
+        parts = (eq.integ_flow, eq.integ_init_expr) if eq.integ_flow is not None else (eq.rhs,)
+        for expr in parts:
+            if not expr:
+                continue
+            try:
+                tree = ast.parse(_to_python_expr(expr, name_map), mode="eval")
+            except (SyntaxError, ValueError):
+                continue  # 语法问题由第 5 步引擎预检报告
+            funcs = {id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)}
+            for bad in sorted(
+                {
+                    node.id
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Name) and id(node) not in funcs and node.id not in allowed
+                }
+            ):
                 errors += 1
-                print(f"  ERROR {name}: 引用未定义变量 '{d}'")
+                print(f"  ERROR {name}: 引用未定义变量 '{bad}'")
 
     # 2. 缺失单位
     for name, eq in equations.items():
@@ -1732,22 +1748,32 @@ def command_check(path: Path, strict: bool = False) -> int:
     if sketch_pos >= 0:
         from vensim_autolayout import load_mdl as _load_mdl
 
+        from sketch_geometry import shown
+
         _, views = _load_mdl(path)
         for view in views:
             ids = set(view.objects)
+            ordered = sorted(view.objects.values(), key=lambda obj: obj.line_index)
+            valve_label = {
+                prev.obj_id: obj
+                for prev, obj in zip(ordered, ordered[1:], strict=False)
+                if prev.kind == 11 and obj.kind == 10 and obj.attached_to_valve
+            }
             for arrow in view.arrows:
                 if arrow.from_id not in ids or arrow.to_id not in ids:
                     errors += 1
                     print(f"  ERROR 草图 {view.name}: 箭头 {arrow.obj_id} 断裂引用")
                     continue
-                # 每条信息箭头都要标正负号（原则性要求）；物理管道和指向阀门的箭头不算
-                ends = view.objects[arrow.from_id], view.objects[arrow.to_id]
-                if (
-                    not arrow.is_physical_flow
-                    and all(obj.kind == 10 for obj in ends)
-                    and (arrow.fields[6].strip() if len(arrow.fields) > 6 else "0")
-                    not in {"43", "45", "83", "79", "115", "111"}
-                ):
+                # 每条信息箭头都要标正负号（原则性要求）；物理管道不算。
+                # 指向/来自阀门的箭头按其附着的流量名算（Vensim 原生模型里输入流率的箭头指向阀门），
+                # 隐藏的箭头与隐藏对象上的箭头不算（与 feedback 审计口径一致）
+                if arrow.is_physical_flow or not shown(view, arrow):
+                    continue
+                ends = [view.objects[arrow.from_id], view.objects[arrow.to_id]]
+                ends = [valve_label.get(obj.obj_id, obj) for obj in ends]
+                if all(obj.kind == 10 for obj in ends) and (
+                    arrow.fields[6].strip() if len(arrow.fields) > 6 else "0"
+                ) not in {"43", "45", "83", "79", "115", "111"}:
                     warnings += 1
                     print(
                         f"  WARNING 草图 {view.name}: 箭头 {arrow.obj_id} "

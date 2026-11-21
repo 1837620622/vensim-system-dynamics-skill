@@ -37,7 +37,12 @@ def _default_output(model: str, suffix: str) -> str:
 
 
 def _has_option(args: list[str], option: str) -> bool:
-    return any(arg.lower().split("=", 1)[0] == option for arg in args)
+    """argparse 接受唯一前缀（--out、--outp），按前缀判断，避免默认值覆盖用户的输出。"""
+    for arg in args:
+        head = arg.lower().split("=", 1)[0]
+        if len(head) > 2 and head.startswith("--") and option.startswith(head):
+            return True
+    return False
 
 
 def _invoke(module_main: Callable[[], int], argv: list[str]) -> int:

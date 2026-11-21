@@ -42,6 +42,9 @@ def atomic_write(path: Path, data: bytes, *, overwrite=False) -> None:
             dir=path.parent, prefix=".vensim-", delete=False
         ) as stream:
             temporary = Path(stream.name)
+            mask = os.umask(0)
+            os.umask(mask)
+            os.chmod(stream.fileno() if os.chmod in os.supports_fd else temporary, 0o666 & ~mask)
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
@@ -54,6 +57,19 @@ def atomic_write(path: Path, data: bytes, *, overwrite=False) -> None:
         # Windows 不允许删除仍然打开的临时文件，清理必须在 with 结束后执行。
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def split_sketch_fields(body: str) -> list[str]:
+    """按逗号切分草图记录，只在其后引号数为偶数处切开（与旧正则等价），线性时间。"""
+    fields, start, quotes_after = [], 0, body.count('"')
+    for index, char in enumerate(body):
+        if char == '"':
+            quotes_after -= 1
+        elif char == "," and quotes_after % 2 == 0:
+            fields.append(body[start:index])
+            start = index + 1
+    fields.append(body[start:])
+    return fields
 
 
 @dataclasses.dataclass

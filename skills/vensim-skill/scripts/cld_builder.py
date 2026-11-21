@@ -52,7 +52,10 @@ def cld_links(spec, include_constants=False):
     for link in spec.get("links", []):
         key = (canonical_name(link["from"]), canonical_name(link["to"]))
         if link.get("polarity"):
-            declared[key] = link["polarity"]
+            # S/s 与 O/o 是 + / - 的同义写法，统一成 +/-，不能在下面被当成“推不出”
+            declared[key] = {"S": "+", "s": "+", "O": "-", "o": "-"}.get(
+                link["polarity"], link["polarity"]
+            )
         if link.get("delay"):
             delays.add((link["from"], link["to"]))
     known = set(items)

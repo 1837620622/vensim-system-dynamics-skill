@@ -21,8 +21,10 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import os
 import random
 import re
+import time
 from collections import Counter, defaultdict
 
 from arc_routing import arc_ratio, route_arcs
@@ -1501,6 +1503,8 @@ def anneal(
     current = scene.total()
     best, best_state = current, scene.snapshot()
     for it in range(iterations):
+        if it % 256 == 0 and _deadline_passed():
+            break
         temperature = t0 * (t1 / t0) ** (it / max(1, iterations))
         r = rng.random()
         saved = {}
@@ -2405,7 +2409,7 @@ def _natural_plan_once(lines, view, config, exclude=frozenset()):
         polish_seed = 0
         split_stale = False  # 上一轮拆分失败且状态未变：跳过，避免重复同样的试验
         for _ in range(split_limit + polish_left + 8):
-            if selection_key(state["result"][3])[:2] == (0, 0):
+            if selection_key(state["result"][3])[:2] == (0, 0) or _deadline_passed():
                 break
             improved = False
             if len(state["splits"]) < split_limit and not split_stale:
@@ -3495,14 +3499,13 @@ def arc_summary(plan, view):
 # 回写 MDL 文本
 # ---------------------------------------------------------------------------
 
-_FIELD_SPLIT = re.compile(r",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)")
-
 
 def _set_fields(line, updates):
     """按字段序号改写对象记录；引号内的逗号不参与分割，换行符原样保留。"""
+    from mdl_document import split_sketch_fields
     from vensim_autolayout import _line_body, _line_ending
 
-    fields = _FIELD_SPLIT.split(_line_body(line))
+    fields = split_sketch_fields(_line_body(line))
     for index, value in updates.items():
         if index < len(fields):
             fields[index] = str(value)
@@ -3545,6 +3548,14 @@ def orphan_shadow_ids(view):
     return shadows - used
 
 
+_LAYOUT_DEADLINE = [None]
+
+
+def _deadline_passed() -> bool:
+    deadline = _LAYOUT_DEADLINE[0]
+    return deadline is not None and time.monotonic() > deadline
+
+
 def natural_view(lines, view, config, exclude=frozenset()):
     """对一个视图执行 natural 排版并改写 lines（新影子行另行返回，由调用方插入）。
 
@@ -3553,7 +3564,12 @@ def natural_view(lines, view, config, exclude=frozenset()):
     """
     from vensim_autolayout import _line_ending, update_arrow_line
 
-    plan = natural_plan(lines, view, config, exclude)
+    budget = float(os.environ.get("VENSIM_SKILL_LAYOUT_SECONDS", "180"))
+    _LAYOUT_DEADLINE[0] = time.monotonic() + budget if budget > 0 else None
+    try:
+        plan = natural_plan(lines, view, config, exclude)
+    finally:
+        _LAYOUT_DEADLINE[0] = None
     if plan is None:
         return {"strategy": "natural", "skipped": "视图中没有可见对象"}, []
     # ---- 对象：坐标、存量/云尺寸、云图标代码 ----

@@ -91,7 +91,22 @@ def infer_polarity(expression, source, equations):
             rows = [walk(arg) for arg in node.args]
             if any(row[1] != (0.0, 0.0) for row in rows[1:]):
                 raise ValueError("延迟时间也依赖 source")
+            # *I 变体从初值出发，输出值不等于输入值；值未知，不能再当常数参与乘除
+            if node.func.id.upper().endswith("I"):
+                return None, rows[0][1]
             return rows[0]
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_delay_fixed"
+            and len(node.args) == 4
+        ):
+            # DELAY FIXED(输入, 延迟时间, 初值)：输出是输入的平移，对输入正向；
+            # 第一个参数是状态键字符串
+            rows = [walk(arg) for arg in node.args[1:]]
+            if any(row[1] != (0.0, 0.0) for row in rows[1:]):
+                raise ValueError("延迟时间或初值也依赖 source")
+            return None, rows[0][1]
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
@@ -157,8 +172,8 @@ def numeric_link_signs(text):
     names = set(equations)
     name_map = {name: f"_v{i}" for i, name in enumerate(expanded)}
     lookups = {name: LookupTable(eq.lookup_pairs) for name, eq in expanded.items() if eq.is_lookup}
-    step = max(1, math.ceil(len(result.times) / NUMERIC_POINTS))
-    samples = range(0, len(result.times), step)
+    # 逐个保存时刻都要看：抽样会漏掉只在部分时刻翻号的作用（如周期开关）
+    samples = range(len(result.times))
     signs = {}
     cache: dict = {}
     contexts = []
@@ -379,6 +394,8 @@ def audit_feedback(text, loops=None):
             status = (
                 "no_dependency" if not exists else "unmarked" if not displayed else "needs_review"
             )
+            if status == "unmarked" and kind != "flow":
+                status = "needs_review"  # 2.6.0 起每条信息箭头都必须有极性
             if exists and expected == "0":
                 status = "needs_review"
             elif ambiguous_initial_dynamic:
@@ -392,6 +409,9 @@ def audit_feedback(text, loops=None):
                 found = numeric.get((canonical_name(source), canonical_name(target)))
                 if found and SIGNS[found] == sign:
                     status = "numeric"
+                elif found:
+                    # 基准运行里偏导始终与标注相反：按冲突处理，不能停在 needs_review
+                    status = "conflict"
             rows.append(
                 {
                     "view": view.name,

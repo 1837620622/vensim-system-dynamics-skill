@@ -162,6 +162,22 @@ def compare_backends(
 # ---------------------------------------------------------------------------
 
 
+_SKETCH = "\\\\\\---///"
+
+
+def _strip_docs_for_pysd(text: str) -> str:
+    """PySD 把方程注释原样写进生成代码的 docstring，翻译前清空注释字段。"""
+    equations, marker, sketch = text.partition(_SKETCH)
+    out = []
+    for chunk in re.split(r"(\|)", equations):
+        parts = chunk.split("~")
+        out.append(chunk if chunk == "|" or len(parts) < 3 else "~".join([*parts[:2], "\n\t"]))
+    cleaned = "".join(out)
+    if '"""' in cleaned or "'''" in cleaned:
+        raise ValueError("方程区含三引号，PySD 翻译时可能被当作代码，已拒绝")
+    return cleaned + marker + sketch
+
+
 def parse_overrides(items):
     params = {}
     for item in items:
@@ -292,8 +308,11 @@ def run_model(
             )
         with tempfile.TemporaryDirectory(prefix="vensim-pysd-") as folder:
             copied = Path(folder) / "model.mdl"
-            copied.write_text(text, encoding="utf-8")
-            model = pysd.read_vensim(str(copied))
+            copied.write_text(_strip_docs_for_pysd(text), encoding="utf-8")
+            try:
+                model = pysd.read_vensim(str(copied))
+            except Exception as exc:  # noqa: BLE001 - PySD/parsimonious 的解析异常类型不固定
+                raise RuntimeError(f"PySD 无法翻译该模型: {type(exc).__name__}: {exc}") from exc
             # PySD 保留名字两侧的引号（如 "Population Aged 0-14"），按 Vensim 名称规则对应
             native = {canonical_name(key): key for key in model.namespace}
 

@@ -1,8 +1,8 @@
 # Vensim System Dynamics Skill
 
-![Version](https://img.shields.io/badge/version-2.6.0-2f6f9f)
+![Version](https://img.shields.io/badge/version-2.7.0-2f6f9f)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
-![License](https://img.shields.io/badge/license-non--commercial%20free%20%7C%20commercial%20paid-8a8a8a)
+![License](https://img.shields.io/badge/license-source--available%20%7C%20commercial%20paid-8a8a8a)
 
 [简体中文](README.md) · English
 
@@ -50,11 +50,11 @@ Diagrams on this page are rendered from the MDL by the `preview` command; text w
 
 | Step | Commands | What it does |
 | --- | --- | --- |
-| Build | `build` `fix` | Generates an MDL from a JSON spec of stocks, flows, equations and units, then lays it out and checks polarity, signing every information link `+/-` (constant and stock-initial links included) and listing pasteable `links` entries for any it cannot derive; draws R/B loop markers for the declared loops it can verify, or suggests pasteable loop entries when none are declared; splits views by subsystem with automatic shadow variables; `fix` fills units, drops broken arrows and marks unused outputs as Supplementary on explicit options |
+| Build | `build` `fix` | Generates an MDL from a JSON spec of stocks, flows, equations and units, then lays it out and checks polarity, signing every information link `+/-` (constant and stock-initial links included) and listing pasteable `links` entries for any it cannot derive; draws R/B loop markers for the declared loops it can verify, or suggests pasteable loop entries when none are declared; splits views by subsystem with automatic shadow variables; `fix` fills units, drops broken arrows and marks unused outputs as Supplementary on explicit options, and `fix --apply-polarity` writes derivable `+/-` signs onto unsigned arrows of an existing model; `build` and `cld` exit with code 1 when any arrow lacks a sign (`--allow-unsigned` for drafts) |
 | Causal loop diagrams | `cld` | From the same model JSON, one causal loop diagram per subsystem plus an overall one: plain-text variables, `+/-` links, R/B markers on verified loops, laid out like `build` |
 | Check | `inspect` `audit` `check` `units` | Sketch objects, broken references, undefined variables, initialisation loops, missing units; `check --strict` also requires no Vensim USE FLAG (variables nothing uses) and a polarity sign on every information link, failing on any unsigned one |
 | Layout | `layout` `visual` `preview` | Four modes (below); `visual --strict` checks crossings, text overlap, too-short arrows and the `<Time>` slot; `preview` writes a sketch as HTML with estimated text widths, for locating problems only |
-| Feedback | `feedback` | Signs of partial derivatives from the equations, checked against arrow `+/-` and declared R/B loops |
+| Feedback | `feedback` | Signs of partial derivatives from the equations, checked against arrow `+/-` and declared R/B loops; unsigned arrows get a suggested sign with its source (equation or numeric) |
 | Simulate | `simulate` `crosscheck` `convergence` | Built-in Euler engine; point-by-point comparison with PySD; dt, dt/2, dt/4 convergence |
 | Experiments | `experiment` | Named scenarios, one-at-a-time perturbation, grid, Monte Carlo |
 | Calibration and policy | `calibrate` `optimize` | SciPy differential evolution with bounds, constraints and a simulation budget |
@@ -89,6 +89,7 @@ cd vensim-system-dynamics-skill/skills/vensim-skill
 | Result plots | `python -m pip install -r requirements/plots.txt` |
 | PySD comparison | `python -m pip install -r requirements/pysd.txt` |
 | Calibration and policy search | `python -m pip install -r requirements/analysis.txt` |
+| Layout planarity check | `python -m pip install -r requirements/layout.txt` |
 
 ## Quick start
 
@@ -103,9 +104,14 @@ Once installed, describe the task to your agent, e.g. "build an inventory model 
   --output-dir results/scenarios --plot figures/scenarios.png
 
 # Tidy an existing model into a new file; the original is untouched
-./skill.sh layout old.mdl --output old_layout.mdl
+./skill.sh check old.mdl --strict
+./skill.sh fix old.mdl --apply-polarity --output old_signed.mdl   # write derivable link signs
+./skill.sh layout old_signed.mdl --output old_layout.mdl
 ./skill.sh visual old_layout.mdl --strict
+./skill.sh check old_layout.mdl --strict
 ```
+
+`./skill.sh --version` prints the version. Environment variables: `VENSIM_SKILL_WORKERS` sets the number of parallel layout processes; `VENSIM_SKILL_LAYOUT_SECONDS` caps layout time per view (default 180 s, 0 for no limit) and returns the best layout found so far.
 
 Commands refuse to overwrite existing outputs; use a new name when re-running.
 
@@ -124,7 +130,7 @@ Main rules and their sources:
 - Information links are single-control-point arcs with a target bow (sagitta/chord) of 0.12 (median 0.14 in the official examples); straight lines only where an arc would cross or graze text.
 - Stock chains run horizontally with at least 200 px between rows (textbook median about 180 px). Flows that skip a stock become a detour branch or a right-angle bypass pipe, both taken from Duggan's diagrams.
 - R/B loop markers are placeholder nodes during layout: pulled to the centre of their own loop, kept inside it, with other variables arranged around them, and the circle turns the way the loop runs; hidden variables are skipped together with their arrows (Vensim Hide/unhide).
-- Every link carries a polarity sign, as a rule (since 2.6.0). Signs the equations cannot give come from numeric partial derivatives along the base run; any still unknown (time switches, smoothing times, ratios whose denominator can change sign) are written in `links` by the modeller with the conditions under which they hold; see [FEEDBACK.md](skills/vensim-skill/references/FEEDBACK.md) (Chinese).
+- Every link carries a polarity sign, as a rule (since 2.6.0). Signs the equations cannot give come from numeric partial derivatives along the base run; any still unknown (time switches, smoothing times, ratios whose denominator can change sign) are written in `links` by the modeller with the conditions under which they hold; for an existing MDL, `fix --apply-polarity` writes the derivable signs and lists the rest; see [FEEDBACK.md](skills/vensim-skill/references/FEEDBACK.md) (Chinese).
 - New models avoid the USE FLAG notice Vensim shows on opening: unused outputs are marked Supplementary and unused constants are rejected (per the Vensim documentation, unused variables are a notice that does not stop simulation, and marking them Supplementary clears it).
 - Zero crossings. Where the structure is non-planar (K3,3), a shadow variable carries the link, and each such split is listed in the report.
 - Large models are split into views by subsystem, with views linked by variables or shadow variables (Vensim, *How Views Work*). The 6–40 defined variables per view is this tool's design range, and fragment views are avoided.

@@ -1,11 +1,37 @@
 [project]
 name = "vensim-system-dynamics-skill"
-version = "2.6.0"
+version = "2.7.0"
 description = "Vensim system dynamics skill for AI agents: MDL building, layout, checks, simulation and plots"
 requires-python = ">=3.10"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "LicenseRef-Vensim-Skill-SourceAvailable"
+license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+]
 authors = [{ name = "传康KK（万能程序员）", email = "2040168455@qq.com" }]
+
+[project.scripts]
+vensim-skill = "vensim_skill.scripts.skill_cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+# 技能目录整体装成 vensim_skill（脚本、模板、参考模型都在里面），技能本身仍按目录使用
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[tool.hatch.build.targets.wheel.force-include]
+"skills/vensim-skill" = "vensim_skill"
+
+[tool.hatch.build]
+exclude = ["**/__pycache__", "**/*.pyc"]
 
 [tool.ruff]
 target-version = "py310"

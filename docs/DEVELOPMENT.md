@@ -6,7 +6,7 @@
 
 - `skills/vensim-skill/SKILL.md` 是 Skill 入口，目录名必须与 frontmatter 的 `name` 一致。
 - `skills/vensim-skill/scripts` 保存确定性解析、布局、仿真、审计和绘图代码。
-- `skills/vensim-skill/assets` 放模板、两个中文示例和 `reference_models` 下的 7 个教材模型；新增参考模型必须是可再分发的许可，并附许可证全文。
+- `skills/vensim-skill/assets` 放模板、三个中文示例和 `reference_models` 下的 7 个教材模型；新增参考模型必须是可再分发的许可，并附许可证全文。
 - `skills/vensim-skill/references` 是按任务读取的规则与研究边界。
 - `tests` 覆盖核心代码、可选后端、跨平台入口和输出安全。
 - 本机专属的 `AGENTS.md`、缓存和临时仿真目录不属于发布内容。

@@ -321,7 +321,7 @@ def audit_feedback(text, loops=None):
     views = parse_views(
         text.splitlines(True), {name for name, eq in equations.items() if eq.integ_flow is not None}
     )
-    rows, unresolved = [], []
+    rows, unresolved, unsigned_unmapped = [], [], []
     numeric = None  # 基准运行的数值偏导，第一次用到时才仿真
     for view in views:
         labels = {
@@ -339,6 +339,16 @@ def audit_feedback(text, loops=None):
             source, target = labels.get(arrow.from_id), labels.get(arrow.to_id)
             raw_polarity = arrow.fields[6] if len(arrow.fields) > 6 else "0"
             if source not in equations or target not in equations:
+                if raw_polarity in ("0", "") and source and target and not arrow.is_physical_flow:
+                    unsigned_unmapped.append(
+                        {
+                            "view": view.name,
+                            "arrow": arrow.obj_id,
+                            "source": source,
+                            "target": target,
+                            "reason": "端点不是已解析方程（如 Time），推不出符号",
+                        }
+                    )
                 if raw_polarity not in ("0", ""):
                     unresolved.append(
                         {
@@ -412,9 +422,21 @@ def audit_feedback(text, loops=None):
                 elif found:
                     # 基准运行里偏导始终与标注相反：按冲突处理，不能停在 needs_review
                     status = "conflict"
+            suggested, suggested_source = None, None
+            if exists and not displayed and kind != "flow":
+                # 未标号箭头给出建议符号：方程推得出的用方程，否则用基准运行数值偏导
+                if expected in {"+", "-"}:
+                    suggested, suggested_source = expected, "equation"
+                elif kind == "information" and not ambiguous_initial_dynamic:
+                    if numeric is None:
+                        numeric = numeric_link_signs(text)
+                    found = numeric.get((canonical_name(source), canonical_name(target)))
+                    if found:
+                        suggested, suggested_source = found, "numeric"
             rows.append(
                 {
                     "view": view.name,
+                    "view_index": view.index,
                     "arrow": arrow.obj_id,
                     "source": source,
                     "target": target,
@@ -423,6 +445,8 @@ def audit_feedback(text, loops=None):
                     "expected": expected,
                     "status": status,
                     "native_dtype": arrow.fields[9] if len(arrow.fields) > 9 else "",
+                    "suggested": suggested,
+                    "suggested_source": suggested_source,
                 }
             )
     marked = {
@@ -444,6 +468,7 @@ def audit_feedback(text, loops=None):
         "loops": loop_rows,
         "conflicts": conflicts,
         "unresolved": unresolved,
+        "unsigned_unmapped": unsigned_unmapped,
         "status": "conflict" if conflicts else "needs_review" if needs_review else "checked_subset",
     }
 

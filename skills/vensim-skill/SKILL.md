@@ -3,7 +3,7 @@ name: vensim-skill
 description: "Build, lay out, check and simulate Vensim system dynamics models (.mdl). Use when the user wants a stock-and-flow or causal loop diagram in Vensim, needs an existing MDL tidied (overlapping labels, crossing arrows, messy views), wants polarity and R/B loop checks, or needs reproducible simulation, scenario, sensitivity, calibration or policy runs with publication-quality Python plots. Chinese variable names by default; Windows, macOS and Linux."
 license: "Source-available; free for personal learning and non-commercial research; commercial use requires a paid license (2040168455@qq.com); see LICENSE"
 metadata:
-  version: "2.6.0"
+  version: "2.7.0"
 ---
 
 # Vensim 建模、排版与仿真
@@ -19,7 +19,7 @@ metadata:
 5. **视图只做关键的。** 定义变量约 40 个以内用一个视图；更大的模型按子系统分，每个视图 6–40 个定义变量，对应一条主要存量链或一组紧密相关的机制；跨视图引用用影子变量。不做一个变量一个视图、两三个变量的碎视图，也不把上百个变量挤在一起。
 6. **图面朴素。** 存量画方框，流量画阀门和双线管道，其余变量只写名字。信息线统一黑色（`monochrome`），或 Vensim 传统纯蓝（`native-blue`）。图内只放变量、极性、延迟标记和核对过的 R/B，不加标题、水印、底色、说明框或装饰。
 7. **新模型默认中文变量名。** 用户要求英文时用英文；Vensim 函数和 `INITIAL TIME` 等控制变量保持英文。修改已有模型时不改变量名。
-8. **每条箭头都标正负号，这是原则性要求。** SFD 和 CLD 里的每条信息箭头（含常量引出的箭头和存量初值箭头）都要有 `+` 或 `-`，`build` 默认 `polarity: all`。符号按方程判断，不按变量名或曲线涨跌猜；方程推不出的按基准运行数值偏导确定，仍推不出的（时间开关、平滑或延迟时间、分母可正可负的比值等）由建模者按经济或物理含义在 `links` 里写明，并在说明里写成立的取值范围。`build`、`cld` 报出的每条无极性箭头都要处理，`check --strict` 遇到无极性箭头直接失败。用 `feedback` 核对回路。
+8. **每条箭头都标正负号，这是原则性要求。** SFD 和 CLD 里的每条信息箭头（含常量引出的箭头和存量初值箭头）都要有 `+` 或 `-`，`build` 默认 `polarity: all`。符号按方程判断，不按变量名或曲线涨跌猜；方程推不出的按基准运行数值偏导确定，仍推不出的（时间开关、平滑或延迟时间、分母可正可负的比值等）由建模者按经济或物理含义在 `links` 里写明，并在说明里写成立的取值范围。`build`、`cld` 遇到无极性箭头时退出码为 1（草稿阶段可加 `--allow-unsigned`），`check --strict` 同样失败。已有 MDL 没有 JSON 时用 `fix --apply-polarity` 补写方程或数值偏导推得出的符号，它不改方程，推不出的列在 `unsigned_remaining` 里，由建模者判断后在 Vensim 里补标并在说明里写依据。用 `feedback` 核对回路，未标号箭头的 `suggested` 字段给出建议符号和来源。
 9. **参数来自当前资料。** 时间范围、初值、参数、情景幅度、抽样次数和种子都按当前任务确定；示例和参考模型里的数值不能拿来填空。缺资料时列出缺项。
 10. **结果图用 Python 出，默认无标题。** 坐标框细线、刻度朝内、无网格；颜色和线型同时区分曲线；超过 8 条曲线分组出图（`max_lines`），蒙特卡洛画分位带；数据不平滑、不删点。样式依据见 [RESULT_PLOTS.md](references/RESULT_PLOTS.md)。
 11. **结构图从 Vensim 导出。** `preview` 生成的 HTML/SVG 用估算字宽，只用来定位问题。没有 Vensim 时交付 MDL 和检查报告，并写明“未在 Vensim 中核对”。
@@ -30,7 +30,7 @@ metadata:
 1. 读模型或资料：`doctor` 看环境，`inspect`、`audit`、`check` 看结构和方程。截图只用来定位问题，不能据此猜方程。
 2. 先修语义问题（未定义变量、断裂引用、缺初值、缺单位、没有被使用的变量），再排版。
 3. 新模型：照模板写建模 JSON（格式见 [SPECIFICATIONS.md](references/SPECIFICATIONS.md)），`build` 生成 MDL，排版、极性和回路核对一起完成（二十几个变量约需 15 秒，上百个变量、多个视图时几分钟，多视图按 CPU 数并行，不要中断）。需要因果回路图时用同一份 JSON 跑 `cld`，得到每个子系统一张 CLD 和一张总体 CLD。输出里的每条“建议”都要处理：名字过长就精简，没声明的回路按给出的条目补进 `feedback_loops`，常量被移到别的视图就改 JSON；改完重新 `build`。
-4. 已有模型：`layout` 输出新文件，`visual --strict` 检查；不合格时按报告里的对象 ID 处理，必要时用 `node_positions` 固定个别变量后重跑。
+4. 已有模型：先 `check --strict`；缺极性就 `fix --apply-polarity --output 新文件`，缺单位用 `fix --units-map`，没人用的输出指标用 `fix --mark-supplementary`（几个选项可一次写）。然后 `layout` 输出新文件，`visual --strict` 和 `check --strict` 复查；不合格时按报告里的对象 ID 处理，必要时用 `node_positions` 固定个别变量后重跑。单个视图排版默认最多 180 秒（`VENSIM_SKILL_LAYOUT_SECONDS` 可调，0 表示不限），到时返回当前最好的版面。
 5. 在 Vensim 中打开每个视图，运行 Check Model 和 Units Check，导出结构图。
 6. 仿真和实验：`simulate`、`experiment`、`convergence`；装了 PySD 时用 `crosscheck` 对照。结果图用 `graph` 或 `plot-data`（默认 Vensim DSS 风格）；要 Vensim 原生结果图时用 `vensim-script` 生成 `.cin`、`.vgd` 和 `.cmd`，在 Vensim DSS 中运行。
 7. 交付 MDL、CSV、运行清单（`.run.json`）、图件和检查报告；不交付 `preview` 调试图和临时文件。
@@ -46,6 +46,7 @@ metadata:
 ./skill.sh audit work/model.mdl
 ./skill.sh check work/model.mdl --strict                                 # 缺单位、没人用的变量也算失败
 ./skill.sh fix work/model.mdl --output work/model_fixed.mdl --mark-supplementary  # 没人用的输出指标标 Supplementary
+./skill.sh fix old.mdl --output work/old_signed.mdl --apply-polarity  # 已有模型补写推得出的箭头极性
 ./skill.sh feedback work/model.mdl --spec model.json --strict
 ./skill.sh layout work/model.mdl --output work/model_layout.mdl          # 默认 auto
 ./skill.sh layout work/model.mdl --output work/redrawn.mdl --mode natural
@@ -59,7 +60,7 @@ metadata:
 ./skill.sh vensim-script work/model_layout.mdl --spec experiment.json --output-dir results/dss   # Vensim DSS 原生结果图
 ```
 
-各命令加 `--help` 查看完整参数。输出文件已存在时命令会拒绝覆盖，重跑请换新文件名或新目录。
+各命令加 `--help` 查看完整参数，`--version` 显示版本。输出文件已存在时命令会拒绝覆盖，重跑请换新文件名或新目录。
 
 ## 按需阅读
 

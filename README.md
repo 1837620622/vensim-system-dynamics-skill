@@ -1,8 +1,8 @@
 # Vensim System Dynamics Skill
 
-![Version](https://img.shields.io/badge/version-2.6.0-2f6f9f)
+![Version](https://img.shields.io/badge/version-2.7.0-2f6f9f)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
-![License](https://img.shields.io/badge/license-non--commercial%20free%20%7C%20commercial%20paid-8a8a8a)
+![License](https://img.shields.io/badge/license-source--available%20%7C%20commercial%20paid-8a8a8a)
 
 简体中文 · [English](README.en.md)
 
@@ -50,11 +50,11 @@ Duggan 教材的 Student Flows 模型。原图有文字重叠、连线交叉和�
 
 | 环节 | 命令 | 说明 |
 | --- | --- | --- |
-| 建模 | `build` `fix` | 由 JSON 写明存量、流向、方程、单位，生成 MDL 并完成排版和极性核对，每条信息箭头都标 `+/-`（含常量和存量初值箭头），推不出的逐条给出 `links` 条目；按 `feedback_loops` 画出核对过的 R/B 回路标记，没声明时给出可直接粘贴的回路建议；可按子系统分视图，跨视图自动生成影子变量；`fix` 按显式选项补单位、删除断裂的箭头、把没人用的输出指标标为 Supplementary |
+| 建模 | `build` `fix` | 由 JSON 写明存量、流向、方程、单位，生成 MDL 并完成排版和极性核对，每条信息箭头都标 `+/-`（含常量和存量初值箭头），推不出的逐条给出 `links` 条目；按 `feedback_loops` 画出核对过的 R/B 回路标记，没声明时给出可直接粘贴的回路建议；可按子系统分视图，跨视图自动生成影子变量；`fix` 按显式选项补单位、删除断裂的箭头、把没人用的输出指标标为 Supplementary，`fix --apply-polarity` 给已有模型的未标号箭头补写推得出的 `+/-`；有箭头缺极性时 `build`、`cld` 退出码为 1（草稿可加 `--allow-unsigned`） |
 | 因果回路图 | `cld` | 用建模 JSON 生成每个子系统一张因果回路图和一张总体图：变量为无框文字，连线标 `+/-`，核对通过的回路画 R/B 标记，排版与 `build` 相同 |
 | 检查 | `inspect` `audit` `check` `units` | 草图对象、断裂引用、未定义变量、初值循环、缺失单位；`check --strict` 还要求没有 Vensim 的 USE FLAG（没有被使用的变量），并且每条信息箭头都标了极性，缺一条就失败 |
 | 排版 | `layout` `visual` `preview` | 四种模式（见下文）；`visual --strict` 检查交叉、压字、重叠、过短箭头和 `<Time>` 预留区；`preview` 生成草图 HTML，字宽为估算值，只用于定位问题 |
-| 反馈 | `feedback` | 按方程求偏导符号，核对箭头 `+/-` 和指定回路的 R/B |
+| 反馈 | `feedback` | 按方程求偏导符号，核对箭头 `+/-` 和指定回路的 R/B；未标号箭头给出建议符号和来源（方程或数值偏导） |
 | 仿真 | `simulate` `crosscheck` `convergence` | 内置 Euler 引擎；与 PySD 逐点对照；dt、dt/2、dt/4 步长收敛检查 |
 | 实验 | `experiment` | 命名情景、单因素扰动、网格、蒙特卡洛 |
 | 校准与政策 | `calibrate` `optimize` | SciPy 差分进化，有界参数、约束和仿真次数上限 |
@@ -89,6 +89,7 @@ cd vensim-system-dynamics-skill/skills/vensim-skill
 | 结果图 | `python -m pip install -r requirements/plots.txt` |
 | PySD 对照 | `python -m pip install -r requirements/pysd.txt` |
 | 校准与政策搜索 | `python -m pip install -r requirements/analysis.txt` |
+| 排版平面性检查 | `python -m pip install -r requirements/layout.txt` |
 
 ## 快速开始
 
@@ -103,11 +104,16 @@ cd vensim-system-dynamics-skill/skills/vensim-skill
   --output-dir results/scenarios --plot figures/scenarios.png
 
 # 整理已有模型：输出新文件，原文件不动
-./skill.sh layout old.mdl --output old_layout.mdl
+./skill.sh check old.mdl --strict
+./skill.sh fix old.mdl --apply-polarity --output old_signed.mdl   # 补写推得出的箭头极性
+./skill.sh layout old_signed.mdl --output old_layout.mdl
 ./skill.sh visual old_layout.mdl --strict
+./skill.sh check old_layout.mdl --strict
 ```
 
-输出文件已存在时命令会拒绝覆盖，重跑请换新文件名。
+输出文件已存在时命令会拒绝覆盖，重跑请换新文件名。`./skill.sh --version` 显示版本。
+
+环境变量：`VENSIM_SKILL_WORKERS` 多视图并行进程数；`VENSIM_SKILL_LAYOUT_SECONDS` 单个视图排版时间上限，默认 180 秒，0 表示不限，到时返回当前最好的版面。
 
 ## 排版规则
 
@@ -124,7 +130,7 @@ cd vensim-system-dynamics-skill/skills/vensim-skill
 - 信息线是单控制点圆弧，弧度（矢高/弦长）目标 0.12（官方示例中位数 0.14）；只在弧线会交叉或擦字时用直线。
 - 存量链水平排列，相邻两行中心至少隔 200px（教材模型中位数约 180px）。跳过中间存量的流量画成绕行支路或直角折线管道，两种画法都取自 Duggan 教材原图。
 - R/B 回路标记在排版时是占位的节点：被所属回路的中心吸引、落在回路里面，其他变量围绕它排布，圈的方向按回路走向画；隐藏的变量连同进出箭头一起不画（Vensim Hide/unhide 文档）。
-- 每条箭头都标正负号，这是原则性要求（2.6.0 起）。方程推不出的用基准运行数值偏导，再推不出的（时间开关、平滑时间、分母可正可负的比值）由建模者在 `links` 里写明并注明成立条件，规则见 [FEEDBACK.md](skills/vensim-skill/references/FEEDBACK.md)。
+- 每条箭头都标正负号，这是原则性要求（2.6.0 起）。方程推不出的用基准运行数值偏导，再推不出的（时间开关、平滑时间、分母可正可负的比值）由建模者在 `links` 里写明并注明成立条件；已有 MDL 用 `fix --apply-polarity` 补写推得出的符号，推不出的会逐条列出。规则见 [FEEDBACK.md](skills/vensim-skill/references/FEEDBACK.md)。
 - 新建模型自动避开 Vensim 打开时的 USE FLAG 提示：没人用的输出指标标 Supplementary，没人用的常量直接报错（Vensim 文档：未使用变量只是提示、不影响仿真，标 Supplementary 可消除）。
 - 零交叉。结构上不可平面时（如 K3,3）用影子变量引出连线，报告逐条列出。
 - 大模型按子系统分视图，视图之间用变量或影子变量连接（Vensim *How Views Work*）。每个视图 6–40 个定义变量是本工具的设计取值，不做碎视图。

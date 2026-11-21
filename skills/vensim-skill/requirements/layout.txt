@@ -1,0 +1,3 @@
+# 可选：排版平面性检查（natural_layout 的 planarity_report）
+-c constraints.txt
+networkx>=3.0

@@ -894,7 +894,7 @@ def build_model(spec):
 # ---------------------------------------------------------------------------
 
 
-def command_build(spec_path, output):
+def command_build(spec_path, output, allow_unsigned=False):
     separate_output(output, [spec_path])
     if output.exists():
         raise ValueError("建模输出已存在，请使用新文件名")
@@ -922,15 +922,28 @@ def command_build(spec_path, output):
         print("回路标记: " + "，".join(f"{row['label']} {row['loop']}".strip() for row in drawn))
     for index, line in enumerate(report["advice"], 1):
         print(f"建议 {index}: {line}")
+    if unsigned and not allow_unsigned:
+        # 与 check --strict 同口径：缺极性的箭头算未通过，退出码 1（文件照常写出）
+        print(f"FAIL: {len(unsigned)} 条箭头缺极性，退出码 1；草稿阶段可加 --allow-unsigned")
+        return 1
     return 0
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="排版、极性和种子等选项写在 JSON 的 sketch 与 links 字段，见 "
+        "references/SPECIFICATIONS.md。有箭头缺极性时退出码为 1（与 check --strict 一致）。",
+    )
     parser.add_argument("spec", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--allow-unsigned",
+        action="store_true",
+        help="草稿阶段允许箭头缺极性，退出码仍为 0（交付前不要用）",
+    )
     args = parser.parse_args(argv)
-    return command_build(args.spec, args.output)
+    return command_build(args.spec, args.output, args.allow_unsigned)
 
 
 if __name__ == "__main__":

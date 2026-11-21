@@ -1698,7 +1698,6 @@ def command_units(path: Path) -> int:
 def command_check(path: Path, strict: bool = False) -> int:
     text = load_mdl_text(path)
     equations = parse_equations(text)
-    names = set(equations.keys())
     errors = 0
     warnings = 0
     print(f"CHECK: {path}")
@@ -1722,7 +1721,9 @@ def command_check(path: Path, strict: bool = False) -> int:
                 {
                     node.id
                     for node in ast.walk(tree)
-                    if isinstance(node, ast.Name) and id(node) not in funcs and node.id not in allowed
+                    if isinstance(node, ast.Name)
+                    and id(node) not in funcs
+                    and node.id not in allowed
                 }
             ):
                 errors += 1
@@ -1746,9 +1747,8 @@ def command_check(path: Path, strict: bool = False) -> int:
     # 4. 草图引用审计
     sketch_pos = text.find(r"\\\---///")
     if sketch_pos >= 0:
-        from vensim_autolayout import load_mdl as _load_mdl
-
         from sketch_geometry import shown
+        from vensim_autolayout import load_mdl as _load_mdl
 
         _, views = _load_mdl(path)
         for view in views:
@@ -1777,7 +1777,8 @@ def command_check(path: Path, strict: bool = False) -> int:
                     warnings += 1
                     print(
                         f"  WARNING 草图 {view.name}: 箭头 {arrow.obj_id} "
-                        f"{ends[0].name} → {ends[1].name} 没有标极性，在 links 里写明 + 或 -"
+                        f"{ends[0].name} → {ends[1].name} 没有标极性：JSON 建模在 links 里写明 + 或 -，"
+                        "已有 MDL 用 fix --apply-polarity 补写"
                     )
 
     # 5. 用内置引擎实际求一次初值，暴露表达式里的未知名称和语法问题
@@ -1817,17 +1818,76 @@ def command_check(path: Path, strict: bool = False) -> int:
     return 1 if errors or (strict and warnings) else 0
 
 
+POLARITY_CODES = {"+": "43", "-": "45"}
+
+
+def apply_polarity(document: MdlDocument) -> tuple[str, list[str], list[dict]]:
+    """把 feedback 推出的确定符号写进未标号箭头的极性字段（草图第 7 个字段）。
+
+    只写方程推导或基准运行数值偏导给出的 + / -；推不出的原样保留并列出。
+    方程区逐字节不变（MdlDocument.encode 校验）。
+    """
+    from feedback_audit import audit_feedback
+    from mdl_document import split_sketch_fields
+    from vensim_autolayout import parse_views
+
+    report = audit_feedback(document.semantic_text)
+    lines = document.text.splitlines(keepends=True)
+    views = parse_views(lines)
+    applied, remaining = [], []
+    for row in report["links"]:
+        if row["displayed"] or row["kind"] == "flow" or row["status"] == "no_dependency":
+            continue
+        sign = row.get("suggested")
+        if sign not in POLARITY_CODES:
+            remaining.append(
+                {
+                    "view": row["view"],
+                    "arrow": row["arrow"],
+                    "source": row["source"],
+                    "target": row["target"],
+                    "reason": "方程和基准运行数值偏导都推不出确定符号，需建模者判断",
+                }
+            )
+            continue
+        arrow = next(a for a in views[row["view_index"]].arrows if a.obj_id == row["arrow"])
+        line = lines[arrow.line_index]
+        body = line.rstrip("\r\n")
+        fields = split_sketch_fields(body)
+        if len(fields) < 7 or fields[0] != "1" or fields[1].strip() != str(arrow.obj_id):
+            raise ValueError(f"无法安全定位箭头 {arrow.obj_id} 的极性字段")
+        fields[6] = POLARITY_CODES[sign]
+        lines[arrow.line_index] = ",".join(fields) + line[len(body) :]
+        applied.append(
+            f"箭头 {row['arrow']} {row['source']} → {row['target']}: {sign}"
+            f"（{'方程推导' if row['suggested_source'] == 'equation' else '基准运行数值偏导'}）"
+        )
+    remaining.extend(report.get("unsigned_unmapped", []))
+    return document.encode(lines).decode(document.encoding, "surrogateescape"), applied, remaining
+
+
 def command_fix(
-    path: Path, output: Path, units_map=None, drop_broken=False, mark_supplementary=False
+    path: Path,
+    output: Path,
+    units_map=None,
+    drop_broken=False,
+    mark_supplementary=False,
+    apply_polarity_signs=False,
 ) -> int:
     _ensure_output_separate(output, [path, *([units_map] if units_map else [])])
     document = MdlDocument.read(path)
     text = document.text
     equations = parse_equations(document.semantic_text, expand=False)
     fixes = []
-    if not units_map and not drop_broken and not mark_supplementary:
+    remaining = []
+    if apply_polarity_signs:
+        # 先补极性：只改草图字段，后面的选项在此基础上继续
+        text, applied, remaining = apply_polarity(document)
+        document = MdlDocument(text.encode(document.encoding, "surrogateescape"), document.encoding)
+        fixes.extend(f"补写极性 {item}" for item in applied)
+    if not units_map and not drop_broken and not mark_supplementary and not apply_polarity_signs:
         raise ValueError(
-            "请指定 --units-map、--drop-broken-arrows 或 --mark-supplementary；"
+            "请指定 --units-map、--drop-broken-arrows、--mark-supplementary 或 --apply-polarity；"
             "缺失的单位不会自动补成 Dmnl"
         )
     if units_map:
@@ -1881,7 +1941,10 @@ def command_fix(
             fixes.append(f"标为 Supplementary（输出指标）: {name}")
         fixes.extend(f"常量 {name} 没有被任何方程使用，未标记，建议删除" for name in constants)
     atomic_write(output, text.encode(document.encoding, errors="surrogateescape"))
-    print(json.dumps({"output": str(output), "fixes": fixes}, ensure_ascii=False, indent=2))
+    report = {"output": str(output), "fixes": fixes}
+    if apply_polarity_signs:
+        report["unsigned_remaining"] = remaining
+    print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -1940,6 +2003,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--mark-supplementary",
         action="store_true",
         help="把没有被使用的输出指标标为 Supplementary，消除 Vensim 的 USE FLAG",
+    )
+    p_fix.add_argument(
+        "--apply-polarity",
+        action="store_true",
+        help="给未标号的箭头写入方程推导或基准运行数值偏导得出的 +/-，推不出的列在 "
+        "unsigned_remaining 里",
     )
 
     from result_plotting import plot_options
@@ -2005,6 +2074,7 @@ def main() -> int:
             args.units_map,
             args.drop_broken_arrows,
             args.mark_supplementary,
+            args.apply_polarity,
         )
     return 2
 

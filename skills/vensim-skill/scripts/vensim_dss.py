@@ -5,10 +5,16 @@
 
 写出（文件名只用 ASCII，避免命令脚本里的路径编码问题）：
 
-- ``scenario_01.cin`` …：每个情景一份参数变更文件，一行一个 ``常量 = 数值``；
+- ``scenario_NN.cin``：有参数变更的情景各一份，NN 是情景在 JSON 里的序号，一行一个
+  ``常量 = 数值``；参数为空的情景就是基准，不出 .cin（所以编号可能从 02 开始）；
 - ``graphs.vgd``：Vensim 自定义图（Custom Graph），每个变量一张，叠加基准和全部情景；
-- ``run_all.cmd``：Vensim 命令脚本，载入模型、跑基准 ``base`` 和各情景、载入自定义图；
-- ``README.txt``：在 Vensim DSS 中的使用步骤。
+- ``run_all.cmd``：Vensim 命令脚本，载入模型、依次运行各情景、载入自定义图。运行名取自
+  情景名（非字母数字汉字换成下划线）；JSON 里没有参数为空的情景时，另加一个名为
+  ``base`` 的基准运行；
+- ``README.txt``：在 Vensim DSS 中的使用步骤和运行名对照表。
+
+不写 ``--var`` 时用实验 JSON 的 ``variables``。情景名、标题前缀和模型路径不能含换行等
+控制字符（会被当成新的 Vensim 命令行），遇到直接报错。
 
 情景沿用 ``experiment`` 的 JSON（``mode`` 为 ``scenarios``/``perturb``/``grid``，
 蒙特卡洛请在 Vensim 里用 Sensitivity 工具）。只写参数变更，不改模型文件。
@@ -31,6 +37,13 @@ MAX_SCENARIOS = 40
 
 def _number(value: float) -> str:
     return repr(float(value)) if not float(value).is_integer() else str(int(value))
+
+
+def _safe(value: str, what: str) -> str:
+    """写进 .vgd / .cmd 的文本不能含换行等控制字符，否则会多出一行 Vensim 命令。"""
+    if any(ord(char) < 32 or ord(char) == 127 for char in str(value)):
+        raise ValueError(f"{what} 不能包含换行或其他控制字符: {value!r}")
+    return value
 
 
 def _quote(name: str) -> str:
@@ -60,9 +73,11 @@ def build_files(
     for variable in variables:
         if canonical_name(variable) not in canonical:
             raise ValueError(f"模型中没有变量: {variable}")
+    _safe(title_prefix, "标题前缀")
     files = {}
     names = []
     for index, run in enumerate(runs, 1):
+        _safe(run["name"], "情景名")
         if run["name"].strip().lower() == "base":
             raise ValueError("情景名 base 留给基准运行，请换一个名字")
         lines = []
@@ -86,8 +101,8 @@ def build_files(
     ]
     graphs = []
     for index, variable in enumerate(variables, 1):
-        name = canonical[canonical_name(variable)]
-        unit = equations[name].unit
+        name = _safe(canonical[canonical_name(variable)], "变量名")
+        unit = _safe(equations[name].unit or "", f"{name} 的单位")
         block = [
             f":GRAPH G{index:02d}",
             f":TITLE {title_prefix}{name}",
@@ -107,7 +122,7 @@ def build_files(
     except ValueError:
         # Windows 上模型和输出目录不在同一个盘符时无法写相对路径，退回绝对路径
         model_ref = str(model.resolve())
-    cmd = [f"SPECIAL>LOADMODEL|{model_ref}"]
+    cmd = [f"SPECIAL>LOADMODEL|{_safe(model_ref, '模型路径')}"]
     for cin, run_name in zip(cins, run_names, strict=True):
         if cin is not None:
             cmd.append(f"SIMULATE>READCIN|{cin}")
@@ -131,7 +146,7 @@ README = """在 Vensim DSS 中出原生结果图
    （相对本文件夹）。Vensim 找不到文件时，把 run_all.cmd 里的路径改成绝对路径。
 2. Vensim DSS 菜单 File > Run Command Script（不同版本也可能在 Tools 菜单下），
    选择 run_all.cmd。脚本依次运行基准和各情景，再载入 graphs.vgd。
-3. 在控制面板 Graphs 页选择 G01、G02 … 共 {count} 张自定义图，Display 后可用
+3. 在控制面板 Graphs 页选择自定义图（从 G01 起共 {count} 张），Display 后可用
    Copy/Save 导出图片；图上曲线编号和图例都是 Vensim 原生绘制。
 
 运行名与情景对应：
@@ -181,7 +196,12 @@ def main(argv=None):
     )
     parser.add_argument("model", type=Path)
     parser.add_argument("--spec", type=Path, required=True, help="experiment 的情景 JSON")
-    parser.add_argument("--var", action="append", default=[], help="要出图的变量，可多次指定")
+    parser.add_argument(
+        "--var",
+        action="append",
+        default=[],
+        help="要出图的变量，可多次指定；不写时用实验 JSON 的 variables",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--encoding", choices=["utf-8", "utf-8-sig", "gbk"], default="utf-8")
     parser.add_argument("--title-prefix", default="", help="自定义图标题前缀")

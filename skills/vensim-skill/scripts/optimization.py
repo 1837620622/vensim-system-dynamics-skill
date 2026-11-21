@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import math
+import sys
 from bisect import bisect_left
 from pathlib import Path
 
@@ -467,9 +468,19 @@ def run_search(
 # ---------------------------------------------------------------------------
 
 
+MODE_HELP = {
+    "calibrate": "按观测数据拟合参数：--data 给观测 CSV，--spec 给待估参数与范围",
+    "optimize": "在约束下搜索政策参数：--spec 给目标、约束与参数范围，不需要 --data",
+}
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["calibrate", "optimize"])
+    argv = list(sys.argv[1:] if argv is None else argv)
+    mode = argv[0] if argv and argv[0] in MODE_HELP else None
+    parser = argparse.ArgumentParser(
+        prog=f"skill.sh {mode}" if mode else None, description=MODE_HELP.get(mode, __doc__)
+    )
+    parser.add_argument("mode", choices=["calibrate", "optimize"], help=argparse.SUPPRESS)
     parser.add_argument("model", type=Path)
     parser.add_argument("--spec", type=Path, required=True)
     parser.add_argument("--data", type=Path)

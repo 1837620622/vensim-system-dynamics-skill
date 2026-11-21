@@ -293,7 +293,9 @@ def overall_path(output: Path, language: str) -> Path:
     return output.with_name(output.stem + suffix + output.suffix)
 
 
-def command_cld(spec_path: Path, output: Path, include_constants=False, overall=True) -> int:
+def command_cld(
+    spec_path: Path, output: Path, include_constants=False, overall=True, allow_unsigned=False
+) -> int:
     separate_output(output, [spec_path])
     if output.suffix.lower() != ".mdl":
         raise ValueError("CLD 输出必须是 .mdl")
@@ -331,6 +333,9 @@ def command_cld(spec_path: Path, output: Path, include_constants=False, overall=
     ]
     if failed:
         print("以下视图仍有几何问题，请在 Vensim 中微调: " + "，".join(failed))
+    if result["notes"]["unsigned_links"] and not allow_unsigned:
+        print("FAIL: 有连线缺极性，退出码 1；草稿阶段可加 --allow-unsigned")
+        return 1
     return 0
 
 
@@ -342,8 +347,15 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--include-constants", action="store_true", help="同时画出常量（参数）")
     parser.add_argument("--no-overall", action="store_true", help="不生成总体因果回路图")
+    parser.add_argument(
+        "--allow-unsigned",
+        action="store_true",
+        help="草稿阶段允许连线缺极性，退出码仍为 0（交付前不要用）",
+    )
     args = parser.parse_args(argv)
-    return command_cld(args.spec, args.output, args.include_constants, not args.no_overall)
+    return command_cld(
+        args.spec, args.output, args.include_constants, not args.no_overall, args.allow_unsigned
+    )
 
 
 if __name__ == "__main__":

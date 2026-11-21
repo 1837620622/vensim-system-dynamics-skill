@@ -4,6 +4,8 @@ REM 复杂参数处理放在 Python wrapper 中，避免 CMD 字符串拼接与 
 setlocal DisableDelayedExpansion
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
+REM 不在当前目录查找 py/python，防止模型目录里的同名程序被执行
+set "NoDefaultCurrentDirectoryInExePath=1"
 
 set "SCRIPT_DIR=%~dp0"
 set "WRAPPER=%SCRIPT_DIR%scripts\skill_cli.py"

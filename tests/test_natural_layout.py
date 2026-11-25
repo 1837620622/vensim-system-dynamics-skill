@@ -258,8 +258,8 @@ def test_soft_arcs_follow_the_k_rule(chains):
     assert max(ratios) <= MAX_ARC_RATIO + 0.01
     curved = [k for k in ratios if k > 0.01]
     assert len(curved) >= len(ratios) * 0.8
-    # Vensim 官方示例的弧度中位数约 0.14；目标 0.12
-    assert 0.08 <= sum(curved) / len(curved) <= 0.16
+    # 目标 0.08，长箭头矢高限 24px、最低 0.04，减少 Vensim 折线化后的折点
+    assert 0.035 <= sum(curved) / len(curved) <= 0.1
 
 
 def test_time_reserved_area_and_initial_values(chains):

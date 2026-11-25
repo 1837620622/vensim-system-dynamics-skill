@@ -27,7 +27,7 @@ import re
 import time
 from collections import Counter, defaultdict
 
-from arc_routing import TARGET_RATIO, arc_ratio, route_arcs
+from arc_routing import arc_ratio, route_arcs
 from sketch_geometry import (
     LAYOUT_CLEARANCE,
     NATIVE_CLOUD_CODE,
@@ -88,11 +88,10 @@ BOUND_MARGIN = 90.0
 ARROW_CLEAR = 7.0  # 直线近似比检查器（6px）多留 1px，给圆弧留余量
 GAP_X, GAP_Y = 14.0, 10.0  # 文字框之间的最小净距
 NARROW_ANGLE = math.radians(20)
-# 过短判断按目标弧度 TARGET_RATIO 估计可见长度：两端切线偏离弦 atan(4k)，宽而扁的
+# 过短判断按目标弧度 k=0.12 估计可见长度：两端切线偏离弦约 26°，宽而扁的
 # 文字框会从上下边离开，可见部分比直线裁剪更长
 SHORT_LIMIT = PREFERRED_ARROW
-ARC_END_TURN = math.atan(4 * TARGET_RATIO)
-ARC_LENGTH_FACTOR = 1 + 8 * TARGET_RATIO**2 / 3  # 弧长 ≈ 弦长 × (1 + 8k²/3)
+ARC_END_TURN = math.atan(4 * 0.12)
 SEED_ATTEMPTS = 3  # 仍有缺陷时换种子重跑的总次数
 LARGE_VIEW = 80  # 对象数超过此值的视图减少重跑、打磨与拆分试验，控制耗时
 W_MARKER = 3.0  # 回路标记偏离所属回路中心的代价（每像素）
@@ -724,9 +723,8 @@ def arc_visible_length(x1, y1, w1, h1, x2, y2, w2, h2):
     best = chord - _exit(w1, h1, theta) - _exit(w2, h2, theta)
     for sign in (1, -1):
         turn = sign * ARC_END_TURN
-        value = (
-            chord * ARC_LENGTH_FACTOR - _exit(w1, h1, theta + turn) - _exit(w2, h2, theta - turn)
-        )
+        # 弧长 ≈ 弦长 × (1 + 8k²/3)，k=0.12 时约 1.038
+        value = chord * 1.038 - _exit(w1, h1, theta + turn) - _exit(w2, h2, theta - turn)
         best = max(best, value)
     return best
 

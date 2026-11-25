@@ -3,7 +3,7 @@ name: vensim-skill
 description: "Build, lay out, check and simulate Vensim system dynamics models (.mdl). Use when the user wants a stock-and-flow or causal loop diagram in Vensim, needs an existing MDL tidied (overlapping labels, crossing arrows, messy views), wants polarity and R/B loop checks, or needs reproducible simulation, scenario, sensitivity, calibration or policy runs with publication-quality Python plots. Chinese variable names by default; Windows, macOS and Linux."
 license: "Source-available; free for personal learning and non-commercial research; commercial use requires a paid license (2040168455@qq.com); see LICENSE"
 metadata:
-  version: "2.7.1"
+  version: "2.7.2"
 ---
 
 # Vensim 建模、排版与仿真

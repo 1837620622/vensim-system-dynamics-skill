@@ -1,6 +1,6 @@
 # Vensim System Dynamics Skill
 
-![Version](https://img.shields.io/badge/version-2.7.1-2f6f9f)
+![Version](https://img.shields.io/badge/version-2.7.2-2f6f9f)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-source--available%20%7C%20commercial%20paid-8a8a8a)
 
@@ -127,7 +127,7 @@ Commands refuse to overwrite existing outputs; use a new name when re-running.
 Main rules and their sources:
 
 - Stock boxes are at least 96×48 (median about 104×56 in Vensim's own examples) and Chinese names of up to ten characters stay on one row (longer ones wrap into two rows of similar length); cloud to valve is 80 px, valve to stock at least 120 px (medians of 76 px and 124 px in Vensim's own examples).
-- Information links are single-control-point arcs with a target bow (sagitta/chord) of 0.08, sagitta capped at 24 px on long links (Vensim draws arcs as ~6° line segments, so flatter arcs look smoother); straight lines only where an arc would cross or graze text.
+- Information links are single-control-point arcs with a target bow (sagitta/chord) of 0.12 (median 0.14 in the official examples); straight lines only where an arc would cross or graze text.
 - Stock chains run horizontally with at least 200 px between rows (textbook median about 180 px). Flows that skip a stock become a detour branch or a right-angle bypass pipe, both taken from Duggan's diagrams.
 - R/B loop markers are placeholder nodes during layout: pulled to the centre of their own loop, kept inside it, with other variables arranged around them, and the circle turns the way the loop runs; hidden variables are skipped together with their arrows (Vensim Hide/unhide).
 - Every link carries a polarity sign, as a rule (since 2.6.0). Signs the equations cannot give come from numeric partial derivatives along the base run; any still unknown (time switches, smoothing times, ratios whose denominator can change sign) are written in `links` by the modeller with the conditions under which they hold; for an existing MDL, `fix --apply-polarity` writes the derivable signs and lists the rest; see [FEEDBACK.md](skills/vensim-skill/references/FEEDBACK.md) (Chinese).

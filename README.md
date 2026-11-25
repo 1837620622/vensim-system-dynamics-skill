@@ -1,6 +1,6 @@
 # Vensim System Dynamics Skill
 
-![Version](https://img.shields.io/badge/version-2.7.1-2f6f9f)
+![Version](https://img.shields.io/badge/version-2.7.2-2f6f9f)
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
 ![License](https://img.shields.io/badge/license-source--available%20%7C%20commercial%20paid-8a8a8a)
 
@@ -127,7 +127,7 @@ cd vensim-system-dynamics-skill/skills/vensim-skill
 几条主要规则和依据：
 
 - 存量方框最小 96×48（官方示例中位数约 104×56），中文名 10 个字以内一行写完，更长的折成长度相近的两行；云到阀门 80px，阀门到存量不少于 120px（官方示例中位数 76px、124px）。
-- 信息线是单控制点圆弧，弧度（矢高/弦长）目标 0.08，长箭头矢高不超过 24px（Vensim 按约 6° 一段把圆弧画成折线，弧缓一些线条更顺）；只在弧线会交叉或擦字时用直线。
+- 信息线是单控制点圆弧，弧度（矢高/弦长）目标 0.12（官方示例中位数 0.14）；只在弧线会交叉或擦字时用直线。
 - 存量链水平排列，相邻两行中心至少隔 200px（教材模型中位数约 180px）。跳过中间存量的流量画成绕行支路或直角折线管道，两种画法都取自 Duggan 教材原图。
 - R/B 回路标记在排版时是占位的节点：被所属回路的中心吸引、落在回路里面，其他变量围绕它排布，圈的方向按回路走向画；隐藏的变量连同进出箭头一起不画（Vensim Hide/unhide 文档）。
 - 每条箭头都标正负号，这是原则性要求（2.6.0 起）。方程推不出的用基准运行数值偏导，再推不出的（时间开关、平滑时间、分母可正可负的比值）由建模者在 `links` 里写明并注明成立条件；已有 MDL 用 `fix --apply-polarity` 补写推得出的符号，推不出的会逐条列出。规则见 [FEEDBACK.md](skills/vensim-skill/references/FEEDBACK.md)。

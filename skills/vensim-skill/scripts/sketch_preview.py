@@ -10,6 +10,7 @@ from mdl_document import atomic_write, separate_output
 from sketch_geometry import (
     LINE_HEIGHT,
     NATIVE_CLOUD_CODE,
+    arc_svg_data,
     arrow_path,
     bounds,
     box,
@@ -141,10 +142,11 @@ def view_svg(view, lines, show_ids=False):
         path = paths.get(arrow.obj_id, [])
         if not path or arrow.is_physical_flow:
             continue
-        data = "M" + " L".join(f"{x:.2f},{y:.2f}" for x, y in path)
+        data = arc_svg_data(view, arrow, path)
         color = _color(arrow.fields[11])
         parts.append(
-            f'<path d="{data}" fill="none" stroke="{color}" stroke-width="1.3" marker-end="url(#head)"/>'
+            f'<path d="{data}" fill="none" stroke="{color}" stroke-width="1.3" '
+            'stroke-linecap="round" stroke-linejoin="round" marker-end="url(#head)"/>'
         )
         polarity = int(arrow.fields[6] or 0)
         if 32 <= polarity <= 126:

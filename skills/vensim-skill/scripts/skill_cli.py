@@ -17,7 +17,7 @@ if sys.version_info < (3, 10):  # noqa: UP036 - 旧解释器上给出可读的�
     raise SystemExit("ERROR: Vensim skill 需要 Python 3.10 或更新版本")
 sys.dont_write_bytecode = True
 
-__version__ = "2.7.1"
+__version__ = "2.7.2"
 
 TOOLS_DIR = Path(__file__).resolve().parent
 ROOT_DIR = TOOLS_DIR.parent

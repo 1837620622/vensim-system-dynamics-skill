@@ -132,17 +132,27 @@ def lerp(a, b, t):
     return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
 
 
-def circle_path(start, control, end, tolerance=0.5):
-    """经过三个点的圆弧，选取包含控制点的有向弧；共线退化为直线。"""
+def circle_through(start, control, end):
+    """经过三个点的圆，返回 (圆心, 半径)；三点共线时返回 None。"""
     bx, by = control[0] - start[0], control[1] - start[1]
     cx, cy = end[0] - start[0], end[1] - start[1]
     determinant = 2 * (bx * cy - by * cx)
     if abs(determinant) < EPS * max(1, math.hypot(bx, by) * math.hypot(cx, cy)):
-        return [start, end]
+        return None
     ux = (cy * (bx * bx + by * by) - by * (cx * cx + cy * cy)) / determinant
     uy = (bx * (cx * cx + cy * cy) - cx * (bx * bx + by * by)) / determinant
-    center = start[0] + ux, start[1] + uy
-    radius = math.hypot(ux, uy)
+    return (start[0] + ux, start[1] + uy), math.hypot(ux, uy)
+
+
+def circle_path(start, control, end, tolerance=0.5):
+    """经过三个点的圆弧，选取包含控制点的有向弧；共线退化为直线。
+
+    返回的折线只用于碰撞和长度计算；预览输出用 arc_svg_data 画真正的圆弧。
+    """
+    circle = circle_through(start, control, end)
+    if circle is None:
+        return [start, end]
+    center, radius = circle
     first = math.atan2(start[1] - center[1], start[0] - center[0])
     middle = math.atan2(control[1] - center[1], control[0] - center[0])
     last = math.atan2(end[1] - center[1], end[0] - center[0])
@@ -160,6 +170,44 @@ def circle_path(start, control, end, tolerance=0.5):
     ]
     path[0], path[-1] = start, end
     return path
+
+
+def arc_svg_data(view, arrow, path):
+    """信息箭头的 SVG 路径数据。
+
+    单控制点圆弧写成 SVG 椭圆弧命令（A），起点、终点取裁剪后折线的两端，
+    圆心和半径与 circle_path 相同，所以线的位置和箭头落点不变，只是不再
+    由短直线段拼成，放大不会出现折角。直线和其他形状仍按折线输出。
+    """
+    if len(path) < 2:
+        return ""
+    start, end = path[0], path[-1]
+    source, target = view.objects.get(arrow.from_id), view.objects.get(arrow.to_id)
+    circle = None
+    if (
+        source is not None
+        and target is not None
+        and arrow.shape == 1
+        and len(arrow.points) == 1
+        and len(path) > 2
+    ):
+        circle = circle_through((source.x, source.y), arrow.points[0], (target.x, target.y))
+    if circle is None:
+        return "M" + " L".join(f"{x:.2f},{y:.2f}" for x, y in path)
+    center, radius = circle
+    # 沿折线累计转角，得到裁剪后可见弧段的方向和扫角
+    sweep = 0.0
+    previous = math.atan2(path[0][1] - center[1], path[0][0] - center[0])
+    for x, y in path[1:]:
+        angle = math.atan2(y - center[1], x - center[0])
+        sweep += (angle - previous + math.pi) % math.tau - math.pi
+        previous = angle
+    large = 1 if abs(sweep) > math.pi else 0
+    clockwise = 1 if sweep > 0 else 0  # SVG 的 y 轴向下，角度增大即 sweep-flag=1
+    return (
+        f"M{start[0]:.2f},{start[1]:.2f} "
+        f"A{radius:.2f},{radius:.2f} 0 {large} {clockwise} {end[0]:.2f},{end[1]:.2f}"
+    )
 
 
 def trim_path(points, source, target):

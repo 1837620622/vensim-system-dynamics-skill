@@ -1,14 +1,10 @@
 """信息箭头的圆弧路由：Vensim 普通箭头加一个控制点即画成圆弧。
 
 控制点 = 弦中点 + k·(dy, −dx)，(dx, dy) 为起点中心指向终点中心的向量，|k| 为
-矢高与弦长之比。每条箭头在 0、±0.04、±0.08、±0.12 中选取：先满足与 visual
+矢高与弦长之比。每条箭头在 0、±0.06、±0.12、±0.18 中选取：先满足与 visual
 相同的硬约束（不与其他连线或管道交叉、不穿文字框、不压 <Time> 预留区、
-可见长度不少于 PREFERRED_ARROW、控制点不落进两端文字框），再选接近目标弧度、
+可见长度不少于 PREFERRED_ARROW、控制点不落进两端文字框），再选接近 0.12、
 离文字较远、与同一节点其他箭头张开足够角度的弧。
-
-目标弧度随弦长收紧：Vensim 把圆弧按固定转角（实测约 6°）切成直线段来画，
-弧扫过的角度越大折点越多，放大后像毛刺。短箭头取 0.08，长箭头把矢高限制在
-MAX_SAGITTA 以内，扫角小、折点少，线条更顺。
 """
 
 from __future__ import annotations
@@ -35,23 +31,17 @@ from sketch_geometry import (
 # 圆弧参数
 # ---------------------------------------------------------------------------
 
-# 弧度 k = 矢高 / 弦长，扫角 = 4·atan(2k)。Vensim 官方示例信息线弧度中位数约 0.14
-# （四分位 0.08–0.22）；但 Vensim 按约 6° 一段把圆弧画成折线，k=0.12 的弧扫角 54°、
-# 有 9 个折点，放大后能看到一节一节的毛刺。这里取四分位下沿 0.08（扫角 36°），
-# 长箭头再按 MAX_SAGITTA 收紧，最低 0.04（扫角 18°，约 3 个折点）。
-ARC_RATIOS = (0.04, 0.08, 0.12)
-TARGET_RATIO = 0.08
-MIN_TARGET_RATIO = 0.04
-MAX_ARC_RATIO = 0.12
-MAX_SAGITTA = 24.0  # 长箭头矢高上限（像素）
+# 弧度 k = 矢高 / 弦长。Vensim 官方示例模型中信息线弧度的中位数约 0.14
+# （四分位 0.08–0.22），各弦长区间基本一致；这里取略缓的 0.12 为目标
+ARC_RATIOS = (0.06, 0.12, 0.18)
+TARGET_RATIO = 0.12
+MAX_ARC_RATIO = 0.18
 SPREAD_ANGLE = math.radians(28)
 
 
 def target_ratio(chord: float) -> float:
-    """期望弧度：短箭头取 TARGET_RATIO，长箭头矢高不超过 MAX_SAGITTA，最低 MIN_TARGET_RATIO。"""
-    if chord <= 0:
-        return TARGET_RATIO
-    return max(MIN_TARGET_RATIO, min(TARGET_RATIO, MAX_SAGITTA / chord))
+    """期望弧度；真实模型的弧度与弦长关系不大，统一取 TARGET_RATIO。"""
+    return TARGET_RATIO
 
 
 def control_point(source, target, ratio: float) -> tuple[int, int]:

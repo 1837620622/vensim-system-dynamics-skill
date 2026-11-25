@@ -258,8 +258,8 @@ def test_soft_arcs_follow_the_k_rule(chains):
     assert max(ratios) <= MAX_ARC_RATIO + 0.01
     curved = [k for k in ratios if k > 0.01]
     assert len(curved) >= len(ratios) * 0.8
-    # 目标 0.08，长箭头矢高限 24px、最低 0.04，减少 Vensim 折线化后的折点
-    assert 0.035 <= sum(curved) / len(curved) <= 0.1
+    # Vensim 官方示例的弧度中位数约 0.14；目标 0.12
+    assert 0.08 <= sum(curved) / len(curved) <= 0.16
 
 
 def test_time_reserved_area_and_initial_values(chains):
@@ -435,9 +435,54 @@ def test_preview_draws_arcs_clouds_and_time_area(tmp_path, chains):
     assert "Short arrows" in html and "Non-native clouds" in html
     after_view = html.split("<h1>After</h1>", 1)[1]
     arcs = [part for part in after_view.split('<path d="M')[1:] if 'marker-end="url(#head' in part]
-    # 圆弧按 0.5px 容差离散为折线：绝大多数信息线应有多于两个点。
-    curved = [part for part in arcs if part.split('"', 1)[0].count(" L") >= 3]
+    # 信息线写成真正的 SVG 圆弧（A 命令），不再拆成短直线段；线端为圆头。
+    curved = [part for part in arcs if " A" in part.split('"', 1)[0]]
     assert arcs and len(curved) >= 0.8 * len(arcs)
+    assert all(" L" not in part.split('"', 1)[0] for part in curved)
+    assert all('stroke-linecap="round"' in part.split("/>", 1)[0] for part in arcs)
+
+
+def _svg_arc_center(x1, y1, r, large, sweep, x2, y2):
+    """SVG 端点参数 → 圆心（圆的情形）。"""
+    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+    dx, dy = (x2 - x1) / 2, (y2 - y1) / 2
+    half = math.hypot(dx, dy)
+    h = math.sqrt(max(r * r - half * half, 0.0))
+    sign = 1 if large != sweep else -1
+    return mx - sign * h * dy / half, my + sign * h * dx / half
+
+
+def test_preview_arc_matches_native_circle_and_endpoints(chains):
+    from sketch_geometry import arc_svg_data, arrow_path, circle_through
+
+    _source, target = chains
+    view = load_mdl(target)[1][0]
+    checked = 0
+    for arrow in view.arrows:
+        if arrow.is_physical_flow or arrow.shape != 1 or len(arrow.points) != 1:
+            continue
+        path = arrow_path(view, arrow)
+        data = arc_svg_data(view, arrow, path)
+        if " A" not in data:
+            continue
+        move, arc = data[1:].split(" A")
+        x1, y1 = map(float, move.split(","))
+        radii, _rotation, large, sweep, end = arc.split()
+        r, large, sweep = float(radii.split(",")[0]), int(large), int(sweep)
+        x2, y2 = map(float, end.split(","))
+        # 起点、终点与裁剪后的折线完全一致：箭头落点不变
+        assert math.dist((x1, y1), path[0]) < 0.01
+        assert math.dist((x2, y2), path[-1]) < 0.01
+        source, dest = view.objects[arrow.from_id], view.objects[arrow.to_id]
+        center, radius = circle_through((source.x, source.y), arrow.points[0], (dest.x, dest.y))
+        assert abs(r - radius) < 0.01
+        # 标志位选出的圆心就是原生圆弧的圆心：方向没有画反
+        assert math.dist(_svg_arc_center(x1, y1, r, large, sweep, x2, y2), center) < 0.5
+        # 折线中点落在这条圆弧上
+        mid = path[len(path) // 2]
+        assert abs(math.dist(mid, center) - radius) < 0.6
+        checked += 1
+    assert checked >= 5
 
 
 def test_build_defaults_to_natural_with_native_clouds(tmp_path):
